@@ -1,0 +1,5 @@
+secrets/
+requirement.txt
+application.log
+.log_collector.pid
+region_events.json
