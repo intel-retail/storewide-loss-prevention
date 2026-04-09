@@ -1,5 +1,14 @@
 secrets/
+scenescape/secrets/ca/
+scenescape/secrets/certs/
+scenescape/secrets/django/
+scenescape/secrets/pgserver/
+scenescape/secrets/*.auth
+scenescape/secrets/supass
+docker/.env
+docker/.env.bak
 requirement.txt
 application.log
 .log_collector.pid
 region_events.json
+scenescape/sample_data/store-wide-loss-prevention.*
