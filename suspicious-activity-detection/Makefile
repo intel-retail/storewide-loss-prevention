@@ -6,66 +6,97 @@
 # Full-stack deployment using pre-built SceneScape Docker images.
 # No SceneScape source checkout required.
 
-COMPOSE_FULL := docker compose -f docker/docker-compose.full.yaml
+COMPOSE_SCENESCAPE := docker compose -f docker/docker-compose-scenescape.yaml
 COMPOSE_LP := docker compose -f docker/docker-compose.yaml
+COMPOSE_ALL := docker compose -f docker/docker-compose-scenescape.yaml -f docker/docker-compose.yaml
 SAMPLE_DATA_DIR := scenescape/sample_data
 
 # ---- Full Stack (SceneScape + LP) ----
 
 .PHONY: demo
-demo: init
-	@echo "Starting full stack (SceneScape + Loss Prevention)..."
-	@$(MAKE) init-sample-data
-	$(COMPOSE_FULL) up -d
+demo: init init-sample-data download-models init-volumes
+	@echo ""
+	@echo "=== Building LP images ==="
+	$(COMPOSE_LP) build
+	@echo ""
+	@echo "=== Starting all services ==="
+	$(COMPOSE_ALL) up -d
 	@echo ""
 	@echo "Services running:"
 	@echo "  SceneScape UI:   https://localhost"
+	@echo "  Login:           admin / $$(grep SUPASS docker/.env | cut -d= -f2)"
 	@echo "  Gradio UI:       http://localhost:7860"
 	@echo "  LP API:          http://localhost:8082"
 	@echo ""
 	@echo "To stop: make down"
 
+# SceneScape only (without LP services)
+.PHONY: run-scenescape
+run-scenescape: init init-sample-data download-models init-volumes
+	@echo ""
+	@echo "=== Starting SceneScape ==="
+	$(COMPOSE_SCENESCAPE) up -d
+	@echo ""
+	@echo "=== SceneScape is running ==="
+	@echo "  UI:    https://localhost"
+	@echo "  Login: admin / $$(grep SUPASS docker/.env | cut -d= -f2)"
+	@echo ""
+	@echo "To stop: make down"
+
 .PHONY: init
 init:
-	@chmod +x init.sh
-	@./init.sh
+	@chmod +x scripts/init.sh
+	@./scripts/init.sh
 
 .PHONY: init-sample-data
 init-sample-data:
 	@echo "Initializing sample data volume..."
 	@docker volume create scenescape_vol-sample-data 2>/dev/null || true
 	@docker run --rm -v scenescape_vol-sample-data:/dest alpine:3.23 chown $$(id -u):$$(id -g) /dest
-	@if [ -d "$(SAMPLE_DATA_DIR)" ] && [ -n "$$(ls -A $(SAMPLE_DATA_DIR)/*.ts 2>/dev/null)" ]; then \
+	@if [ -d "$(SAMPLE_DATA_DIR)" ] && [ -n "$$(ls -A $(SAMPLE_DATA_DIR)/*.ts $(SAMPLE_DATA_DIR)/*.mp4 2>/dev/null)" ]; then \
 		echo "Copying sample videos to volume..."; \
 		docker run --rm \
 			-v $(CURDIR)/$(SAMPLE_DATA_DIR):/source:ro \
 			-v scenescape_vol-sample-data:/dest \
 			--user $$(id -u):$$(id -g) \
 			alpine:3.23 \
-			sh -c "cp -v /source/*.ts /dest/ 2>/dev/null || true"; \
+			sh -c "cp -v /source/*.ts /source/*.mp4 /dest/ 2>/dev/null || true"; \
 		echo "Sample data volume initialized."; \
 	else \
-		echo "WARNING: No .ts video files in $(SAMPLE_DATA_DIR)/"; \
-		echo "Run ./init.sh to download sample videos."; \
+		echo "WARNING: No video files (.ts/.mp4) in $(SAMPLE_DATA_DIR)/"; \
+		echo "Run ./scripts/init.sh to download sample videos."; \
 	fi
+
+.PHONY: download-models
+download-models:
+	@chmod +x scripts/download_models.sh
+	@./scripts/download_models.sh
+
+.PHONY: init-volumes
+init-volumes:
+	@echo "Initializing Docker volumes..."
+	@docker volume create scenescape_vol-media 2>/dev/null || true
+	@docker run --rm -v scenescape_vol-media:/data alpine:3.23 sh -c "touch /data/placeholder"
+	@echo "Volumes initialized."
 
 .PHONY: down
 down:
-	-$(COMPOSE_FULL) down
-	-$(COMPOSE_LP) down 2>/dev/null || true
+	-$(COMPOSE_ALL) down
 
 .PHONY: logs
 logs:
-	$(COMPOSE_FULL) logs -f
+	$(COMPOSE_ALL) logs -f
 
 .PHONY: status
 status:
-	$(COMPOSE_FULL) ps
+	$(COMPOSE_ALL) ps
 
 # ---- LP-Only (SceneScape must be running separately) ----
 
 .PHONY: demo-lp
 demo-lp:
+	@echo "Building LP images..."
+	$(COMPOSE_LP) build
 	@echo "Starting LP services only (SceneScape must be running)..."
 	$(COMPOSE_LP) up -d
 
@@ -77,13 +108,13 @@ down-lp:
 
 .PHONY: build
 build:
-	$(COMPOSE_FULL) build
+	$(COMPOSE_SCENESCAPE) build
 
 # ---- Cleanup ----
 
 .PHONY: clean
 clean:
-	-$(COMPOSE_FULL) down -v
+	-$(COMPOSE_SCENESCAPE) down -v
 	-$(COMPOSE_LP) down -v 2>/dev/null || true
 
 .PHONY: clean-secrets
@@ -104,7 +135,9 @@ help:
 	@echo "Storewide Loss Prevention - Available targets:"
 	@echo ""
 	@echo "  Full Stack (SceneScape + LP, using pre-built images):"
+	@echo "    make run-scenescape  - Single command: init + models + start"
 	@echo "    make demo            - Initialize and start everything"
+	@echo "    make download-models - Download OpenVINO AI models"
 	@echo "    make down            - Stop all services"
 	@echo "    make logs            - Follow logs"
 	@echo "    make status          - Show service status"

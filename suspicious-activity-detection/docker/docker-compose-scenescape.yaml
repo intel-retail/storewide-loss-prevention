@@ -6,7 +6,7 @@
 # All SceneScape services run from Docker Hub images — no source checkout needed.
 #
 # Quick start:
-#   1. ./init.sh                    # generate secrets, download videos
+#   1. ./scripts/init.sh                    # generate secrets, download videos
 #   2. docker compose -f docker/docker-compose.full.yaml up -d
 #
 # Or use the Makefile:
@@ -28,8 +28,6 @@ secrets:
     file: ${SECRETSDIR}/certs/scenescape-vdms-c.crt
   vdms-client-key:
     file: ${SECRETSDIR}/certs/scenescape-vdms-c.key
-  django:
-    file: ${SECRETSDIR}/django
   controller.auth:
     environment: CONTROLLER_AUTH
   browser.auth:
@@ -133,6 +131,7 @@ services:
       - vol-media:/workspace/media
       - vol-sample-data:/home/scenescape/SceneScape/sample_data
       - vol-migrations:/workspace/migrations
+      - ${SECRETSDIR}/django:/run/secrets/django
     secrets:
       - source: root-cert
         target: certs/scenescape-ca.pem
@@ -140,7 +139,6 @@ services:
         target: certs/scenescape-web.crt
       - source: web-key
         target: certs/scenescape-web.key
-      - django
       - controller.auth
       - browser.auth
     restart: always
@@ -211,10 +209,10 @@ services:
     volumes:
       - vol-media:/home/scenescape/SceneScape/media
       - vol-sample-data:/home/scenescape/SceneScape/sample_data
+      - ${SECRETSDIR}/django:/run/secrets/django
     secrets:
       - source: root-cert
         target: certs/scenescape-ca.pem
-      - django
       - controller.auth
       - source: vdms-client-key
         target: certs/scenescape-vdms-c.key
@@ -234,7 +232,7 @@ services:
     pids_limit: 1000
 
   # ---- RTSP Camera Streams (retail videos) ----
-  retail-cams:
+  lp-cams:
     image: linuxserver/ffmpeg:version-8.0-cli
     command: >
       -nostdin -re -stream_loop -1 -i /workspace/media/${VIDEO_FILE:-lp-camera1.mp4}
@@ -250,7 +248,7 @@ services:
     pids_limit: 1000
 
   # ---- DLStreamer Pipeline Server (inference + MQTT publishing) ----
-  retail-video:
+  lp-video:
     image: docker.io/intel/dlstreamer-pipeline-server:${DLSTREAMER_VERSION:-2026.1.0-20260331-weekly-ubuntu24}
     networks:
       scenescape:
@@ -275,7 +273,7 @@ services:
         condition: service_started
       ntpserv:
         condition: service_started
-      retail-cams:
+      lp-cams:
         condition: service_started
     healthcheck:
       test: ["CMD", "curl", "-I", "-s", "http://localhost:8080/pipelines"]
@@ -299,7 +297,7 @@ services:
       - NO_PROXY=mediaserver,${NO_PROXY}
       - no_proxy=mediaserver,${no_proxy}
     configs:
-      - source: retail-config
+      - source: lp-config
         target: /home/pipeline-server/config.json
     volumes:
       - ../scenescape/dlstreamer-pipeline-server/user_scripts:/home/pipeline-server/user_scripts
@@ -312,110 +310,6 @@ services:
     restart: always
     pids_limit: 1000
 
-  # =========================================================================
-  #  Loss Prevention Services
-  # =========================================================================
-
-  # ---- Gradio UI ----
-  gradio-ui:
-    build:
-      context: ../ui
-      dockerfile: Dockerfile
-    image: gradio-ui:latest
-    ports:
-      - "7860:7860"
-    networks:
-      - scenescape
-    depends_on:
-      storewide-loss-prevention:
-        condition: service_healthy
-    environment:
-      - LP_BASE_URL=http://storewide-loss-prevention:8082
-      - no_proxy=storewide-loss-prevention,localhost,127.0.0.1,10.0.0.0/8,172.16.0.0/12
-      - NO_PROXY=storewide-loss-prevention,localhost,127.0.0.1,10.0.0.0/8,172.16.0.0/12
-      - http_proxy=
-      - https_proxy=
-      - HTTP_PROXY=
-      - HTTPS_PROXY=
-    restart: unless-stopped
-    volumes:
-      - ../configs/zone_config.json:/app/zone_config.json:ro
-
-  # ---- SeaweedFS (S3-compatible Object Storage for evidence frames) ----
-  seaweedfs:
-    image: chrislusf/seaweedfs:latest
-    ports:
-      - "${SEAWEEDFS_S3_PORT:-8333}:8333"
-      - "${SEAWEEDFS_MASTER_PORT:-9333}:9333"
-      - "${SEAWEEDFS_VOLUME_PORT:-8080}:8080"
-    networks:
-      - scenescape
-    environment:
-      - http_proxy=${http_proxy}
-      - https_proxy=${https_proxy}
-      - HTTP_PROXY=${http_proxy}
-      - HTTPS_PROXY=${https_proxy}
-      - no_proxy=${no_proxy:-${NO_PROXY:-}},seaweedfs,localhost,127.0.0.1,::1,172.18.0.0/16,10.0.0.0/8
-      - NO_PROXY=${no_proxy:-${NO_PROXY:-}},seaweedfs,localhost,127.0.0.1,::1,172.18.0.0/16,10.0.0.0/8
-    command: "server -s3 -s3.config=/etc/seaweedfs/s3-config.json -dir=/data"
-    volumes:
-      - seaweedfs-data:/data
-      - ../configs/s3-config.json:/etc/seaweedfs/s3-config.json:ro
-    healthcheck:
-      test: ["CMD", "nc", "-z", "localhost", "9333"]
-      interval: 10s
-      timeout: 5s
-      retries: 20
-      start_period: 30s
-
-  # ---- Storewide Loss Prevention Service ----
-  storewide-loss-prevention:
-    build:
-      context: ${APP_DIR:-..}/src
-      dockerfile: Dockerfile
-      args:
-        http_proxy: ${http_proxy:-}
-        https_proxy: ${https_proxy:-}
-        no_proxy: ${no_proxy:-}
-        HTTP_PROXY: ${HTTP_PROXY:-}
-        HTTPS_PROXY: ${HTTPS_PROXY:-}
-        NO_PROXY: ${NO_PROXY:-}
-    image: ${REGISTRY:-}storewide-loss-prevention:${TAG:-latest}
-    ports:
-      - "${LP_SERVICE_PORT:-8082}:8082"
-    networks:
-      - scenescape
-    healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8082/api/v1/lp/status')"]
-      interval: 10s
-      timeout: 5s
-      retries: 10
-      start_period: 30s
-    depends_on:
-      web:
-        condition: service_healthy
-      broker:
-        condition: service_started
-      retail-video:
-        condition: service_healthy
-    environment:
-      LOG_LEVEL: ${LOG_LEVEL:-INFO}
-      http_proxy: ${http_proxy}
-      https_proxy: ${https_proxy}
-      no_proxy: ${no_proxy:-${NO_PROXY:-}},.scenescape.intel.com,${HOST_IP},broker.scenescape.intel.com,seaweedfs,localhost,127.0.0.1,172.18.0.0/16,10.0.0.0/8
-      STORE_NAME: ${STORE_NAME:-Retail}
-      STORE_ID: ${STORE_ID:-store_001}
-      MQTT_HOST: ${MQTT_HOST:-broker.scenescape.intel.com}
-      MQTT_PORT: ${MQTT_PORT:-1883}
-      SCENESCAPE_API_USER: ${SCENESCAPE_API_USER:-}
-      SCENESCAPE_API_PASSWORD: ${SCENESCAPE_API_PASSWORD:-}
-      BEHAVIORAL_ANALYSIS_URL: ${BEHAVIORAL_ANALYSIS_URL:-http://behavioral-analysis-service:8090}
-      RULE_SERVICE_URL: ${RULE_SERVICE_URL:-http://rule-service:8091}
-    volumes:
-      - ../configs:/app/configs:ro
-      - ../scenescape/secrets/certs:/app/secrets/certs:ro
-    restart: unless-stopped
-
 # =========================================================================
 #  Configs (bind-mounted JSON files)
 # =========================================================================
@@ -426,7 +320,7 @@ configs:
     file: ../scenescape/controller/tracker-config.json
   reid-config:
     file: ../scenescape/controller/reid-config.json
-  retail-config:
+  lp-config:
     file: ../scenescape/dlstreamer-pipeline-server/config.json
 
 # =========================================================================
