@@ -55,8 +55,17 @@ class ConfigService:
     def get_store_name(self) -> str:
         return self._app_cfg.get("store", {}).get("name", "retail_store_1")
 
-    # ---- cameras ----
+    # ---- cameras (derived from zone_config.camera_name, fallback to app_config) ----
     def get_cameras(self) -> List[dict]:
+        cam = self._zone_cfg.get("camera_name", "")
+        if cam:
+            return [{
+                "name": cam,
+                "number": 1,
+                "description": self._zone_cfg.get("scene_name", ""),
+                "data_topic": f"scenescape/data/camera/{cam}",
+                "image_topic": f"scenescape/image/camera/{cam}",
+            }]
         return self._app_cfg.get("cameras", [])
 
     def get_camera_topics(self) -> List[str]:

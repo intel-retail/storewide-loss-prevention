@@ -2,8 +2,8 @@
 # Copyright (C) 2025 Intel Corporation
 # SPDX-License-Identifier: Apache-2.0
 #
-# Initialize secrets, download sample videos, and generate .env
-# for the full-stack (SceneScape + Loss Prevention) deployment.
+# Initialize secrets, read zone_config.json, generate DLStreamer config,
+# and generate .env for the full-stack deployment.
 #
 # Usage: ./init.sh
 
@@ -13,6 +13,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SECRETS_DIR="${SCRIPT_DIR}/scenescape/secrets"
 ENV_FILE="${SCRIPT_DIR}/docker/.env"
 SAMPLE_DATA_DIR="${SCRIPT_DIR}/scenescape/sample_data"
+ZONE_CONFIG="${SCRIPT_DIR}/configs/zone_config.json"
+DLSTREAMER_CONFIG="${SCRIPT_DIR}/scenescape/dlstreamer-pipeline-server/config.json"
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -23,51 +25,103 @@ echo -e "${GREEN}=== Storewide Loss Prevention - Full Stack Init ===${NC}"
 echo ""
 
 # ---- Step 1: Generate SceneScape secrets ----
-echo -e "${YELLOW}[1/3] Generating SceneScape secrets...${NC}"
+echo -e "${YELLOW}[1/4] Generating SceneScape secrets...${NC}"
 chmod +x "${SECRETS_DIR}/generate_secrets.sh"
 bash "${SECRETS_DIR}/generate_secrets.sh"
 
-# ---- Step 2: Download sample videos ----
-echo -e "${YELLOW}[2/3] Downloading sample retail videos...${NC}"
-mkdir -p "${SAMPLE_DATA_DIR}"
-
-# These are the retail demo videos used by DLStreamer pipeline
-# They get loaded into the vol-sample-data volume
-VIDEO_BRANCH="main"
-VIDEO_URL="https://github.com/open-edge-platform/edge-ai-resources/raw/refs/heads/${VIDEO_BRANCH}/videos"
-VIDEOS=("apriltag-cam1.ts" "apriltag-cam2.ts")
-
-NEED_DOWNLOAD=false
-for VIDEO in "${VIDEOS[@]}"; do
-  if [ ! -f "${SAMPLE_DATA_DIR}/${VIDEO}" ]; then
-    NEED_DOWNLOAD=true
-    break
-  fi
-done
-
-if [ "${NEED_DOWNLOAD}" = true ]; then
-  echo "Downloading videos from GitHub..."
-  for VIDEO in "${VIDEOS[@]}"; do
-    if [ ! -f "${SAMPLE_DATA_DIR}/${VIDEO}" ]; then
-      echo "  Downloading ${VIDEO}..."
-      curl -k -L -s "${VIDEO_URL}/${VIDEO}" -o "${SAMPLE_DATA_DIR}/${VIDEO}" &
-    fi
-  done
-  wait
-
-  for VIDEO in "${VIDEOS[@]}"; do
-    if [ ! -f "${SAMPLE_DATA_DIR}/${VIDEO}" ]; then
-      echo -e "${RED}ERROR: Failed to download ${VIDEO}${NC}"
-      exit 1
-    fi
-  done
-  echo "  Videos downloaded successfully."
-else
-  echo "  Videos already present, skipping download."
+# ---- Step 2: Read zone_config.json ----
+echo -e "${YELLOW}[2/4] Reading zone_config.json...${NC}"
+if [ ! -f "${ZONE_CONFIG}" ]; then
+    echo -e "${RED}ERROR: zone_config.json not found at ${ZONE_CONFIG}${NC}"
+    exit 1
 fi
 
-# ---- Step 3: Generate .env file ----
-echo -e "${YELLOW}[3/3] Generating docker/.env...${NC}"
+SCENE_NAME=$(python3 -c "import json; print(json.load(open('${ZONE_CONFIG}')).get('scene_name',''))" 2>/dev/null)
+SCENE_ZIP=$(python3 -c "import json; print(json.load(open('${ZONE_CONFIG}')).get('scene_zip',''))" 2>/dev/null)
+CAMERA_NAME=$(python3 -c "import json; print(json.load(open('${ZONE_CONFIG}')).get('camera_name',''))" 2>/dev/null)
+VIDEO_FILE=$(python3 -c "import json; print(json.load(open('${ZONE_CONFIG}')).get('video_file',''))" 2>/dev/null)
+
+echo "  Scene name:  ${SCENE_NAME}"
+echo "  Scene zip:   ${SCENE_ZIP}"
+echo "  Camera name: ${CAMERA_NAME}"
+echo "  Video file:  ${VIDEO_FILE}"
+
+if [ -z "${SCENE_NAME}" ] || [ -z "${CAMERA_NAME}" ] || [ -z "${VIDEO_FILE}" ]; then
+    echo -e "${RED}ERROR: zone_config.json must have scene_name, camera_name, and video_file${NC}"
+    exit 1
+fi
+
+# Validate scene zip exists
+SCENE_ZIP_PATH="${SCRIPT_DIR}/scenescape/webserver/${SCENE_ZIP}"
+if [ -n "${SCENE_ZIP}" ] && [ ! -f "${SCENE_ZIP_PATH}" ]; then
+    echo -e "${YELLOW}WARNING: Scene zip not found at ${SCENE_ZIP_PATH}${NC}"
+    echo "  Scene import will be skipped. Import manually via SceneScape UI."
+fi
+
+# Validate video exists
+VIDEO_PATH="${SAMPLE_DATA_DIR}/${VIDEO_FILE}"
+if [ ! -f "${VIDEO_PATH}" ]; then
+    echo -e "${YELLOW}WARNING: Video not found at ${VIDEO_PATH}${NC}"
+    echo "  Place your video file in scenescape/sample_data/"
+fi
+
+# ---- Step 3: Generate DLStreamer config.json ----
+echo -e "${YELLOW}[3/4] Generating DLStreamer pipeline config...${NC}"
+
+cat > "${DLSTREAMER_CONFIG}" <<DLEOF
+{
+  "config": {
+    "logging": {
+      "C_LOG_LEVEL": "INFO",
+      "PY_LOG_LEVEL": "INFO"
+    },
+    "pipelines": [
+      {
+        "name": "reid_${CAMERA_NAME}",
+        "source": "gstreamer",
+        "pipeline": "rtspsrc location=rtsp://mediaserver:8554/retail-cam1 latency=200 ! rtph264depay ! h264parse ! avdec_h264 ! videoconvert ! video/x-raw,format=BGR ! gvapython class=PostDecodeTimestampCapture function=processFrame module=/home/pipeline-server/user_scripts/gvapython/sscape/sscape_adapter.py name=timesync ! gvadetect model=/home/pipeline-server/models/intel/person-detection-retail-0013/FP32/person-detection-retail-0013.xml model-proc=/home/pipeline-server/models/object_detection/person/person-detection-retail-0013.json name=detection ! gvainference model=/home/pipeline-server/models/intel/person-reidentification-retail-0277/FP32/person-reidentification-retail-0277.xml inference-region=roi-list ! gvametaconvert add-tensor-data=true name=metaconvert ! gvapython class=PostInferenceDataPublish function=processFrame module=/home/pipeline-server/user_scripts/gvapython/sscape/sscape_adapter.py name=datapublisher ! gvametapublish name=destination ! appsink sync=true",
+        "auto_start": true,
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "ntp_config": {
+              "element": { "name": "timesync", "property": "kwarg", "format": "json" },
+              "type": "object",
+              "properties": { "ntpServer": { "type": "string" } }
+            },
+            "camera_config": {
+              "element": { "name": "datapublisher", "property": "kwarg", "format": "json" },
+              "type": "object",
+              "properties": {
+                "cameraid": { "type": "string" },
+                "metadatagenpolicy": { "type": "string" },
+                "publish_frame": { "type": "boolean" },
+                "detection_labels": { "type": "array", "items": { "type": "string" } }
+              }
+            }
+          }
+        },
+        "payload": {
+          "parameters": {
+            "ntp_config": { "ntpServer": "ntpserv" },
+            "camera_config": {
+              "cameraid": "${CAMERA_NAME}",
+              "metadatagenpolicy": "reidPolicy",
+              "detection_labels": ["person"]
+            }
+          }
+        }
+      }
+    ]
+  }
+}
+DLEOF
+
+echo "  Generated ${DLSTREAMER_CONFIG}"
+echo "  Pipeline: reid_${CAMERA_NAME}  cameraid: ${CAMERA_NAME}"
+
+# ---- Step 4: Generate .env file ----
+echo -e "${YELLOW}[4/4] Generating docker/.env...${NC}"
 
 # Read generated secrets — honor SUPASS from environment if set
 SUPASS="${SUPASS:-$(cat "${SECRETS_DIR}/supass" 2>/dev/null || echo "")}"
@@ -90,6 +144,12 @@ DATABASE_PASSWORD=${DBPASS}
 CONTROLLER_AUTH=${CONTROLLER_AUTH}
 UID=${USER_UID}
 GID=${USER_GID}
+
+# Scene (from zone_config.json)
+SCENE_NAME=${SCENE_NAME}
+SCENE_ZIP=${SCENE_ZIP}
+CAMERA_NAME=${CAMERA_NAME}
+VIDEO_FILE=${VIDEO_FILE}
 
 # SceneScape image versions
 SCENESCAPE_REGISTRY=
@@ -118,20 +178,22 @@ echo ""
 echo -e "${GREEN}=== Init complete ===${NC}"
 echo ""
 echo "Generated files:"
-echo "  Secrets:  ${SECRETS_DIR}/"
-echo "  Videos:   ${SAMPLE_DATA_DIR}/"
-echo "  Env:      ${ENV_FILE}"
+echo "  Secrets:          ${SECRETS_DIR}/"
+echo "  DLStreamer config: ${DLSTREAMER_CONFIG}"
+echo "  Env:              ${ENV_FILE}"
 echo ""
-echo -e "SUPASS: ${YELLOW}${SUPASS}${NC}"
+echo "Scene: ${SCENE_NAME}"
+echo "  Camera: ${CAMERA_NAME}  Video: ${VIDEO_FILE}  Zip: ${SCENE_ZIP}"
+echo -e "  SUPASS: ${YELLOW}${SUPASS}${NC}"
+echo ""
+echo "To change scene/video/camera: edit configs/zone_config.json, then re-run ./init.sh"
 echo ""
 echo "Next steps:"
-echo "  1. Review docker/.env and adjust proxy/image settings if needed"
-echo "  2. Start the full stack:"
-echo "       cd ${SCRIPT_DIR}"
-echo "       docker compose -f docker/docker-compose.full.yaml up -d"
-echo "     or:"
-echo "       make demo"
+echo "  1. Place your video in scenescape/sample_data/${VIDEO_FILE}"
+echo "  2. Place your scene zip in scenescape/webserver/${SCENE_ZIP}"
+echo "  3. Start the full stack:"
+echo "       make demo   (or: docker compose -f docker/docker-compose.full.yaml up -d)"
 echo ""
-echo "  3. Open SceneScape UI:  https://localhost"
+echo "  4. Open SceneScape UI:  https://localhost"
 echo "     Login: admin / ${SUPASS}"
-echo "  4. Open Gradio UI:      http://localhost:7860"
+echo "  5. Open Gradio UI:      http://localhost:7860"

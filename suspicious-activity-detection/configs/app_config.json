@@ -3,22 +3,6 @@
     "name": "retail_store_1",
     "id": "store_001"
   },
-  "cameras": [
-    {
-      "name": "camera1",
-      "number": 1,
-      "description": "Electronics aisle",
-      "data_topic": "scenescape/data/camera/camera1",
-      "image_topic": "scenescape/image/camera/camera1"
-    },
-    {
-      "name": "camera2",
-      "number": 2,
-      "description": "Checkout lanes",
-      "data_topic": "scenescape/data/camera/camera2",
-      "image_topic": "scenescape/image/camera/camera2"
-    }
-  ],
   "mqtt": {
     "host": "broker.scenescape.intel.com",
     "port": 1883,

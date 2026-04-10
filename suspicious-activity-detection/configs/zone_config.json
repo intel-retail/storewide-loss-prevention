@@ -1,5 +1,8 @@
 {
-  "scene_name": "Queuing",
+  "scene_name": "storewide loss prevention",
+  "scene_zip": "storewide-loss-prevention.zip",
+  "camera_name": "lp-camera1",
+  "video_file": "lp-camera1.mp4",
   "scenescape_api": {
     "base_url": "https://web.scenescape.intel.com",
     "auth_path": "/api/v1/auth",
@@ -8,9 +11,7 @@
     "verify_ssl": false
   },
   "zones": {
-    "jewelry_zone": "HIGH_VALUE",
-    "entrance_exit_zone": "EXIT",
-    "restricted_office_zone": "RESTRICTED",
-    "checkout_zone": "CHECKOUT"
+    "aisle1": "HIGH_VALUE",
+    "aisle2": "CHECKOUT"
   }
 }

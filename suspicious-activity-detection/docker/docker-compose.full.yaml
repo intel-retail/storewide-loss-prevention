@@ -36,10 +36,6 @@ secrets:
     file: ${SECRETSDIR}/browser.auth
   calibration.auth:
     file: ${SECRETSDIR}/calibration.auth
-  autocalibration-cert:
-    file: ${SECRETSDIR}/certs/scenescape-autocalibration.crt
-  autocalibration-key:
-    file: ${SECRETSDIR}/certs/scenescape-autocalibration.key
 
 # =========================================================================
 #  SceneScape Core Services (pre-built images from Docker Hub / registry)
@@ -84,8 +80,8 @@ services:
       - scenescape
     volumes:
       - vol-db:/var/lib/postgresql/data
-    ports:
-      - "5432:5432"
+    # ports:
+    #   - "5432:5432"
     restart: always
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB -h localhost -p 5432"]
@@ -115,7 +111,6 @@ services:
       --broker broker.scenescape.intel.com
       --brokerauth /run/secrets/browser.auth
       --brokerrootcert /run/secrets/certs/scenescape-ca.pem
-      --autocalibration autocalibration.scenescape.intel.com:8443
     healthcheck:
       test: "curl --insecure -X GET https://web.scenescape.intel.com:443/api/v1/database-ready | grep 'true'"
       interval: 10s
@@ -148,9 +143,36 @@ services:
       - django
       - controller.auth
       - browser.auth
-      - calibration.auth
     restart: always
     pids_limit: 1000
+
+  # ---- Scene Import (imports .zip scene via REST API after web is ready) ----
+  scene-import:
+    image: python:3.12-slim
+    networks:
+      - scenescape
+    depends_on:
+      web:
+        condition: service_healthy
+    environment:
+      - SCENE_NAME=${SCENE_NAME:-}
+      - SCENE_ZIP=${SCENE_ZIP:-}
+      - SCENESCAPE_URL=https://web.scenescape.intel.com
+      - SCENESCAPE_USER=admin
+      - SUPASS=${SUPASS}
+      - http_proxy=${http_proxy:-}
+      - https_proxy=${https_proxy:-}
+      - no_proxy=${no_proxy:-},web.scenescape.intel.com,localhost,127.0.0.1
+      - HTTP_PROXY=${HTTP_PROXY:-}
+      - HTTPS_PROXY=${HTTPS_PROXY:-}
+      - NO_PROXY=${NO_PROXY:-},web.scenescape.intel.com,localhost,127.0.0.1
+    volumes:
+      - ../scenescape/webserver:/webserver:ro
+    secrets:
+      - source: root-cert
+        target: certs/scenescape-ca.pem
+    entrypoint: ["/bin/bash", "/webserver/scene-import.sh"]
+    restart: "no"
 
   # ---- SceneScape Controller (tracking + analytics) ----
   scene:
@@ -201,65 +223,6 @@ services:
     restart: always
     pids_limit: 1000
 
-  # ---- Autocalibration Init (fix volume permissions) ----
-  autocalibration-init:
-    image: alpine:3.23
-    command: sh -c "chown -R 1000:1000 /data/netvlad_models /data/media /data/datasets"
-    volumes:
-      - vol-netvlad_models:/data/netvlad_models
-      - vol-media:/data/media
-      - vol-datasets:/data/datasets
-
-  # ---- Autocalibration Service ----
-  autocalibration:
-    image: ${SCENESCAPE_REGISTRY:-}intel/scenescape-autocalibration:${SCENESCAPE_VERSION:-v2026.0.0}
-    init: true
-    networks:
-      scenescape:
-        aliases:
-          - autocalibration.scenescape.intel.com
-    user: "1000:1000"
-    command: >
-      --restauth /run/secrets/calibration.auth
-      --resturl https://web.scenescape.intel.com:443/api/v1
-      --restport 8443
-      --ssl-certfile /run/secrets/certs/scenescape-autocalibration.crt
-      --ssl-keyfile /run/secrets/certs/scenescape-autocalibration.key
-    depends_on:
-      autocalibration-init:
-        condition: service_completed_successfully
-      web:
-        condition: service_healthy
-      broker:
-        condition: service_started
-    environment:
-      - EGL_PLATFORM=surfaceless
-      - NETVLAD_MODEL_DIR=/usr/local/lib/python3.11/site-packages/third_party/netvlad
-      - HTTP_PROXY=${HTTP_PROXY}
-      - HTTPS_PROXY=${HTTPS_PROXY}
-      - NO_PROXY=${NO_PROXY},scenescape.intel.com
-    volumes:
-      - vol-media:/home/scenescape/SceneScape/media
-      - vol-datasets:/home/scenescape/SceneScape/datasets
-      - vol-netvlad_models:/usr/local/lib/python3.11/site-packages/third_party/netvlad
-    secrets:
-      - source: root-cert
-        target: certs/scenescape-ca.pem
-      - source: autocalibration-cert
-        target: certs/scenescape-autocalibration.crt
-      - source: autocalibration-key
-        target: certs/scenescape-autocalibration.key
-      - django
-      - calibration.auth
-    healthcheck:
-      test: ["CMD", "curl", "-k", "-s", "https://localhost:8443/v1/status"]
-      interval: 30s
-      timeout: 5s
-      retries: 3
-      start_period: 10s
-    restart: always
-    pids_limit: 1000
-
   # ---- RTSP Media Server ----
   mediaserver:
     image: bluenviron/mediamtx:1.14.0
@@ -274,10 +237,9 @@ services:
   retail-cams:
     image: linuxserver/ffmpeg:version-8.0-cli
     command: >
-      -nostdin -re -stream_loop -1 -i /workspace/media/apriltag-cam1.ts
-      -re -stream_loop -1 -i /workspace/media/apriltag-cam2.ts
-      -map 0:v -c copy -f rtsp -rtsp_transport tcp rtsp://mediaserver:8554/retail-cam1
-      -map 1:v -c copy -f rtsp -rtsp_transport tcp rtsp://mediaserver:8554/retail-cam2
+      -nostdin -re -stream_loop -1 -i /workspace/media/${VIDEO_FILE:-lp-camera1.mp4}
+      -c:v libx264 -preset ultrafast -tune zerolatency
+      -f rtsp -rtsp_transport tcp rtsp://mediaserver:8554/retail-cam1
     volumes:
       - vol-sample-data:/workspace/media
     networks:
@@ -340,7 +302,7 @@ services:
       - source: retail-config
         target: /home/pipeline-server/config.json
     volumes:
-      - ./scenescape/dlstreamer-pipeline-server/user_scripts:/home/pipeline-server/user_scripts
+      - ../scenescape/dlstreamer-pipeline-server/user_scripts:/home/pipeline-server/user_scripts
       - vol-dlstreamer-pipeline-root:/var/cache/pipeline_root:uid=1999,gid=1999
       - vol-sample-data:/home/pipeline-server/videos
       - vol-models:/home/pipeline-server/models
@@ -411,6 +373,13 @@ services:
     build:
       context: ${APP_DIR:-..}/src
       dockerfile: Dockerfile
+      args:
+        http_proxy: ${http_proxy:-}
+        https_proxy: ${https_proxy:-}
+        no_proxy: ${no_proxy:-}
+        HTTP_PROXY: ${HTTP_PROXY:-}
+        HTTPS_PROXY: ${HTTPS_PROXY:-}
+        NO_PROXY: ${NO_PROXY:-}
     image: ${REGISTRY:-}storewide-loss-prevention:${TAG:-latest}
     ports:
       - "${LP_SERVICE_PORT:-8082}:8082"
@@ -433,7 +402,7 @@ services:
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
       http_proxy: ${http_proxy}
       https_proxy: ${https_proxy}
-      no_proxy: ${no_proxy:-${NO_PROXY:-}},.scenescape.intel.com,${HOST_IP},broker.scenescape.intel.com,seaweedfs,behavioral-analysis-service,rule-service,localhost,127.0.0.1,172.18.0.0/16,10.0.0.0/8
+      no_proxy: ${no_proxy:-${NO_PROXY:-}},.scenescape.intel.com,${HOST_IP},broker.scenescape.intel.com,seaweedfs,localhost,127.0.0.1,172.18.0.0/16,10.0.0.0/8
       STORE_NAME: ${STORE_NAME:-Retail}
       STORE_ID: ${STORE_ID:-store_001}
       MQTT_HOST: ${MQTT_HOST:-broker.scenescape.intel.com}
@@ -444,7 +413,7 @@ services:
       RULE_SERVICE_URL: ${RULE_SERVICE_URL:-http://rule-service:8091}
     volumes:
       - ../configs:/app/configs:ro
-      - ../secrets:/app/secrets:ro
+      - ../scenescape/secrets/certs:/app/secrets/certs:ro
     restart: unless-stopped
 
 # =========================================================================
@@ -467,11 +436,8 @@ volumes:
   vol-db:
   vol-media:
   vol-migrations:
-  vol-datasets:
   vol-sample-data:
   vol-models:
-  vol-netvlad_models:
-    driver: local
   vol-dlstreamer-pipeline-root:
     driver: local
     driver_opts:
