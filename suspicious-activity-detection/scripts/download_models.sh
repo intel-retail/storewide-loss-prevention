@@ -13,19 +13,24 @@
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 MODEL_PROC_DIR="${PROJECT_DIR}/scenescape/dlstreamer-pipeline-server/model-proc-files"
-VOLUME_NAME="scenescape_vol-models"
+VOLUME_NAME="storewide-lp_vol-models"
+
+# Source MODELS and MODEL_PRECISION from .env if available
+ENV_FILE="${PROJECT_DIR}/docker/.env"
+if [ -f "${ENV_FILE}" ]; then
+    MODELS="${MODELS:-$(grep ^MODELS= "${ENV_FILE}" 2>/dev/null | cut -d= -f2-)}"
+    MODEL_PRECISION="${MODEL_PRECISION:-$(grep ^MODEL_PRECISION= "${ENV_FILE}" 2>/dev/null | cut -d= -f2-)}"
+fi
 
 # OpenVINO Model Zoo download URL (same as SceneScape model_installer)
 OMZ_BASE_URL="https://storage.openvinotoolkit.org/repositories/open_model_zoo/2023.0/models_bin/1"
 
-# Models required by the DLStreamer pipeline
-MODELS=(
-    "person-detection-retail-0013"
-    "person-reidentification-retail-0277"
-)
+# Models required by the DLStreamer pipeline (from .env or defaults)
+DEFAULT_MODELS="person-detection-retail-0013,person-reidentification-retail-0277"
+IFS=',' read -ra MODELS <<< "${MODELS:-${DEFAULT_MODELS}}"
 
-# Default precision; override with --precisions FP32,FP16
-PRECISIONS="${1:-FP32}"
+# Default precision; override with MODEL_PRECISION env or --precisions flag
+PRECISIONS="${MODEL_PRECISION:-FP32}"
 if [ "$1" = "--precisions" ] && [ -n "$2" ]; then
     PRECISIONS="$2"
 fi

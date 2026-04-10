@@ -1,4 +1,4 @@
-# Copyright (C) 2025 Intel Corporation
+# Copyright (C) 2026 Intel Corporation
 # SPDX-License-Identifier: Apache-2.0
 
 # Full-stack deployment: SceneScape (pre-built images) + Storewide Loss Prevention
@@ -12,10 +12,10 @@
 # Or use the Makefile:
 #   make demo
 
-name: scenescape
+name: storewide-lp
 
 networks:
-  scenescape:
+  storewide-lp:
 
 secrets:
   root-cert:
@@ -45,7 +45,7 @@ services:
   ntpserv:
     image: dockurr/chrony:4.8
     networks:
-      scenescape:
+      storewide-lp:
     restart: unless-stopped
     pids_limit: 1000
 
@@ -60,7 +60,7 @@ services:
     volumes:
       - ${SECRETSDIR}:/mosquitto/secrets
     networks:
-      scenescape:
+      storewide-lp:
         aliases:
           - broker.scenescape.intel.com
     user: "${UID:-1000}:${GID:-1000}"
@@ -75,7 +75,7 @@ services:
       POSTGRES_PASSWORD: ${DATABASE_PASSWORD}
       POSTGRES_DB: scenescape
     networks:
-      - scenescape
+      - storewide-lp
     volumes:
       - vol-db:/var/lib/postgresql/data
     # ports:
@@ -93,7 +93,7 @@ services:
     image: ${SCENESCAPE_REGISTRY:-}intel/scenescape-manager:${SCENESCAPE_VERSION:-v2026.0.0}
     init: true
     networks:
-      scenescape:
+      storewide-lp:
         aliases:
           - web.scenescape.intel.com
     depends_on:
@@ -148,7 +148,7 @@ services:
   scene-import:
     image: python:3.12-slim
     networks:
-      - scenescape
+      - storewide-lp
     depends_on:
       web:
         condition: service_healthy
@@ -178,7 +178,7 @@ services:
     init: true
     user: "${UID:-1000}:${GID:-1000}"
     networks:
-      scenescape:
+      storewide-lp:
     depends_on:
       web:
         condition: service_healthy
@@ -225,7 +225,7 @@ services:
   mediaserver:
     image: bluenviron/mediamtx:1.14.0
     networks:
-      scenescape:
+      storewide-lp:
         aliases:
           - mediaserver
     restart: always
@@ -241,7 +241,7 @@ services:
     volumes:
       - vol-sample-data:/workspace/media
     networks:
-      scenescape:
+      storewide-lp:
     depends_on:
       - mediaserver
     restart: always
@@ -251,7 +251,7 @@ services:
   lp-video:
     image: docker.io/intel/dlstreamer-pipeline-server:${DLSTREAMER_VERSION:-2026.1.0-20260331-weekly-ubuntu24}
     networks:
-      scenescape:
+      storewide-lp:
     tty: true
     entrypoint: ["./run.sh"]
     # Uncomment to use GPU acceleration:

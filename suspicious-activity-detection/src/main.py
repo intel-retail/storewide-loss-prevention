@@ -139,10 +139,18 @@ async def lifespan(app: FastAPI):
     ss_user = os.environ.get("SCENESCAPE_API_USER", "")
     ss_pass = os.environ.get("SCENESCAPE_API_PASSWORD", "")
     if ss_user and ss_pass:
-        # Authenticate first — needed for both scene resolution and zone discovery
-        authenticated = await ss_client.authenticate(ss_user, ss_pass)
+        # Authenticate with retry — web container may still be starting
+        authenticated = False
+        for attempt in range(5):
+            authenticated = await ss_client.authenticate(ss_user, ss_pass)
+            if authenticated:
+                break
+            wait = 2 ** attempt  # 1, 2, 4, 8, 16 seconds
+            logger.warning("SceneScape auth failed, retrying", attempt=attempt + 1, retry_in=wait)
+            await asyncio.sleep(wait)
+
         if not authenticated:
-            logger.error("SceneScape API authentication failed")
+            logger.error("SceneScape API authentication failed after retries")
         else:
             # Resolve scene_name → scene_id via SceneScape API
             scene_name = config.get_scene_name()

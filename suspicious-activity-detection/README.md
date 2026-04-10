@@ -8,7 +8,7 @@ MQTT-driven loss prevention service for Intel SceneScape retail deployments. The
 
 - **Intel SceneScape** running with cameras configured and regions/zones defined
 - **Docker** and **Docker Compose** installed
-- SceneScape Docker network (`scenescape_scenescape`) available
+- SceneScape Docker network (`storewide-lp_storewide-lp`) available
 
 ## Core Responsibilities
 
@@ -165,7 +165,7 @@ Override defaults by exporting before running `scripts/setup.sh`:
 | storewide-loss-prevention | 8082 | FastAPI service (alerts, sessions, health) |
 | seaweedfs | 8333 / 9333 | S3-compatible object storage (person frames, evidence) |
 
-All containers join the `scenescape_scenescape` Docker network.
+All containers join the `storewide-lp_storewide-lp` Docker network.
 
 ## API Endpoints
 

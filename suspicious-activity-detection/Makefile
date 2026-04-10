@@ -17,16 +17,19 @@ SAMPLE_DATA_DIR := scenescape/sample_data
 demo: init init-sample-data download-models init-volumes
 	@echo ""
 	@echo "=== Building LP images ==="
-	$(COMPOSE_LP) build
+	$(COMPOSE_ALL) build storewide-loss-prevention gradio-ui
 	@echo ""
 	@echo "=== Starting all services ==="
 	$(COMPOSE_ALL) up -d
+	@rm -f application.log
+	@$(COMPOSE_ALL) logs -f storewide-loss-prevention > application.log 2>&1 &
 	@echo ""
 	@echo "Services running:"
 	@echo "  SceneScape UI:   https://localhost"
 	@echo "  Login:           admin / $$(grep SUPASS docker/.env | cut -d= -f2)"
 	@echo "  Gradio UI:       http://localhost:7860"
 	@echo "  LP API:          http://localhost:8082"
+	@echo "  LP logs:         application.log"
 	@echo ""
 	@echo "To stop: make down"
 
@@ -51,13 +54,13 @@ init:
 .PHONY: init-sample-data
 init-sample-data:
 	@echo "Initializing sample data volume..."
-	@docker volume create scenescape_vol-sample-data 2>/dev/null || true
-	@docker run --rm -v scenescape_vol-sample-data:/dest alpine:3.23 chown $$(id -u):$$(id -g) /dest
+	@docker volume create storewide-lp_vol-sample-data 2>/dev/null || true
+	@docker run --rm -v storewide-lp_vol-sample-data:/dest alpine:3.23 chown $$(id -u):$$(id -g) /dest
 	@if [ -d "$(SAMPLE_DATA_DIR)" ] && [ -n "$$(ls -A $(SAMPLE_DATA_DIR)/*.ts $(SAMPLE_DATA_DIR)/*.mp4 2>/dev/null)" ]; then \
 		echo "Copying sample videos to volume..."; \
 		docker run --rm \
 			-v $(CURDIR)/$(SAMPLE_DATA_DIR):/source:ro \
-			-v scenescape_vol-sample-data:/dest \
+			-v storewide-lp_vol-sample-data:/dest \
 			--user $$(id -u):$$(id -g) \
 			alpine:3.23 \
 			sh -c "cp -v /source/*.ts /source/*.mp4 /dest/ 2>/dev/null || true"; \
@@ -75,13 +78,18 @@ download-models:
 .PHONY: init-volumes
 init-volumes:
 	@echo "Initializing Docker volumes..."
-	@docker volume create scenescape_vol-media 2>/dev/null || true
-	@docker run --rm -v scenescape_vol-media:/data alpine:3.23 sh -c "touch /data/placeholder"
+	@docker volume create storewide-lp_vol-media 2>/dev/null || true
+	@docker run --rm -v storewide-lp_vol-media:/data alpine:3.23 sh -c "chown 1000:1000 /data && touch /data/placeholder"
 	@echo "Volumes initialized."
 
 .PHONY: down
 down:
 	-$(COMPOSE_ALL) down
+	@rm -f application.log
+
+.PHONY: down-scenescape
+down-scenescape:
+	-$(COMPOSE_SCENESCAPE) down
 
 .PHONY: logs
 logs:
@@ -96,7 +104,7 @@ status:
 .PHONY: demo-lp
 demo-lp:
 	@echo "Building LP images..."
-	$(COMPOSE_LP) build
+	$(COMPOSE_ALL) build storewide-loss-prevention gradio-ui
 	@echo "Starting LP services only (SceneScape must be running)..."
 	$(COMPOSE_LP) up -d
 
@@ -139,6 +147,7 @@ help:
 	@echo "    make demo            - Initialize and start everything"
 	@echo "    make download-models - Download OpenVINO AI models"
 	@echo "    make down            - Stop all services"
+	@echo "    make down-scenescape - Stop SceneScape only"
 	@echo "    make logs            - Follow logs"
 	@echo "    make status          - Show service status"
 	@echo ""

@@ -11,7 +11,7 @@ services:
     ports:
       - "7860:7860"
     networks:
-      - scenescape
+      - storewide-lp
     depends_on:
       storewide-loss-prevention:
         condition: service_healthy
@@ -35,7 +35,7 @@ services:
       - "${SEAWEEDFS_MASTER_PORT:-9333}:9333"
       - "${SEAWEEDFS_VOLUME_PORT:-8080}:8080"
     networks:
-      - scenescape
+      - storewide-lp
     environment:
       - http_proxy=${http_proxy}
       - https_proxy=${https_proxy}
@@ -48,7 +48,7 @@ services:
       - seaweedfs-data:/data
       - ../configs/s3-config.json:/etc/seaweedfs/s3-config.json:ro
     healthcheck:
-      test: ["CMD", "nc", "-z", "localhost", "9333"]
+      test: ["CMD", "nc", "-z", "127.0.0.1", "9333"]
       interval: 10s
       timeout: 5s
       retries: 20
@@ -63,16 +63,18 @@ services:
     ports:
       - "${LP_SERVICE_PORT:-8082}:8082"
     networks:
-      - scenescape
+      - storewide-lp
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8082/api/v1/lp/status')"]
       interval: 10s
       timeout: 5s
       retries: 10
       start_period: 30s
-    # depends_on:
-    #   seaweedfs:
-    #     condition: service_healthy
+    depends_on:
+      seaweedfs:
+        condition: service_healthy
+      web:
+        condition: service_healthy
     environment:
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
       http_proxy: ${http_proxy}
@@ -96,9 +98,8 @@ services:
     restart: unless-stopped
 
 networks:
-  scenescape:
-    name: scenescape_scenescape
-    external: true
+  storewide-lp:
+    name: storewide-lp_storewide-lp
 
 volumes:
   seaweedfs-data:

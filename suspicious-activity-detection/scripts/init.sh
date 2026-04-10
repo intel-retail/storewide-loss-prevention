@@ -78,7 +78,7 @@ fi
 # ---- Step 3: Generate DLStreamer config.json ----
 echo -e "${YELLOW}[3/4] Generating DLStreamer pipeline config...${NC}"
 
-DLSTREAMER_TEMPLATE="${PROJECT_DIR}/scenescape/dlstreamer-pipeline-server/dlstreamer-pipeline.template.json"
+DLSTREAMER_TEMPLATE="${PROJECT_DIR}/scenescape/dlstreamer-pipeline-server/lp-config.json"
 if [ ! -f "${DLSTREAMER_TEMPLATE}" ]; then
     echo -e "${RED}ERROR: DLStreamer template not found at ${DLSTREAMER_TEMPLATE}${NC}"
     exit 1
@@ -103,7 +103,7 @@ USER_GID=$(id -g)
 # If secrets were freshly generated, remove stale DB volumes
 if [ "${SECRETS_GENERATED}" = "1" ]; then
     echo "  New secrets generated — removing stale DB volumes..."
-    docker volume rm scenescape_vol-db scenescape_vol-migrations 2>/dev/null || true
+    docker volume rm storewide-lp_vol-db storewide-lp_vol-migrations 2>/dev/null || true
 fi
 
 if [ -f "${ENV_FILE}" ] && [ "${SECRETS_GENERATED}" = "0" ]; then
@@ -130,6 +130,10 @@ CAMERA_NAME=${CAMERA_NAME}
 # Infrastructure-only (not in zone_config.json — edit here directly)
 SCENE_ZIP=${SCENE_ZIP}
 VIDEO_FILE=${VIDEO_FILE}
+
+# OpenVINO Models (comma-separated)
+MODELS=person-detection-retail-0013,person-reidentification-retail-0277
+MODEL_PRECISION=FP32
 
 # SceneScape image versions
 SCENESCAPE_REGISTRY=
