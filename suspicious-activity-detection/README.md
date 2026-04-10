@@ -1,5 +1,7 @@
 # Store-wide Loss Prevention: Suspicious Activity Detection
 
+> **GitHub:** [intel-sandbox/storewide-loss-prevention](https://github.com/intel-sandbox/storewide-loss-prevention)
+
 MQTT-driven loss prevention service for Intel SceneScape retail deployments. The service monitors person behavior across store zones using real-time tracking from SceneScape, manages session state and detection rules, and stores cropped person frames in SeaweedFS. Behavioral analysis (pose detection, VLM confirmation) and advanced rule evaluation are handled by separate external services called conditionally.
 
 ## Prerequisites
