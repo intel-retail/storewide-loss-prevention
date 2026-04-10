@@ -1,14 +1,14 @@
 # Store-wide Loss Prevention: Suspicious Activity Detection
 
-> **GitHub:** [intel-sandbox/storewide-loss-prevention](https://github.com/intel-sandbox/storewide-loss-prevention)
 
 MQTT-driven loss prevention service for Intel SceneScape retail deployments. The service monitors person behavior across store zones using real-time tracking from SceneScape, manages session state and detection rules, and stores cropped person frames in SeaweedFS. Behavioral analysis (pose detection, VLM confirmation) and advanced rule evaluation are handled by separate external services called conditionally.
 
 ## Prerequisites
 
-- **Intel SceneScape** running with cameras configured and regions/zones defined
-- **Docker** and **Docker Compose** installed
-- SceneScape Docker network (`storewide-lp_storewide-lp`) available
+- **Docker** (24.0+) and **Docker Compose** (v2.20+)
+- ~10 GB disk space for Docker images, OpenVINO models, and sample video
+- Scene zip file (`scenescape/webserver/storewide-loss-prevention.zip`)
+- Sample video (`scenescape/sample_data/lp-camera1.mp4`)
 
 ## Core Responsibilities
 
@@ -24,7 +24,7 @@ The Store-wide Loss Prevention service owns four responsibilities:
 | Service | Purpose | When Called |
 |---------|---------|-------------|
 | **BehavioralAnalysis Service** | Pose analysis + VLM concealment confirmation | Person enters HIGH_VALUE zone with frames available |
-| **Rule Service** | Advanced/configurable rule evaluation | On every region event (if enabled) |
+| **Alert Service** | Advanced/configurable rule evaluation | On every region event (if enabled) |
 
 These are separate containers — not part of this service.
 
@@ -56,7 +56,7 @@ Store-wide Loss Prevention
   ├── Alert Publisher         — MQTT + REST API + structured log
   └── External Service Clients
        ├── BehavioralAnalysis — HTTP client for pose + VLM service
-       └── Rule Service       — HTTP client for advanced rule evaluation
+       └── Alert Service      — HTTP client for advanced rule evaluation
 ```
 
 ### MQTT Topics Consumed
@@ -102,68 +102,151 @@ bucket: loss-prevention-frames
 
 ## Quick Start
 
-### Using setup.sh (recommended)
+### Prerequisites
+
+| Requirement | Minimum Version |
+|-------------|-----------------|
+| Docker | 24.0+ |
+| Docker Compose | v2.20+ |
+| Disk space | ~10 GB (images + models + video) |
+
+### Required Files
+
+Before starting, ensure these files are in place:
+
+| File | Purpose |
+|------|---------|
+| `scenescape/webserver/storewide-loss-prevention.zip` | Scene map + zone definitions (imported into SceneScape) |
+| `scenescape/sample_data/lp-camera1.mp4` | Sample video for the camera replay |
+| `configs/zone_config.json` | Zone name → type mapping (e.g., `aisle1` → `HIGH_VALUE`) |
+
+### Start Everything (SceneScape + LP)
 
 ```bash
-cd /path/to/storewide-loss-prevention
+cd suspicious-activity-detection
 
-# Ser env vars
-source scripts/setup.sh --setenv
-
-# First time — builds images, copies TLS cert, starts containers
-source scripts/setup.sh --setup
-
-# Subsequent runs — start without rebuilding
-source scripts/setup.sh --run
-
-# Restart
-source scripts/setup.sh --restart
-
-# Stop
-source scripts/setup.sh --stop
-
-# Clean up (remove containers + volumes)
-source scripts/setup.sh --clean
+# Single command — generates secrets, downloads models, builds, and starts all services
+make demo
 ```
 
-### Manual setup
+`make demo` performs the following steps automatically:
+1. Generates TLS certificates, SceneScape secrets, and `docker/.env`
+2. Copies sample video into the Docker volume
+3. Downloads OpenVINO models (person-detection + re-identification)
+4. Initializes Docker volumes with correct permissions
+5. Builds the LP and Gradio UI container images
+6. Starts all 11 containers (SceneScape + LP)
+7. Imports the scene map into SceneScape
+8. Tails LP logs to `application.log`
+
+Once running:
+
+| Service | URL | Credentials |
+|---------|-----|-------------|
+| SceneScape UI | https://localhost | `admin` / password printed by `make demo` |
+| Gradio Dashboard | http://localhost:7860 | — |
+| LP REST API | http://localhost:8082 | — |
+| LP logs | `application.log` | `tail -f application.log` |
+
+### Start SceneScape Only (without LP)
 
 ```bash
-cd /path/to/storewide-loss-prevention
-
-# 1. Copy SceneScape TLS certificate
-mkdir -p secrets/certs
-cp ../../scenescape/secrets/certs/scenescape-ca.pem secrets/certs/
-
-# 2. (Optional) Set SceneScape API credentials for zone auto-discovery
-export SCENESCAPE_API_USER=scenectrl
-export SCENESCAPE_API_PASSWORD=<password>
-
-# 3. Start services
-cd docker
-docker compose up -d --build
+make run-scenescape
 ```
 
-### Environment Variables
+### Start LP Only (SceneScape already running)
 
-Override defaults by exporting before running `scripts/setup.sh`:
+```bash
+make demo-lp
+```
+
+### Stop Services
+
+```bash
+# Stop everything (SceneScape + LP)
+make down
+
+# Stop SceneScape only
+make down-scenescape
+
+# Stop LP only
+make down-lp
+```
+
+### Monitoring
+
+```bash
+# Follow live logs for all services
+make logs
+
+# Show container status
+make status
+
+# Check LP health
+curl http://localhost:8082/health
+
+# Check LP service status + zone counts
+curl http://localhost:8082/api/v1/lp/status
+```
+
+### Clean Up
+
+```bash
+# Stop and remove all containers + volumes
+make clean
+
+# Also remove generated secrets and .env
+make clean-all
+```
+
+### Configuration
+
+All environment variables are in `configs/.env.example`. The `make demo` command auto-generates `docker/.env` — you do not need to create it manually.
+
+Key variables you may want to customize in `configs/.env.example` before running:
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `MQTT_HOST` | `broker.scenescape.intel.com` | SceneScape MQTT broker |
-| `LP_SERVICE_PORT` | `8082` | Service REST API port |
-| `SEAWEEDFS_S3_PORT` | `8333` | SeaweedFS S3-compatible port |
-| `BEHAVIORAL_ANALYSIS_URL` | `http://behavioral-analysis-service:8090` | BehavioralAnalysis service URL |
-| `RULE_SERVICE_URL` | `http://rule-service:8091` | Rule service URL |
-| `SCENESCAPE_API_USER` | *(empty)* | SceneScape API username (enables zone auto-discovery) |
-| `SCENESCAPE_API_PASSWORD` | *(empty)* | SceneScape API password |
+| `SCENE_ZIP` | `storewide-loss-prevention.zip` | Scene zip filename (in `scenescape/webserver/`) |
+| `VIDEO_FILE` | `lp-camera1.mp4` | Video filename (in `scenescape/sample_data/`) |
+| `MODELS` | `person-detection-retail-0013,...` | OpenVINO models (comma-separated) |
+| `MODEL_PRECISION` | `FP32` | Model precision (`FP32`, `FP16`) |
+| `SCENESCAPE_VERSION` | `v2026.0.0` | SceneScape Docker image tag |
+| `LP_SERVICE_PORT` | `8082` | LP REST API port |
+| `LOG_LEVEL` | `INFO` | Logging level (`DEBUG`, `INFO`, `WARNING`) |
+
+Zone mapping is configured in `configs/zone_config.json`:
+
+```json
+{
+  "scene_name": "storewide loss prevention",
+  "camera_name": "lp-camera1",
+  "zones": {
+    "aisle1": "HIGH_VALUE",
+    "aisle2": "CHECKOUT"
+  }
+}
+```
+
+Zone names must match the region names defined in your SceneScape scene.
 
 ## Services Started
 
+`make demo` starts the following containers:
+
 | Container | Port | Description |
 |-----------|------|-------------|
-| storewide-loss-prevention | 8082 | FastAPI service (alerts, sessions, health) |
-| seaweedfs | 8333 / 9333 | S3-compatible object storage (person frames, evidence) |
+| `storewide-lp-web-1` | 443 | SceneScape web UI + REST API |
+| `storewide-lp-broker-1` | 1883 | MQTT broker (Mosquitto) |
+| `storewide-lp-pgserver-1` | 5432 | PostgreSQL database |
+| `storewide-lp-scene-1` | — | SceneScape controller (tracking + analytics) |
+| `storewide-lp-lp-cams-1` | — | DLStreamer pipeline server (inference) |
+| `storewide-lp-lp-video-1` | — | Video replay (FFmpeg → RTSP) |
+| `storewide-lp-mediaserver-1` | 8554 | RTSP media server |
+| `storewide-lp-ntpserv-1` | — | NTP time sync |
+| `storewide-lp-storewide-loss-prevention-1` | 8082 | LP FastAPI service |
+| `storewide-lp-gradio-ui-1` | 7860 | Gradio monitoring dashboard |
+| `storewide-lp-seaweedfs-1` | 8333 | SeaweedFS object storage (person frames) |
 
 All containers join the `storewide-lp_storewide-lp` Docker network.
 
@@ -196,30 +279,14 @@ Zones map SceneScape regions to LP zone types (`HIGH_VALUE`, `CHECKOUT`, `EXIT`,
 
 ### Option A: Auto-discovery at startup (recommended)
 
-Set SceneScape API credentials and the service auto-fetches all regions and maps them by name:
+The LP service auto-discovers zones from SceneScape on startup. Zone names in `configs/zone_config.json` are matched against SceneScape region names:
 
-```bash
-export SCENESCAPE_API_USER=scenectrl
-export SCENESCAPE_API_PASSWORD=<password>
-source scripts/setup.sh --run
-```
-
-Name matching rules in `zone_config.json` control the mapping — region names in SceneScape must match exactly:
 ```json
 {
-  "scene_name": "Retail",
-  "scenescape_api": {
-    "base_url": "https://web.scenescape.intel.com",
-    "auth_path": "/api/v1/auth",
-    "scenes_path": "/api/v1/scenes",
-    "regions_path": "/api/v1/regions",
-    "verify_ssl": false
-  },
+  "scene_name": "storewide loss prevention",
   "zones": {
-    "jewelry_zone": "HIGH_VALUE",
-    "entrance_exit_zone": "EXIT",
-    "restricted_office_zone": "RESTRICTED",
-    "checkout_zone": "CHECKOUT"
+    "aisle1": "HIGH_VALUE",
+    "aisle2": "CHECKOUT"
   }
 }
 ```
@@ -290,7 +357,7 @@ storewide-loss-prevention/
     │   ├── frame_manager.py               # SeaweedFS CRUD (rolling buffer, evidence)
     │   ├── alert_publisher.py             # MQTT + in-memory ring buffer
     │   ├── behavioral_analysis_client.py  # HTTP client for external BehavioralAnalysis service
-    │   └── rule_service_client.py         # HTTP client for external Rule service
+    │   └── rule_service_client.py         # HTTP client for external Alert service
     └── tests/
         ├── __init__.py
         ├── test_session_manager.py
