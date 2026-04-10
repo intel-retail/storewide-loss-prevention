@@ -1,4 +1,4 @@
-# Copyright (C) 2025 Intel Corporation
+# Copyright (C) 2026 Intel Corporation
 # SPDX-License-Identifier: Apache-2.0
 """
 Rule Engine — evaluates ENTERED / EXITED / PERSON_LOST events and fires alerts.

@@ -1,5 +1,5 @@
 #!/bin/bash -e
-# Copyright (C) 2025 Intel Corporation
+# Copyright (C) 2026 Intel Corporation
 # SPDX-License-Identifier: Apache-2.0
 #
 # Download OpenVINO models required by the DLStreamer inference pipeline.
