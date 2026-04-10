@@ -75,6 +75,8 @@ services:
         condition: service_healthy
       web:
         condition: service_healthy
+      scene-import:
+        condition: service_completed_successfully
     environment:
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
       http_proxy: ${http_proxy}

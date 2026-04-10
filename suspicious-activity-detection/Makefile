@@ -26,7 +26,7 @@ demo: init init-sample-data download-models init-volumes
 	@echo ""
 	@echo "Services running:"
 	@echo "  SceneScape UI:   https://localhost"
-	@echo "  Login:           admin / $$(grep SUPASS docker/.env | cut -d= -f2)"
+	@echo "  Login:           admin / $$(grep SUPASS docker/.env | cut -d= -f2-)"
 	@echo "  Gradio UI:       http://localhost:7860"
 	@echo "  LP API:          http://localhost:8082"
 	@echo "  LP logs:         application.log"
@@ -42,7 +42,7 @@ run-scenescape: init init-sample-data download-models init-volumes
 	@echo ""
 	@echo "=== SceneScape is running ==="
 	@echo "  UI:    https://localhost"
-	@echo "  Login: admin / $$(grep SUPASS docker/.env | cut -d= -f2)"
+	@echo "  Login: admin / $$(grep SUPASS docker/.env | cut -d= -f2-)"
 	@echo ""
 	@echo "To stop: make down"
 
