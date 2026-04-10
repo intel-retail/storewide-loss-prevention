@@ -1,10 +1,13 @@
-secrets/
+# Secrets — ignore generated outputs, but keep scaffold scripts
 scenescape/secrets/ca/
 scenescape/secrets/certs/
 scenescape/secrets/django/
 scenescape/secrets/pgserver/
 scenescape/secrets/*.auth
 scenescape/secrets/supass
+# Explicitly track the scripts needed to regenerate secrets
+!scenescape/secrets/generate_secrets.sh
+!scenescape/secrets/openssl.cnf
 docker/.env
 docker/.env.bak
 requirement.txt
