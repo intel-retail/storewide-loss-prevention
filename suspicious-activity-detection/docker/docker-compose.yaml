@@ -92,7 +92,7 @@ services:
       RULE_SERVICE_URL: ${RULE_SERVICE_URL:-http://rule-service:8091}
     volumes:
       - ../configs:/app/configs:ro
-      - ../secrets:/app/secrets:ro
+      - ../scenescape/secrets:/app/secrets:ro
     restart: unless-stopped
 
 networks:

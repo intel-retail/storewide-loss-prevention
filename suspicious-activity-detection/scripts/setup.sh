@@ -12,7 +12,7 @@ CYAN='\033[0;36m'
 MAGENTA='\033[0;35m'
 NC='\033[0m' # No Color
 
-export APP_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+export APP_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && cd .. && pwd)"
 export HOST_IP=$(ip route get 1 2>/dev/null | awk '{print $7}')
 if [ -z "$HOST_IP" ]; then
     export HOST_IP="localhost"

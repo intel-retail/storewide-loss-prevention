@@ -6,10 +6,11 @@
 # Generates secrets, downloads sample videos, and prepares the environment.
 #
 # Usage:
-#   ./install.sh [HOST_IP]
+#   ./scripts/install.sh [HOST_IP]
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-SECRETS_DIR="${SCRIPT_DIR}/scenescape/secrets"
+PROJECT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
+SECRETS_DIR="${PROJECT_DIR}/scenescape/secrets"
 
 echo "=== Storewide Loss Prevention - Install ==="
 
@@ -44,5 +45,5 @@ echo "  Secrets:  ${SECRETS_DIR}/"
 echo "  HOST_IP:  ${HOST_IP}"
 echo ""
 echo "Next steps:"
-echo "  ./init.sh            # download videos & generate .env"
+echo "  ./scripts/init.sh            # download videos & generate .env"
 echo "  make demo            # start full stack"

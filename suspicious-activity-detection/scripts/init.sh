@@ -5,16 +5,17 @@
 # Initialize secrets, read zone_config.json, generate DLStreamer config,
 # and generate .env for the full-stack deployment.
 #
-# Usage: ./init.sh
+# Usage: ./scripts/init.sh
 
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-SECRETS_DIR="${SCRIPT_DIR}/scenescape/secrets"
-ENV_FILE="${SCRIPT_DIR}/docker/.env"
-SAMPLE_DATA_DIR="${SCRIPT_DIR}/scenescape/sample_data"
-ZONE_CONFIG="${SCRIPT_DIR}/configs/zone_config.json"
-DLSTREAMER_CONFIG="${SCRIPT_DIR}/scenescape/dlstreamer-pipeline-server/config.json"
+PROJECT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
+SECRETS_DIR="${PROJECT_DIR}/scenescape/secrets"
+ENV_FILE="${PROJECT_DIR}/docker/.env"
+SAMPLE_DATA_DIR="${PROJECT_DIR}/scenescape/sample_data"
+ZONE_CONFIG="${PROJECT_DIR}/configs/zone_config.json"
+DLSTREAMER_CONFIG="${PROJECT_DIR}/scenescape/dlstreamer-pipeline-server/config.json"
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -26,8 +27,15 @@ echo ""
 
 # ---- Step 1: Generate SceneScape secrets ----
 echo -e "${YELLOW}[1/4] Generating SceneScape secrets...${NC}"
-chmod +x "${SECRETS_DIR}/generate_secrets.sh"
-bash "${SECRETS_DIR}/generate_secrets.sh"
+SECRETS_GENERATED=0
+if [ -f "${SECRETS_DIR}/django/secrets.py" ] && [ -f "${SECRETS_DIR}/certs/scenescape-ca.pem" ]; then
+    echo "  Secrets already exist, skipping generation."
+    echo "  (To regenerate: make clean-secrets && make run-scenescape)"
+else
+    chmod +x "${SECRETS_DIR}/generate_secrets.sh"
+    bash "${SECRETS_DIR}/generate_secrets.sh"
+    SECRETS_GENERATED=1
+fi
 
 # ---- Step 2: Read zone_config.json ----
 echo -e "${YELLOW}[2/4] Reading zone_config.json...${NC}"
@@ -37,22 +45,24 @@ if [ ! -f "${ZONE_CONFIG}" ]; then
 fi
 
 SCENE_NAME=$(python3 -c "import json; print(json.load(open('${ZONE_CONFIG}')).get('scene_name',''))" 2>/dev/null)
-SCENE_ZIP=$(python3 -c "import json; print(json.load(open('${ZONE_CONFIG}')).get('scene_zip',''))" 2>/dev/null)
 CAMERA_NAME=$(python3 -c "import json; print(json.load(open('${ZONE_CONFIG}')).get('camera_name',''))" 2>/dev/null)
-VIDEO_FILE=$(python3 -c "import json; print(json.load(open('${ZONE_CONFIG}')).get('video_file',''))" 2>/dev/null)
+
+# Infrastructure-only vars: not in zone_config.json, override via env or defaults
+SCENE_ZIP="${SCENE_ZIP:-storewide-loss-prevention.zip}"
+VIDEO_FILE="${VIDEO_FILE:-lp-camera1.mp4}"
 
 echo "  Scene name:  ${SCENE_NAME}"
-echo "  Scene zip:   ${SCENE_ZIP}"
 echo "  Camera name: ${CAMERA_NAME}"
-echo "  Video file:  ${VIDEO_FILE}"
+echo "  Scene zip:   ${SCENE_ZIP}  (override: SCENE_ZIP=... ./scripts/init.sh)"
+echo "  Video file:  ${VIDEO_FILE}  (override: VIDEO_FILE=... ./scripts/init.sh)"
 
-if [ -z "${SCENE_NAME}" ] || [ -z "${CAMERA_NAME}" ] || [ -z "${VIDEO_FILE}" ]; then
-    echo -e "${RED}ERROR: zone_config.json must have scene_name, camera_name, and video_file${NC}"
+if [ -z "${SCENE_NAME}" ] || [ -z "${CAMERA_NAME}" ]; then
+    echo -e "${RED}ERROR: zone_config.json must have scene_name and camera_name${NC}"
     exit 1
 fi
 
 # Validate scene zip exists
-SCENE_ZIP_PATH="${SCRIPT_DIR}/scenescape/webserver/${SCENE_ZIP}"
+SCENE_ZIP_PATH="${PROJECT_DIR}/scenescape/webserver/${SCENE_ZIP}"
 if [ -n "${SCENE_ZIP}" ] && [ ! -f "${SCENE_ZIP_PATH}" ]; then
     echo -e "${YELLOW}WARNING: Scene zip not found at ${SCENE_ZIP_PATH}${NC}"
     echo "  Scene import will be skipped. Import manually via SceneScape UI."
@@ -68,54 +78,13 @@ fi
 # ---- Step 3: Generate DLStreamer config.json ----
 echo -e "${YELLOW}[3/4] Generating DLStreamer pipeline config...${NC}"
 
-cat > "${DLSTREAMER_CONFIG}" <<DLEOF
-{
-  "config": {
-    "logging": {
-      "C_LOG_LEVEL": "INFO",
-      "PY_LOG_LEVEL": "INFO"
-    },
-    "pipelines": [
-      {
-        "name": "reid_${CAMERA_NAME}",
-        "source": "gstreamer",
-        "pipeline": "rtspsrc location=rtsp://mediaserver:8554/retail-cam1 latency=200 ! rtph264depay ! h264parse ! avdec_h264 ! videoconvert ! video/x-raw,format=BGR ! gvapython class=PostDecodeTimestampCapture function=processFrame module=/home/pipeline-server/user_scripts/gvapython/sscape/sscape_adapter.py name=timesync ! gvadetect model=/home/pipeline-server/models/intel/person-detection-retail-0013/FP32/person-detection-retail-0013.xml model-proc=/home/pipeline-server/models/object_detection/person/person-detection-retail-0013.json name=detection ! gvainference model=/home/pipeline-server/models/intel/person-reidentification-retail-0277/FP32/person-reidentification-retail-0277.xml inference-region=roi-list ! gvametaconvert add-tensor-data=true name=metaconvert ! gvapython class=PostInferenceDataPublish function=processFrame module=/home/pipeline-server/user_scripts/gvapython/sscape/sscape_adapter.py name=datapublisher ! gvametapublish name=destination ! appsink sync=true",
-        "auto_start": true,
-        "parameters": {
-          "type": "object",
-          "properties": {
-            "ntp_config": {
-              "element": { "name": "timesync", "property": "kwarg", "format": "json" },
-              "type": "object",
-              "properties": { "ntpServer": { "type": "string" } }
-            },
-            "camera_config": {
-              "element": { "name": "datapublisher", "property": "kwarg", "format": "json" },
-              "type": "object",
-              "properties": {
-                "cameraid": { "type": "string" },
-                "metadatagenpolicy": { "type": "string" },
-                "publish_frame": { "type": "boolean" },
-                "detection_labels": { "type": "array", "items": { "type": "string" } }
-              }
-            }
-          }
-        },
-        "payload": {
-          "parameters": {
-            "ntp_config": { "ntpServer": "ntpserv" },
-            "camera_config": {
-              "cameraid": "${CAMERA_NAME}",
-              "metadatagenpolicy": "reidPolicy",
-              "detection_labels": ["person"]
-            }
-          }
-        }
-      }
-    ]
-  }
-}
-DLEOF
+DLSTREAMER_TEMPLATE="${PROJECT_DIR}/scenescape/dlstreamer-pipeline-server/dlstreamer-pipeline.template.json"
+if [ ! -f "${DLSTREAMER_TEMPLATE}" ]; then
+    echo -e "${RED}ERROR: DLStreamer template not found at ${DLSTREAMER_TEMPLATE}${NC}"
+    exit 1
+fi
+
+sed "s/{{CAMERA_NAME}}/${CAMERA_NAME}/g" "${DLSTREAMER_TEMPLATE}" > "${DLSTREAMER_CONFIG}"
 
 echo "  Generated ${DLSTREAMER_CONFIG}"
 echo "  Pipeline: reid_${CAMERA_NAME}  cameraid: ${CAMERA_NAME}"
@@ -131,10 +100,19 @@ CONTROLLER_AUTH=$(cat "${SECRETS_DIR}/controller.auth" 2>/dev/null || echo "")
 USER_UID=$(id -u)
 USER_GID=$(id -g)
 
-if [ -f "${ENV_FILE}" ]; then
-  echo "  ${ENV_FILE} already exists. Backing up to ${ENV_FILE}.bak"
-  cp "${ENV_FILE}" "${ENV_FILE}.bak"
+# If secrets were freshly generated, remove stale DB volumes
+if [ "${SECRETS_GENERATED}" = "1" ]; then
+    echo "  New secrets generated — removing stale DB volumes..."
+    docker volume rm scenescape_vol-db scenescape_vol-migrations 2>/dev/null || true
 fi
+
+if [ -f "${ENV_FILE}" ] && [ "${SECRETS_GENERATED}" = "0" ]; then
+    echo "  ${ENV_FILE} already exists, skipping."
+else
+    if [ -f "${ENV_FILE}" ]; then
+        echo "  ${ENV_FILE} already exists. Backing up to ${ENV_FILE}.bak"
+        cp "${ENV_FILE}" "${ENV_FILE}.bak"
+    fi
 
 cat > "${ENV_FILE}" <<EOF
 # Auto-generated by init.sh — $(date -Iseconds)
@@ -145,10 +123,12 @@ CONTROLLER_AUTH=${CONTROLLER_AUTH}
 UID=${USER_UID}
 GID=${USER_GID}
 
-# Scene (from zone_config.json)
+# Scene (auto-populated from zone_config.json by init.sh)
 SCENE_NAME=${SCENE_NAME}
-SCENE_ZIP=${SCENE_ZIP}
 CAMERA_NAME=${CAMERA_NAME}
+
+# Infrastructure-only (not in zone_config.json — edit here directly)
+SCENE_ZIP=${SCENE_ZIP}
 VIDEO_FILE=${VIDEO_FILE}
 
 # SceneScape image versions
@@ -174,6 +154,8 @@ SCENESCAPE_API_USER=admin
 SCENESCAPE_API_PASSWORD=${SUPASS}
 EOF
 
+fi
+
 echo ""
 echo -e "${GREEN}=== Init complete ===${NC}"
 echo ""
@@ -186,13 +168,14 @@ echo "Scene: ${SCENE_NAME}"
 echo "  Camera: ${CAMERA_NAME}  Video: ${VIDEO_FILE}  Zip: ${SCENE_ZIP}"
 echo -e "  SUPASS: ${YELLOW}${SUPASS}${NC}"
 echo ""
-echo "To change scene/video/camera: edit configs/zone_config.json, then re-run ./init.sh"
+echo "To change scene/camera: edit configs/zone_config.json, then re-run ./scripts/init.sh"
+echo "To change video/zip:    VIDEO_FILE=my.mp4 SCENE_ZIP=my.zip ./scripts/init.sh"
 echo ""
 echo "Next steps:"
 echo "  1. Place your video in scenescape/sample_data/${VIDEO_FILE}"
 echo "  2. Place your scene zip in scenescape/webserver/${SCENE_ZIP}"
 echo "  3. Start the full stack:"
-echo "       make demo   (or: docker compose -f docker/docker-compose.full.yaml up -d)"
+echo "       make demo   (or: docker compose -f docker/docker-compose-scenescape.yaml up -d)"
 echo ""
 echo "  4. Open SceneScape UI:  https://localhost"
 echo "     Login: admin / ${SUPASS}"
