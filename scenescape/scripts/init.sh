@@ -57,15 +57,17 @@ fi
 
 SCENE_NAME=$(python3 -c "import json; print(json.load(open('${ZONE_CONFIG}')).get('scene_name',''))" 2>/dev/null)
 CAMERA_NAME=$(python3 -c "import json; print(json.load(open('${ZONE_CONFIG}')).get('camera_name',''))" 2>/dev/null)
+SCENE_ZIP=$(python3 -c "import json; print(json.load(open('${ZONE_CONFIG}')).get('scene_zip',''))" 2>/dev/null)
+VIDEO_FILE=$(python3 -c "import json; print(json.load(open('${ZONE_CONFIG}')).get('video_file',''))" 2>/dev/null)
 
-# Infrastructure-only vars: not in zone_config.json, override via env or defaults
+# Allow env var overrides
 SCENE_ZIP="${SCENE_ZIP:-storewide-loss-prevention.zip}"
 VIDEO_FILE="${VIDEO_FILE:-lp-camera1.mp4}"
 
 echo "  Scene name:  ${SCENE_NAME}"
 echo "  Camera name: ${CAMERA_NAME}"
-echo "  Scene zip:   ${SCENE_ZIP}  (override: SCENE_ZIP=... ./scenescape/scripts/init.sh)"
-echo "  Video file:  ${VIDEO_FILE}  (override: VIDEO_FILE=... ./scenescape/scripts/init.sh)"
+echo "  Scene zip:   ${SCENE_ZIP}"
+echo "  Video file:  ${VIDEO_FILE}"
 
 if [ -z "${SCENE_NAME}" ] || [ -z "${CAMERA_NAME}" ]; then
     echo -e "${RED}ERROR: zone_config.json must have scene_name and camera_name${NC}"
@@ -134,8 +136,6 @@ GID=${USER_GID}
 # Scene (auto-populated from zone_config.json by init.sh)
 SCENE_NAME=${SCENE_NAME}
 CAMERA_NAME=${CAMERA_NAME}
-
-# Infrastructure-only (not in zone_config.json — edit here directly)
 SCENE_ZIP=${SCENE_ZIP}
 VIDEO_FILE=${VIDEO_FILE}
 
