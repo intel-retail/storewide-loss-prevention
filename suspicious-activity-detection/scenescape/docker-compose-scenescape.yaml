@@ -6,7 +6,7 @@
 # All SceneScape services run from Docker Hub images — no source checkout needed.
 #
 # Quick start:
-#   1. ./scripts/init.sh                    # generate secrets, download videos
+#   1. ./scenescape/scripts/init.sh                    # generate secrets, download videos
 #   2. docker compose -f docker/docker-compose.full.yaml up -d
 #
 # Or use the Makefile:

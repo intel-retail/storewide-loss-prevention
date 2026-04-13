@@ -5,16 +5,17 @@
 #
 # Full-stack deployment using pre-built SceneScape Docker images.
 # No SceneScape source checkout required.
+# SceneScape-specific targets are in scenescape/Makefile.
 
-COMPOSE_SCENESCAPE := docker compose -f docker/docker-compose-scenescape.yaml
-COMPOSE_LP := docker compose -f docker/docker-compose.yaml
-COMPOSE_ALL := docker compose -f docker/docker-compose-scenescape.yaml -f docker/docker-compose.yaml
-SAMPLE_DATA_DIR := scenescape/sample_data
+COMPOSE_SCENESCAPE := docker compose --env-file docker/.env -f scenescape/docker-compose-scenescape.yaml
+COMPOSE_LP := docker compose --env-file docker/.env -f docker/docker-compose.yaml
+COMPOSE_ALL := docker compose --env-file docker/.env -f scenescape/docker-compose-scenescape.yaml -f docker/docker-compose.yaml
 
 # ---- Full Stack (SceneScape + LP) ----
 
 .PHONY: demo
-demo: init init-sample-data download-models init-volumes
+demo:
+	@$(MAKE) -C scenescape init init-sample-data download-models init-volumes
 	@echo ""
 	@echo "=== Building LP images ==="
 	$(COMPOSE_ALL) build storewide-loss-prevention gradio-ui
@@ -35,52 +36,8 @@ demo: init init-sample-data download-models init-volumes
 
 # SceneScape only (without LP services)
 .PHONY: run-scenescape
-run-scenescape: init init-sample-data download-models init-volumes
-	@echo ""
-	@echo "=== Starting SceneScape ==="
-	$(COMPOSE_SCENESCAPE) up -d
-	@echo ""
-	@echo "=== SceneScape is running ==="
-	@echo "  UI:    https://localhost"
-	@echo "  Login: admin / $$(grep SUPASS docker/.env | cut -d= -f2-)"
-	@echo ""
-	@echo "To stop: make down"
-
-.PHONY: init
-init:
-	@chmod +x scripts/init.sh
-	@./scripts/init.sh
-
-.PHONY: init-sample-data
-init-sample-data:
-	@echo "Initializing sample data volume..."
-	@docker volume create storewide-lp_vol-sample-data 2>/dev/null || true
-	@docker run --rm -v storewide-lp_vol-sample-data:/dest alpine:3.23 chown $$(id -u):$$(id -g) /dest
-	@if [ -d "$(SAMPLE_DATA_DIR)" ] && [ -n "$$(ls -A $(SAMPLE_DATA_DIR)/*.ts $(SAMPLE_DATA_DIR)/*.mp4 2>/dev/null)" ]; then \
-		echo "Copying sample videos to volume..."; \
-		docker run --rm \
-			-v $(CURDIR)/$(SAMPLE_DATA_DIR):/source:ro \
-			-v storewide-lp_vol-sample-data:/dest \
-			--user $$(id -u):$$(id -g) \
-			alpine:3.23 \
-			sh -c "cp -v /source/*.ts /source/*.mp4 /dest/ 2>/dev/null || true"; \
-		echo "Sample data volume initialized."; \
-	else \
-		echo "WARNING: No video files (.ts/.mp4) in $(SAMPLE_DATA_DIR)/"; \
-		echo "Run ./scripts/init.sh to download sample videos."; \
-	fi
-
-.PHONY: download-models
-download-models:
-	@chmod +x scripts/download_models.sh
-	@./scripts/download_models.sh
-
-.PHONY: init-volumes
-init-volumes:
-	@echo "Initializing Docker volumes..."
-	@docker volume create storewide-lp_vol-media 2>/dev/null || true
-	@docker run --rm -v storewide-lp_vol-media:/data alpine:3.23 sh -c "chown 1000:1000 /data && touch /data/placeholder"
-	@echo "Volumes initialized."
+run-scenescape:
+	@$(MAKE) -C scenescape run
 
 .PHONY: down
 down:
@@ -89,7 +46,7 @@ down:
 
 .PHONY: down-scenescape
 down-scenescape:
-	-$(COMPOSE_SCENESCAPE) down
+	@$(MAKE) -C scenescape down
 
 .PHONY: logs
 logs:

@@ -7,11 +7,11 @@
 # following the same approach as SceneScape's model_installer.
 #
 # Usage:
-#   ./scripts/download_models.sh [--precisions FP32,FP16]
+#   ./scenescape/scripts/download_models.sh [--precisions FP32,FP16]
 #   make download-models
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PROJECT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
+PROJECT_DIR="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 MODEL_PROC_DIR="${PROJECT_DIR}/scenescape/dlstreamer-pipeline-server/model-proc-files"
 VOLUME_NAME="storewide-lp_vol-models"
 
@@ -41,16 +41,21 @@ echo "  Precisions: ${PRECISIONS}"
 # Create the volume if it doesn't exist
 docker volume create "${VOLUME_NAME}" 2>/dev/null || true
 
-# Build the download commands
+# Build the download commands (skip if model files already exist)
 DOWNLOAD_CMDS=""
+SKIPPED_ALL=true
 for model in "${MODELS[@]}"; do
     IFS=',' read -ra PREC_LIST <<< "${PRECISIONS}"
     for prec in "${PREC_LIST[@]}"; do
         prec=$(echo "${prec}" | xargs)  # trim whitespace
+        DOWNLOAD_CMDS+="if [ -f /models/intel/${model}/${prec}/${model}.xml ] && [ -f /models/intel/${model}/${prec}/${model}.bin ]; then "
+        DOWNLOAD_CMDS+="echo \"  Skipping ${model} (${prec}) — already exists\"; "
+        DOWNLOAD_CMDS+="else "
         DOWNLOAD_CMDS+="echo \"  Downloading ${model} (${prec})...\" && "
         DOWNLOAD_CMDS+="mkdir -p /models/intel/${model}/${prec} && "
         DOWNLOAD_CMDS+="wget -nv -O /models/intel/${model}/${prec}/${model}.xml ${OMZ_BASE_URL}/${model}/${prec}/${model}.xml && "
-        DOWNLOAD_CMDS+="wget -nv -O /models/intel/${model}/${prec}/${model}.bin ${OMZ_BASE_URL}/${model}/${prec}/${model}.bin && "
+        DOWNLOAD_CMDS+="wget -nv -O /models/intel/${model}/${prec}/${model}.bin ${OMZ_BASE_URL}/${model}/${prec}/${model}.bin; "
+        DOWNLOAD_CMDS+="fi && "
     done
 done
 DOWNLOAD_CMDS="${DOWNLOAD_CMDS% && }"

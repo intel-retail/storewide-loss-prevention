@@ -5,12 +5,12 @@
 # Initialize secrets, read zone_config.json, generate DLStreamer config,
 # and generate .env for the full-stack deployment.
 #
-# Usage: ./scripts/init.sh
+# Usage: ./scenescape/scripts/init.sh
 
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PROJECT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
+PROJECT_DIR="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 SECRETS_DIR="${PROJECT_DIR}/scenescape/secrets"
 ENV_FILE="${PROJECT_DIR}/docker/.env"
 SAMPLE_DATA_DIR="${PROJECT_DIR}/scenescape/sample_data"
@@ -53,8 +53,8 @@ VIDEO_FILE="${VIDEO_FILE:-lp-camera1.mp4}"
 
 echo "  Scene name:  ${SCENE_NAME}"
 echo "  Camera name: ${CAMERA_NAME}"
-echo "  Scene zip:   ${SCENE_ZIP}  (override: SCENE_ZIP=... ./scripts/init.sh)"
-echo "  Video file:  ${VIDEO_FILE}  (override: VIDEO_FILE=... ./scripts/init.sh)"
+echo "  Scene zip:   ${SCENE_ZIP}  (override: SCENE_ZIP=... ./scenescape/scripts/init.sh)"
+echo "  Video file:  ${VIDEO_FILE}  (override: VIDEO_FILE=... ./scenescape/scripts/init.sh)"
 
 if [ -z "${SCENE_NAME}" ] || [ -z "${CAMERA_NAME}" ]; then
     echo -e "${RED}ERROR: zone_config.json must have scene_name and camera_name${NC}"
@@ -172,14 +172,14 @@ echo "Scene: ${SCENE_NAME}"
 echo "  Camera: ${CAMERA_NAME}  Video: ${VIDEO_FILE}  Zip: ${SCENE_ZIP}"
 echo -e "  SUPASS: ${YELLOW}${SUPASS}${NC}"
 echo ""
-echo "To change scene/camera: edit configs/zone_config.json, then re-run ./scripts/init.sh"
-echo "To change video/zip:    VIDEO_FILE=my.mp4 SCENE_ZIP=my.zip ./scripts/init.sh"
+echo "To change scene/camera: edit configs/zone_config.json, then re-run ./scenescape/scripts/init.sh"
+echo "To change video/zip:    VIDEO_FILE=my.mp4 SCENE_ZIP=my.zip ./scenescape/scripts/init.sh"
 echo ""
 echo "Next steps:"
 echo "  1. Place your video in scenescape/sample_data/${VIDEO_FILE}"
 echo "  2. Place your scene zip in scenescape/webserver/${SCENE_ZIP}"
 echo "  3. Start the full stack:"
-echo "       make demo   (or: docker compose -f docker/docker-compose-scenescape.yaml up -d)"
+echo "       make demo   (or: docker compose --env-file docker/.env -f scenescape/docker-compose-scenescape.yaml up -d)"
 echo ""
 echo "  4. Open SceneScape UI:  https://localhost"
 echo "     Login: admin / ${SUPASS}"
