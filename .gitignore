@@ -1,0 +1,13 @@
+suspicious-activity-detection/scenescape/sample_data/*.mp4
+
+# Auto-generated env file (contains passwords)
+suspicious-activity-detection/docker/.env
+suspicious-activity-detection/docker/.env.bak
+
+# Generated secrets
+suspicious-activity-detection/scenescape/secrets/ca/
+suspicious-activity-detection/scenescape/secrets/certs/
+suspicious-activity-detection/scenescape/secrets/django/
+suspicious-activity-detection/scenescape/secrets/pgserver/
+suspicious-activity-detection/scenescape/secrets/supass
+suspicious-activity-detection/scenescape/secrets/*.auth

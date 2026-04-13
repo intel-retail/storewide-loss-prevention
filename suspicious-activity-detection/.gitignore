@@ -1,0 +1,12 @@
+# Secrets — ignore everything except the two scaffold scripts
+scenescape/secrets/*
+!scenescape/secrets/generate_secrets.sh
+!scenescape/secrets/openssl.cnf
+docker/.env
+docker/.env.bak
+scenescape/dlstreamer-pipeline-server/config.json
+requirement.txt
+application.log
+.log_collector.pid
+region_events.json
+scenescape/sample_data/store-wide-loss-prevention.*

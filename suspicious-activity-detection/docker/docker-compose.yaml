@@ -1,0 +1,107 @@
+# Copyright (C) 2026 Intel Corporation
+# SPDX-License-Identifier: Apache-2.0
+
+services:
+  # ---------- Gradio UI Service ----------
+  gradio-ui:
+    build:
+      context: ../ui
+      dockerfile: Dockerfile
+    image: gradio-ui:latest
+    ports:
+      - "7860:7860"
+    networks:
+      - storewide-lp
+    depends_on:
+      storewide-loss-prevention:
+        condition: service_healthy
+    environment:
+      - LP_BASE_URL=http://storewide-loss-prevention:8082
+      - no_proxy=storewide-loss-prevention,localhost,127.0.0.1,10.0.0.0/8,172.16.0.0/12
+      - NO_PROXY=storewide-loss-prevention,localhost,127.0.0.1,10.0.0.0/8,172.16.0.0/12
+      - http_proxy=
+      - https_proxy=
+      - HTTP_PROXY=
+      - HTTPS_PROXY=
+    restart: unless-stopped
+    volumes:
+      - ../configs/zone_config.json:/app/zone_config.json:ro
+
+  # ---------- SeaweedFS (S3-compatible Object Storage) ----------
+  seaweedfs:
+    image: chrislusf/seaweedfs:latest
+    ports:
+      - "${SEAWEEDFS_S3_PORT:-8333}:8333"
+      - "${SEAWEEDFS_MASTER_PORT:-9333}:9333"
+      - "${SEAWEEDFS_VOLUME_PORT:-8080}:8080"
+    networks:
+      - storewide-lp
+    environment:
+      - http_proxy=${http_proxy}
+      - https_proxy=${https_proxy}
+      - HTTP_PROXY=${http_proxy}
+      - HTTPS_PROXY=${https_proxy}
+      - no_proxy=${no_proxy:-${NO_PROXY:-}},seaweedfs,localhost,127.0.0.1,::1,172.18.0.0/16,10.0.0.0/8
+      - NO_PROXY=${no_proxy:-${NO_PROXY:-}},seaweedfs,localhost,127.0.0.1,::1,172.18.0.0/16,10.0.0.0/8
+    command: "server -s3 -s3.config=/etc/seaweedfs/s3-config.json -dir=/data"
+    volumes:
+      - seaweedfs-data:/data
+      - ../configs/s3-config.json:/etc/seaweedfs/s3-config.json:ro
+    healthcheck:
+      test: ["CMD", "nc", "-z", "127.0.0.1", "9333"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 30s
+
+  # ---------- Store-wide Loss Prevention ----------
+  storewide-loss-prevention:
+    build:
+      context: ${APP_DIR:-..}/src
+      dockerfile: Dockerfile
+    image: ${REGISTRY:-}storewide-loss-prevention:${TAG:-latest}
+    ports:
+      - "${LP_SERVICE_PORT:-8082}:8082"
+    networks:
+      - storewide-lp
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8082/api/v1/lp/status')"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    depends_on:
+      seaweedfs:
+        condition: service_healthy
+      web:
+        condition: service_healthy
+      scene-import:
+        condition: service_completed_successfully
+    environment:
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      http_proxy: ${http_proxy}
+      https_proxy: ${https_proxy}
+      no_proxy: ${no_proxy:-${NO_PROXY:-}},.scenescape.intel.com,${HOST_IP},broker.scenescape.intel.com,seaweedfs,behavioral-analysis-service,rule-service,localhost,127.0.0.1,172.18.0.0/16,10.0.0.0/8
+      # Store
+      STORE_NAME: ${STORE_NAME:-Retail}
+      STORE_ID: ${STORE_ID:-store_001}
+      # MQTT
+      MQTT_HOST: ${MQTT_HOST:-broker.scenescape.intel.com}
+      MQTT_PORT: ${MQTT_PORT:-1883}
+      # SceneScape API (for zone auto-discovery)
+      SCENESCAPE_API_USER: ${SCENESCAPE_API_USER:-}
+      SCENESCAPE_API_PASSWORD: ${SCENESCAPE_API_PASSWORD:-}
+      # External services
+      BEHAVIORAL_ANALYSIS_URL: ${BEHAVIORAL_ANALYSIS_URL:-http://behavioral-analysis-service:8090}
+      RULE_SERVICE_URL: ${RULE_SERVICE_URL:-http://rule-service:8091}
+    volumes:
+      - ../configs:/app/configs:ro
+      - ../scenescape/secrets:/app/secrets:ro
+    restart: unless-stopped
+
+networks:
+  storewide-lp:
+    name: storewide-lp_storewide-lp
+
+volumes:
+  seaweedfs-data:

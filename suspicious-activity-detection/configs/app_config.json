@@ -1,0 +1,45 @@
+{
+  "store": {
+    "name": "retail_store_1",
+    "id": "store_001"
+  },
+  "mqtt": {
+    "host": "broker.scenescape.intel.com",
+    "port": 1883,
+    "use_tls": true,
+    "cert_required": false,
+    "verify_hostname": false,
+    "ca_cert_path": "secrets/certs/scenescape-ca.pem",
+    "scene_data_topic_pattern": "scenescape/data/scene/+/+",
+    "region_event_topic_pattern": "scenescape/event/region/+/+/+",
+    "image_topic_pattern": "scenescape/image/camera/+",
+    "cmd_topic_pattern": "scenescape/cmd/camera/{camera_name}",
+    "alert_topic_prefix": "lp/alerts"
+  },
+  "seaweedfs": {
+    "endpoint": "seaweedfs:8333",
+    "access_key": "",
+    "secret_key": "",
+    "secure": false,
+    "evidence_retention_hours": 24,
+    "exit_retention_seconds": 60
+  },
+  "behavioral_analysis": {
+    "base_url": "http://behavioral-analysis-service:8090",
+    "timeout_seconds": 30,
+    "enabled": true
+  },
+  "rule_service": {
+    "base_url": "http://rule-service:8091",
+    "timeout_seconds": 10,
+    "enabled": true
+  },
+  "rules": {
+    "loiter_threshold_seconds": 120,
+    "repeat_visit_threshold": 3,
+    "session_timeout_seconds": 10,
+    "vlm_confidence_threshold": 0.80,
+    "vlm_log_threshold": 0.50,
+    "analysis_fps": 2
+  }
+}
