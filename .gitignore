@@ -1,13 +1,16 @@
-suspicious-activity-detection/scenescape/sample_data/*.mp4
+scenescape/sample_data/*.mp4
 
 # Auto-generated env file (contains passwords)
 suspicious-activity-detection/docker/.env
 suspicious-activity-detection/docker/.env.bak
 
 # Generated secrets
-suspicious-activity-detection/scenescape/secrets/ca/
-suspicious-activity-detection/scenescape/secrets/certs/
-suspicious-activity-detection/scenescape/secrets/django/
-suspicious-activity-detection/scenescape/secrets/pgserver/
-suspicious-activity-detection/scenescape/secrets/supass
-suspicious-activity-detection/scenescape/secrets/*.auth
+scenescape/secrets/ca/
+scenescape/secrets/certs/
+scenescape/secrets/django/
+scenescape/secrets/pgserver/
+scenescape/secrets/supass
+scenescape/secrets/*.auth
+
+# Generated DLStreamer config (created by init.sh from pipeline-config.json)
+scenescape/dlstreamer-pipeline-server/*-pipeline-config.json

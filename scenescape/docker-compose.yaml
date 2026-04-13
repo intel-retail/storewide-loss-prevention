@@ -321,7 +321,7 @@ configs:
   reid-config:
     file: ../scenescape/controller/reid-config.json
   lp-config:
-    file: ../scenescape/dlstreamer-pipeline-server/config.json
+    file: ${PIPELINE_CONFIG:-../scenescape/dlstreamer-pipeline-server/config.json}
 
 # =========================================================================
 #  Volumes

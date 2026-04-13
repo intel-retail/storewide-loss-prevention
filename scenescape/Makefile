@@ -6,9 +6,8 @@
 # Manages SceneScape services: init, volumes, models, start, stop.
 
 SCENESCAPE_DIR := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))
-PROJECT_DIR := $(abspath $(SCENESCAPE_DIR)/..)
-ENV_FILE := $(PROJECT_DIR)/docker/.env
-COMPOSE_SCENESCAPE := docker compose --env-file $(ENV_FILE) -f $(SCENESCAPE_DIR)/docker-compose-scenescape.yaml
+ENV_FILE := $(APP_DIR)/docker/.env
+COMPOSE_SCENESCAPE := docker compose --env-file $(ENV_FILE) -f $(SCENESCAPE_DIR)/docker-compose.yaml
 SAMPLE_DATA_DIR := $(SCENESCAPE_DIR)/sample_data
 
 # ---- Init ----
@@ -16,7 +15,7 @@ SAMPLE_DATA_DIR := $(SCENESCAPE_DIR)/sample_data
 .PHONY: init
 init:
 	@chmod +x $(SCENESCAPE_DIR)/scripts/init.sh
-	@$(SCENESCAPE_DIR)/scripts/init.sh
+	@$(SCENESCAPE_DIR)/scripts/init.sh $(APP_DIR)
 
 # ---- Sample Data Volume ----
 

@@ -7,15 +7,16 @@
 # No SceneScape source checkout required.
 # SceneScape-specific targets are in scenescape/Makefile.
 
-COMPOSE_SCENESCAPE := docker compose --env-file docker/.env -f scenescape/docker-compose-scenescape.yaml
+SCENESCAPE_DIR := ../scenescape
+COMPOSE_SCENESCAPE := docker compose --env-file docker/.env -f $(SCENESCAPE_DIR)/docker-compose.yaml
 COMPOSE_LP := docker compose --env-file docker/.env -f docker/docker-compose.yaml
-COMPOSE_ALL := docker compose --env-file docker/.env -f scenescape/docker-compose-scenescape.yaml -f docker/docker-compose.yaml
+COMPOSE_ALL := docker compose --env-file docker/.env -f $(SCENESCAPE_DIR)/docker-compose.yaml -f docker/docker-compose.yaml
 
 # ---- Full Stack (SceneScape + LP) ----
 
 .PHONY: demo
 demo:
-	@$(MAKE) -C scenescape init init-sample-data download-models init-volumes
+	@$(MAKE) -C $(SCENESCAPE_DIR) APP_DIR=$(CURDIR) init init-sample-data download-models init-volumes
 	@echo ""
 	@echo "=== Building LP images ==="
 	$(COMPOSE_ALL) build storewide-loss-prevention gradio-ui
@@ -34,19 +35,19 @@ demo:
 	@echo ""
 	@echo "To stop: make down"
 
-# SceneScape only (without LP services)
-.PHONY: run-scenescape
-run-scenescape:
-	@$(MAKE) -C scenescape run
-
 .PHONY: down
 down:
 	-$(COMPOSE_ALL) down
 	@rm -f application.log
 
+# SceneScape only (without LP services)
+.PHONY: run-scenescape
+run-scenescape:
+	@$(MAKE) -C $(SCENESCAPE_DIR) APP_DIR=$(CURDIR) run
+
 .PHONY: down-scenescape
 down-scenescape:
-	@$(MAKE) -C scenescape down
+	@$(MAKE) -C $(SCENESCAPE_DIR) APP_DIR=$(CURDIR) down
 
 .PHONY: logs
 logs:
@@ -84,9 +85,9 @@ clean:
 
 .PHONY: clean-secrets
 clean-secrets:
-	rm -rf scenescape/secrets/ca scenescape/secrets/certs scenescape/secrets/django
-	rm -rf scenescape/secrets/pgserver scenescape/secrets/supass
-	rm -f scenescape/secrets/controller.auth scenescape/secrets/browser.auth scenescape/secrets/calibration.auth
+	rm -rf $(SCENESCAPE_DIR)/secrets/ca $(SCENESCAPE_DIR)/secrets/certs $(SCENESCAPE_DIR)/secrets/django
+	rm -rf $(SCENESCAPE_DIR)/secrets/pgserver $(SCENESCAPE_DIR)/secrets/supass
+	rm -f $(SCENESCAPE_DIR)/secrets/controller.auth $(SCENESCAPE_DIR)/secrets/browser.auth $(SCENESCAPE_DIR)/secrets/calibration.auth
 	rm -f docker/.env
 
 .PHONY: clean-all
