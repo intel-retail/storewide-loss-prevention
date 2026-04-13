@@ -39,6 +39,7 @@ To create a new application that uses SceneScape:
 1. Create a new directory under `storewide-loss-prevention/` (e.g., `my-new-app/`)
 2. Add a `configs/` folder with:
    - `zone_config.json` — scene and camera configuration
+   - `.env.example` — SCENE_NAME, SCENE_ZIP, CAMERA_NAME, MODELS all required configuration
    - `pipeline-config.json` — DLStreamer pipeline template (use `{{CAMERA_NAME}}` placeholder)
 3. Add a `docker/` folder for your app's `docker-compose.yaml`
 4. Add a `Makefile` that calls SceneScape targets with `APP_DIR`:
