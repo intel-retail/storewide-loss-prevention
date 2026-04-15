@@ -13,12 +13,12 @@ services:
     networks:
       - storewide-lp
     depends_on:
-      storewide-loss-prevention:
+      swlp-service:
         condition: service_healthy
     environment:
-      - LP_BASE_URL=http://storewide-loss-prevention:8082
-      - no_proxy=storewide-loss-prevention,localhost,127.0.0.1,10.0.0.0/8,172.16.0.0/12
-      - NO_PROXY=storewide-loss-prevention,localhost,127.0.0.1,10.0.0.0/8,172.16.0.0/12
+      - LP_BASE_URL=http://swlp-service:8082
+      - no_proxy=swlp-service,localhost,127.0.0.1,10.0.0.0/8,172.16.0.0/12
+      - NO_PROXY=swlp-service,localhost,127.0.0.1,10.0.0.0/8,172.16.0.0/12
       - http_proxy=
       - https_proxy=
       - HTTP_PROXY=
@@ -55,10 +55,10 @@ services:
       start_period: 30s
 
   # ---------- Store-wide Loss Prevention ----------
-  storewide-loss-prevention:
+  swlp-service:
     build:
-      context: src
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: swlp-service/Dockerfile
     image: ${REGISTRY:-}storewide-loss-prevention:${TAG:-latest}
     ports:
       - "${LP_SERVICE_PORT:-8082}:8082"
@@ -81,7 +81,7 @@ services:
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
       http_proxy: ${http_proxy}
       https_proxy: ${https_proxy}
-      no_proxy: ${no_proxy:-${NO_PROXY:-}},.scenescape.intel.com,${HOST_IP},broker.scenescape.intel.com,seaweedfs,behavioral-analysis-service,rule-service,localhost,127.0.0.1,172.18.0.0/16,10.0.0.0/8
+      no_proxy: ${no_proxy:-${NO_PROXY:-}},.scenescape.intel.com,${HOST_IP},broker.scenescape.intel.com,seaweedfs,behavioral-analysis-service,localhost,127.0.0.1,172.18.0.0/16,10.0.0.0/8
       # Store
       STORE_NAME: ${STORE_NAME:-Retail}
       STORE_ID: ${STORE_ID:-store_001}
@@ -93,7 +93,6 @@ services:
       SCENESCAPE_API_PASSWORD: ${SCENESCAPE_API_PASSWORD:-}
       # External services
       BEHAVIORAL_ANALYSIS_URL: ${BEHAVIORAL_ANALYSIS_URL:-http://behavioral-analysis-service:8090}
-      RULE_SERVICE_URL: ${RULE_SERVICE_URL:-http://rule-service:8091}
     volumes:
       - ./configs:/app/configs:ro
       - ../scenescape/secrets:/app/secrets:ro

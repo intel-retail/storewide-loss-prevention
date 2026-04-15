@@ -25,12 +25,12 @@ demo:
 	@$(MAKE) -C $(SCENESCAPE_DIR) APP_DIR=$(CURDIR) init init-sample-data download-models init-volumes
 	@echo ""
 	@echo "=== Building LP images ==="
-	$(COMPOSE_ALL) build storewide-loss-prevention gradio-ui
+	$(COMPOSE_ALL) build swlp-service gradio-ui
 	@echo ""
 	@echo "=== Starting all services ==="
 	$(COMPOSE_ALL) up -d
 	@rm -f application.log
-	@$(COMPOSE_ALL) logs -f storewide-loss-prevention > application.log 2>&1 &
+	@$(COMPOSE_ALL) logs -f swlp-service > application.log 2>&1 &
 	@echo ""
 	@echo "Services running:"
 	@echo "  SceneScape UI:   https://localhost"

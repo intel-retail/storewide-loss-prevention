@@ -6,7 +6,7 @@
   "mqtt": {
     "host": "broker.scenescape.intel.com",
     "port": 1883,
-    "use_tls": true,
+    "use_tls": false,
     "cert_required": false,
     "verify_hostname": false,
     "ca_cert_path": "secrets/certs/scenescape-ca.pem",
@@ -30,14 +30,17 @@
     "enabled": true
   },
   "rule_service": {
-    "base_url": "http://rule-service:8091",
+    "base_url": "http://rule-engine:8091",
+    "timeout_seconds": 10,
+    "enabled": true
+  },
+  "alert_service": {
+    "base_url": "http://alert-service:8092",
     "timeout_seconds": 10,
     "enabled": true
   },
   "rules": {
-    "loiter_threshold_seconds": 120,
-    "repeat_visit_threshold": 3,
-    "session_timeout_seconds": 10,
+    "session_timeout_seconds": 90,
     "vlm_confidence_threshold": 0.80,
     "vlm_log_threshold": 0.50,
     "analysis_fps": 2

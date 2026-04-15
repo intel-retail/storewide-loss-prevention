@@ -1,0 +1,93 @@
+# Copyright (C) 2026 Intel Corporation
+# SPDX-License-Identifier: Apache-2.0
+#
+# Declarative rules for loss prevention suspicious-activity detection.
+# Each rule defines a trigger, conditions, and actions.
+# Variable substitution: ${var_name:default} resolves from the "variables"
+# section below, with environment overrides (RULES_VARIABLES) taking priority.
+
+# Default variable values — used in condition ${var:default} placeholders.
+# Can be overridden at runtime via RULES_VARIABLES env var (JSON).
+variables:
+  repeat_visit_threshold: 4
+  loiter_threshold_seconds: 20
+
+rules:
+  - id: restricted_zone
+    name: Restricted Zone Violation
+    enabled: true
+    trigger:
+      event_type: zone_entry
+      zone_type: RESTRICTED
+    conditions: []
+    actions:
+      - type: alert
+        params:
+          alert_type: ZONE_VIOLATION
+          severity: CRITICAL
+
+  - id: repeated_visits
+    name: Repeated High-Value Zone Visits
+    enabled: true
+    trigger:
+      event_type: zone_entry
+      zone_type: HIGH_VALUE
+    conditions:
+      - field: zone_visit_counts[region_id]
+        op: gte
+        value: ${repeat_visit_threshold:4}
+    actions:
+      - type: alert
+        params:
+          alert_type: UNUSUAL_PATH
+          severity: WARNING
+          threshold: ${repeat_visit_threshold:4}
+
+  - id: behavioral_analysis
+    name: Trigger Behavioral Analysis on High-Value Entry
+    enabled: true
+    trigger:
+      event_type: zone_entry
+      zone_type: HIGH_VALUE
+    conditions: []
+    actions:
+      - type: escalate
+        params:
+          service: behavioral_analysis
+
+  - id: checkout_bypass
+    name: Checkout Bypass Detection
+    enabled: true
+    trigger:
+      event_type: zone_entry
+      zone_type: EXIT
+    conditions:
+      - field: visited_high_value
+        op: eq
+        value: true
+      - field: visited_checkout
+        op: eq
+        value: false
+    actions:
+      - type: alert
+        params:
+          alert_type: CHECKOUT_BYPASS
+          severity: WARNING
+          severity_if_concealment: CRITICAL
+
+  - id: loitering
+    name: Loitering in High-Value Zone
+    enabled: true
+    trigger:
+      event_type: zone_exit
+      zone_type: HIGH_VALUE
+    conditions:
+      - field: dwell_seconds
+        op: gt
+        value: ${loiter_threshold_seconds:20}
+    actions:
+      - type: alert
+        params:
+          alert_type: LOITERING
+          severity: WARNING
+          threshold: ${loiter_threshold_seconds:20}

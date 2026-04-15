@@ -1,0 +1,290 @@
+<mxfile host="app.diagrams.net" agent="draw.io" version="24.0.0">
+  <diagram name="Rule Engine Service Architecture" id="rule-engine-arch">
+    <mxGraphModel dx="1420" dy="820" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1600" pageHeight="1000" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+
+        <!-- Title -->
+        <mxCell id="title" value="Rule Engine Service — Architecture" style="text;html=1;align=center;verticalAlign=middle;fontSize=20;fontStyle=1;fontColor=#1A1A2E;" vertex="1" parent="1">
+          <mxGeometry x="480" y="20" width="440" height="40" as="geometry" />
+        </mxCell>
+
+        <!-- ===== Detection Service Container ===== -->
+        <mxCell id="det-container" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;arcSize=8;dashed=1;dashPattern=8 4;" vertex="1" parent="1">
+          <mxGeometry x="60" y="100" width="520" height="520" as="geometry" />
+        </mxCell>
+        <mxCell id="det-label" value="detection-service container&lt;br/&gt;&lt;font style=&quot;font-size:10px;font-weight:normal;&quot;&gt;Port 8082&lt;/font&gt;" style="text;html=1;align=left;verticalAlign=top;fontSize=14;fontStyle=1;fontColor=#1A1A2E;" vertex="1" parent="1">
+          <mxGeometry x="75" y="108" width="240" height="40" as="geometry" />
+        </mxCell>
+
+        <!-- main.py -->
+        <mxCell id="main" value="&lt;b&gt;main.py&lt;/b&gt;&lt;br/&gt;&lt;font style=&quot;font-size:10px;&quot;&gt;App entry point&lt;br/&gt;Wires all components&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="100" y="170" width="140" height="60" as="geometry" />
+        </mxCell>
+
+        <!-- RuleEngineClient -->
+        <mxCell id="client" value="&lt;b&gt;RuleEngineClient&lt;/b&gt;&lt;br/&gt;&lt;font style=&quot;font-size:10px;&quot;&gt;rule_engine_client.py&lt;br/&gt;aiohttp async HTTP client&lt;br/&gt;Same evaluate() interface&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="310" y="170" width="200" height="70" as="geometry" />
+        </mxCell>
+
+        <!-- RuleEngineAdapter -->
+        <mxCell id="adapter" value="&lt;b&gt;RuleEngineAdapter&lt;/b&gt;&lt;br/&gt;&lt;font style=&quot;font-size:10px;&quot;&gt;rule_adapter.py&lt;br/&gt;LP-specific glue layer&lt;br/&gt;• Session state transitions&lt;br/&gt;• Loiter dedup&lt;br/&gt;• BA escalation&lt;br/&gt;• Builds flat context dict&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="120" y="290" width="200" height="110" as="geometry" />
+        </mxCell>
+
+        <!-- MQTT Service -->
+        <mxCell id="mqtt-svc" value="&lt;b&gt;MQTTService&lt;/b&gt;&lt;br/&gt;&lt;font style=&quot;font-size:10px;&quot;&gt;Subscribes to&lt;br/&gt;SceneScape topics&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="100" y="450" width="140" height="60" as="geometry" />
+        </mxCell>
+
+        <!-- AlertPublisher -->
+        <mxCell id="alert-pub" value="&lt;b&gt;AlertPublisher&lt;/b&gt;&lt;br/&gt;&lt;font style=&quot;font-size:10px;&quot;&gt;Publishes alerts&lt;br/&gt;to MQTT + S3&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="370" y="450" width="140" height="60" as="geometry" />
+        </mxCell>
+
+        <!-- SessionManager -->
+        <mxCell id="session-mgr" value="&lt;b&gt;SessionManager&lt;/b&gt;&lt;br/&gt;&lt;font style=&quot;font-size:10px;&quot;&gt;Tracks PersonSession&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="370" y="360" width="150" height="50" as="geometry" />
+        </mxCell>
+
+        <!-- ===== Rule Engine Container ===== -->
+        <mxCell id="re-container" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;arcSize=8;dashed=1;dashPattern=8 4;" vertex="1" parent="1">
+          <mxGeometry x="700" y="100" width="460" height="520" as="geometry" />
+        </mxCell>
+        <mxCell id="re-label" value="rule-engine container&lt;br/&gt;&lt;font style=&quot;font-size:10px;font-weight:normal;&quot;&gt;Port 8091&lt;/font&gt;" style="text;html=1;align=left;verticalAlign=top;fontSize=14;fontStyle=1;fontColor=#1A1A2E;" vertex="1" parent="1">
+          <mxGeometry x="715" y="108" width="220" height="40" as="geometry" />
+        </mxCell>
+
+        <!-- server.py (FastAPI) -->
+        <mxCell id="server" value="&lt;b&gt;server.py&lt;/b&gt;&lt;br/&gt;&lt;font style=&quot;font-size:10px;&quot;&gt;FastAPI + uvicorn&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="820" y="170" width="180" height="50" as="geometry" />
+        </mxCell>
+
+        <!-- API endpoints group -->
+        <mxCell id="api-group" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF5F5;strokeColor=#b85450;arcSize=6;" vertex="1" parent="1">
+          <mxGeometry x="760" y="250" width="340" height="130" as="geometry" />
+        </mxCell>
+        <mxCell id="api-label" value="&lt;b&gt;REST API Endpoints&lt;/b&gt;" style="text;html=1;align=left;verticalAlign=top;fontSize=11;fontColor=#b85450;" vertex="1" parent="1">
+          <mxGeometry x="775" y="255" width="160" height="20" as="geometry" />
+        </mxCell>
+        <mxCell id="ep-evaluate" value="&lt;font style=&quot;font-size:11px;&quot;&gt;&lt;b&gt;POST&lt;/b&gt; /api/v1/evaluate&lt;br/&gt;&lt;font style=&quot;font-size:9px;&quot;&gt;{event_type, zone_type, context} → Action[]&lt;/font&gt;&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#CC6666;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="775" y="280" width="310" height="34" as="geometry" />
+        </mxCell>
+        <mxCell id="ep-rules" value="&lt;font style=&quot;font-size:11px;&quot;&gt;&lt;b&gt;GET&lt;/b&gt;  /api/v1/rules&lt;br/&gt;&lt;font style=&quot;font-size:9px;&quot;&gt;List all loaded rules&lt;/font&gt;&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#CC6666;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="775" y="318" width="310" height="28" as="geometry" />
+        </mxCell>
+        <mxCell id="ep-health" value="&lt;font style=&quot;font-size:11px;&quot;&gt;&lt;b&gt;GET&lt;/b&gt;  /health&lt;br/&gt;&lt;font style=&quot;font-size:9px;&quot;&gt;Health check (used by Docker)&lt;/font&gt;&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#CC6666;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="775" y="350" width="310" height="28" as="geometry" />
+        </mxCell>
+
+        <!-- RuleEngine (core) -->
+        <mxCell id="engine" value="&lt;b&gt;RuleEngine&lt;/b&gt;&lt;br/&gt;&lt;font style=&quot;font-size:10px;&quot;&gt;engine.py&lt;br/&gt;• YAML-driven evaluator&lt;br/&gt;• Operators: eq/ne/gt/gte/lt/lte&lt;br/&gt;• Bracket field resolution&lt;br/&gt;• Zero parent-service imports&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#56964c;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="755" y="420" width="200" height="100" as="geometry" />
+        </mxCell>
+
+        <!-- models.py -->
+        <mxCell id="models" value="&lt;b&gt;models.py&lt;/b&gt;&lt;br/&gt;&lt;font style=&quot;font-size:10px;&quot;&gt;@dataclass Action&lt;br/&gt;type, params, rule_id&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#56964c;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="980" y="420" width="150" height="60" as="geometry" />
+        </mxCell>
+
+        <!-- loader.py -->
+        <mxCell id="loader" value="&lt;b&gt;loader.py&lt;/b&gt;&lt;br/&gt;&lt;font style=&quot;font-size:10px;&quot;&gt;YAML loading&lt;br/&gt;${var:default} resolution&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#56964c;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="980" y="500" width="150" height="60" as="geometry" />
+        </mxCell>
+
+        <!-- ===== External: configs/rules.yaml ===== -->
+        <mxCell id="rules-yaml" value="&lt;b&gt;configs/rules.yaml&lt;/b&gt;&lt;br/&gt;&lt;font style=&quot;font-size:9px;&quot;&gt;5 declarative rules:&lt;br/&gt;• restricted_zone&lt;br/&gt;• repeated_visits&lt;br/&gt;• behavioral_analysis&lt;br/&gt;• checkout_bypass&lt;br/&gt;• loitering&lt;/font&gt;" style="shape=note;whiteSpace=wrap;html=1;size=14;fillColor=#FFF9C4;strokeColor=#D6B656;fontSize=10;align=left;spacingLeft=6;" vertex="1" parent="1">
+          <mxGeometry x="1240" y="250" width="160" height="130" as="geometry" />
+        </mxCell>
+
+        <!-- ===== External: MQTT Broker ===== -->
+        <mxCell id="mqtt-broker" value="&lt;b&gt;Mosquitto MQTT&lt;/b&gt;&lt;br/&gt;&lt;font style=&quot;font-size:10px;&quot;&gt;SceneScape broker&lt;br/&gt;Port 1883 (plain)&lt;/font&gt;" style="shape=cylinder3;whiteSpace=wrap;html=1;size=10;fillColor=#f5f5f5;strokeColor=#666666;fontColor=#333333;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="100" y="700" width="160" height="70" as="geometry" />
+        </mxCell>
+
+        <!-- ===== External: SeaweedFS ===== -->
+        <mxCell id="seaweedfs" value="&lt;b&gt;SeaweedFS&lt;/b&gt;&lt;br/&gt;&lt;font style=&quot;font-size:10px;&quot;&gt;S3-compatible storage&lt;br/&gt;Port 8333&lt;/font&gt;" style="shape=cylinder3;whiteSpace=wrap;html=1;size=10;fillColor=#f5f5f5;strokeColor=#666666;fontColor=#333333;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="380" y="700" width="160" height="70" as="geometry" />
+        </mxCell>
+
+        <!-- ===== External: Gradio UI ===== -->
+        <mxCell id="gradio" value="&lt;b&gt;Gradio UI&lt;/b&gt;&lt;br/&gt;&lt;font style=&quot;font-size:10px;&quot;&gt;Port 7860&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;fontColor=#333333;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="100" y="810" width="140" height="50" as="geometry" />
+        </mxCell>
+
+        <!-- ============ ARROWS ============ -->
+
+        <!-- main → client: creates -->
+        <mxCell id="e1" style="edgeStyle=orthogonalEdgeStyle;rounded=1;strokeColor=#7B61FF;fontSize=10;" edge="1" source="main" target="client" parent="1">
+          <mxGeometry relative="1" as="geometry" />
+          <mxCell value="creates" style="edgeLabel;html=1;fontSize=9;fontColor=#7B61FF;" vertex="1" connectable="0" as="label">
+            <mxGeometry x="-0.1" relative="1" as="geometry" />
+          </mxCell>
+        </mxCell>
+
+        <!-- main → adapter: creates -->
+        <mxCell id="e2" style="edgeStyle=orthogonalEdgeStyle;rounded=1;strokeColor=#7B61FF;fontSize=10;" edge="1" source="main" target="adapter" parent="1">
+          <mxGeometry relative="1" as="geometry" />
+          <mxCell value="creates" style="edgeLabel;html=1;fontSize=9;fontColor=#7B61FF;" vertex="1" connectable="0" as="label">
+            <mxGeometry x="-0.1" relative="1" as="geometry" />
+          </mxCell>
+        </mxCell>
+
+        <!-- adapter → client: await evaluate() -->
+        <mxCell id="e3" style="edgeStyle=orthogonalEdgeStyle;rounded=1;strokeColor=#D84315;strokeWidth=2;fontSize=10;" edge="1" source="adapter" target="client" parent="1">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="300" y="345" />
+              <mxPoint x="300" y="260" />
+            </Array>
+          </mxGeometry>
+          <mxCell value="await evaluate()" style="edgeLabel;html=1;fontSize=9;fontColor=#D84315;fontStyle=1;" vertex="1" connectable="0" as="label">
+            <mxGeometry x="-0.1" relative="1" as="geometry" />
+          </mxCell>
+        </mxCell>
+
+        <!-- client ──HTTP──▸ server (cross-container) -->
+        <mxCell id="e4" style="rounded=1;strokeColor=#D84315;strokeWidth=3;fontSize=10;dashed=1;dashPattern=12 4;" edge="1" source="client" target="server" parent="1">
+          <mxGeometry relative="1" as="geometry" />
+          <mxCell value="&lt;b&gt;HTTP POST&lt;/b&gt;&lt;br/&gt;&lt;font style=&quot;font-size:9px;&quot;&gt;/api/v1/evaluate&lt;/font&gt;" style="edgeLabel;html=1;fontSize=10;fontColor=#D84315;" vertex="1" connectable="0" as="label">
+            <mxGeometry relative="1" as="geometry" />
+          </mxCell>
+        </mxCell>
+
+        <!-- server → engine -->
+        <mxCell id="e5" style="edgeStyle=orthogonalEdgeStyle;rounded=1;strokeColor=#56964c;fontSize=10;" edge="1" source="server" target="engine" parent="1">
+          <mxGeometry relative="1" as="geometry" />
+          <mxCell value="evaluate()" style="edgeLabel;html=1;fontSize=9;fontColor=#56964c;" vertex="1" connectable="0" as="label">
+            <mxGeometry relative="1" as="geometry" />
+          </mxCell>
+        </mxCell>
+
+        <!-- engine → models -->
+        <mxCell id="e6" style="rounded=1;strokeColor=#56964c;fontSize=10;" edge="1" source="engine" target="models" parent="1">
+          <mxGeometry relative="1" as="geometry" />
+          <mxCell value="returns Action[]" style="edgeLabel;html=1;fontSize=9;fontColor=#56964c;" vertex="1" connectable="0" as="label">
+            <mxGeometry relative="1" as="geometry" />
+          </mxCell>
+        </mxCell>
+
+        <!-- engine → loader -->
+        <mxCell id="e7" style="rounded=1;strokeColor=#56964c;fontSize=10;" edge="1" source="engine" target="loader" parent="1">
+          <mxGeometry relative="1" as="geometry" />
+          <mxCell value="load_rules()" style="edgeLabel;html=1;fontSize=9;fontColor=#56964c;" vertex="1" connectable="0" as="label">
+            <mxGeometry relative="1" as="geometry" />
+          </mxCell>
+        </mxCell>
+
+        <!-- loader → rules.yaml -->
+        <mxCell id="e8" style="rounded=1;strokeColor=#D6B656;fontSize=10;dashed=1;" edge="1" source="loader" target="rules-yaml" parent="1">
+          <mxGeometry relative="1" as="geometry" />
+          <mxCell value="reads" style="edgeLabel;html=1;fontSize=9;fontColor=#D6B656;" vertex="1" connectable="0" as="label">
+            <mxGeometry relative="1" as="geometry" />
+          </mxCell>
+        </mxCell>
+
+        <!-- mqtt-svc → adapter: RegionEvent -->
+        <mxCell id="e9" style="edgeStyle=orthogonalEdgeStyle;rounded=1;strokeColor=#6c8ebf;fontSize=10;" edge="1" source="mqtt-svc" target="adapter" parent="1">
+          <mxGeometry relative="1" as="geometry" />
+          <mxCell value="RegionEvent" style="edgeLabel;html=1;fontSize=9;fontColor=#6c8ebf;" vertex="1" connectable="0" as="label">
+            <mxGeometry relative="1" as="geometry" />
+          </mxCell>
+        </mxCell>
+
+        <!-- adapter → alert-pub -->
+        <mxCell id="e10" style="edgeStyle=orthogonalEdgeStyle;rounded=1;strokeColor=#6c8ebf;fontSize=10;" edge="1" source="adapter" target="alert-pub" parent="1">
+          <mxGeometry relative="1" as="geometry" />
+          <mxCell value="Alert" style="edgeLabel;html=1;fontSize=9;fontColor=#6c8ebf;" vertex="1" connectable="0" as="label">
+            <mxGeometry relative="1" as="geometry" />
+          </mxCell>
+        </mxCell>
+
+        <!-- adapter → session-mgr -->
+        <mxCell id="e11" style="edgeStyle=orthogonalEdgeStyle;rounded=1;strokeColor=#6c8ebf;fontSize=10;" edge="1" source="adapter" target="session-mgr" parent="1">
+          <mxGeometry relative="1" as="geometry" />
+          <mxCell value="PersonSession" style="edgeLabel;html=1;fontSize=9;fontColor=#6c8ebf;" vertex="1" connectable="0" as="label">
+            <mxGeometry relative="1" as="geometry" />
+          </mxCell>
+        </mxCell>
+
+        <!-- mqtt-svc ↔ mqtt-broker -->
+        <mxCell id="e12" style="rounded=1;strokeColor=#666666;fontSize=10;" edge="1" source="mqtt-svc" target="mqtt-broker" parent="1">
+          <mxGeometry relative="1" as="geometry" />
+          <mxCell value="MQTT" style="edgeLabel;html=1;fontSize=9;fontColor=#666666;" vertex="1" connectable="0" as="label">
+            <mxGeometry relative="1" as="geometry" />
+          </mxCell>
+        </mxCell>
+
+        <!-- alert-pub → seaweedfs -->
+        <mxCell id="e13" style="rounded=1;strokeColor=#666666;fontSize=10;" edge="1" source="alert-pub" target="seaweedfs" parent="1">
+          <mxGeometry relative="1" as="geometry" />
+          <mxCell value="S3 frames" style="edgeLabel;html=1;fontSize=9;fontColor=#666666;" vertex="1" connectable="0" as="label">
+            <mxGeometry relative="1" as="geometry" />
+          </mxCell>
+        </mxCell>
+
+        <!-- gradio → detection-service -->
+        <mxCell id="e14" style="rounded=1;strokeColor=#666666;fontSize=10;" edge="1" source="gradio" target="det-container" parent="1">
+          <mxGeometry relative="1" as="geometry" />
+          <mxCell value="HTTP :8082" style="edgeLabel;html=1;fontSize=9;fontColor=#666666;" vertex="1" connectable="0" as="label">
+            <mxGeometry relative="1" as="geometry" />
+          </mxCell>
+        </mxCell>
+
+        <!-- ===== Data Flow Legend ===== -->
+        <mxCell id="legend-box" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FAFAFA;strokeColor=#CCCCCC;" vertex="1" parent="1">
+          <mxGeometry x="1220" y="440" width="200" height="170" as="geometry" />
+        </mxCell>
+        <mxCell id="legend-title" value="&lt;b&gt;Legend&lt;/b&gt;" style="text;html=1;fontSize=11;fontColor=#333;" vertex="1" parent="1">
+          <mxGeometry x="1290" y="445" width="60" height="20" as="geometry" />
+        </mxCell>
+        <mxCell id="leg1" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;arcSize=8;" vertex="1" parent="1">
+          <mxGeometry x="1235" y="472" width="20" height="14" as="geometry" />
+        </mxCell>
+        <mxCell id="leg1t" value="detection-service" style="text;html=1;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="1260" y="469" width="120" height="20" as="geometry" />
+        </mxCell>
+        <mxCell id="leg2" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;arcSize=8;" vertex="1" parent="1">
+          <mxGeometry x="1235" y="496" width="20" height="14" as="geometry" />
+        </mxCell>
+        <mxCell id="leg2t" value="rule-engine" style="text;html=1;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="1260" y="493" width="120" height="20" as="geometry" />
+        </mxCell>
+        <mxCell id="leg3" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;arcSize=8;" vertex="1" parent="1">
+          <mxGeometry x="1235" y="520" width="20" height="14" as="geometry" />
+        </mxCell>
+        <mxCell id="leg3t" value="adapter / client layer" style="text;html=1;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="1260" y="517" width="140" height="20" as="geometry" />
+        </mxCell>
+        <mxCell id="leg4" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;arcSize=8;" vertex="1" parent="1">
+          <mxGeometry x="1235" y="544" width="20" height="14" as="geometry" />
+        </mxCell>
+        <mxCell id="leg4t" value="HTTP API layer" style="text;html=1;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="1260" y="541" width="120" height="20" as="geometry" />
+        </mxCell>
+        <mxCell id="leg5" value="" style="endArrow=classic;strokeColor=#D84315;strokeWidth=3;dashed=1;dashPattern=12 4;" edge="1" parent="1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="1235" y="575" as="sourcePoint" />
+            <mxPoint x="1255" y="575" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="leg5t" value="cross-container call" style="text;html=1;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="1260" y="565" width="140" height="20" as="geometry" />
+        </mxCell>
+        <mxCell id="leg6" value="" style="shape=note;size=8;fillColor=#FFF9C4;strokeColor=#D6B656;" vertex="1" parent="1">
+          <mxGeometry x="1235" y="590" width="20" height="16" as="geometry" />
+        </mxCell>
+        <mxCell id="leg6t" value="config file (volume mount)" style="text;html=1;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="1260" y="589" width="150" height="20" as="geometry" />
+        </mxCell>
+
+        <!-- ===== Docker Network Label ===== -->
+        <mxCell id="net-label" value="&lt;font style=&quot;font-size:10px;&quot;&gt;Docker network: &lt;b&gt;storewide-lp&lt;/b&gt;&lt;/font&gt;" style="text;html=1;align=center;verticalAlign=middle;fontColor=#999999;" vertex="1" parent="1">
+          <mxGeometry x="480" y="660" width="240" height="20" as="geometry" />
+        </mxCell>
+
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>
