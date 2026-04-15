@@ -1,0 +1,446 @@
+Store-wide Loss Prevention: Suspicious Activity Detection
+
+Overview
+The system detects suspicious activity in a retail store by combining real-time person tracking from SceneScape with lightweight pose detection and Vision Language Model (VLM) based confirmation. The system monitors person behavior across store zones and fires alerts when suspicious patterns are detected.
+The architecture follows a layered approach where a single application-specific service (LossPreventionService) owns session state and business logic, while leveraging generic reusable services (BehavioralAnalysisService, AlertService) for analysis and alerting capabilities.
+
+Suspicious Activities Addressed
+1. Merchandise Concealment
+A person in a high-value zone (electronics, jewelry, etc.) performs a shelf-to-waist hand motion — reaching toward shelf level and then bringing their hand to their waistband, pocket, or clothing interior. Detected by pose analysis and confirmed by VLM reviewing a 10-second frame sequence around the moment of flagging.
+2. Checkout Bypass
+A person visits one or more high-value zones during their session and then exits the store without passing through any checkout zone. 
+3. Loitering in High-Value Zone
+A person spends an unusually long time (configurable threshold, default 120 seconds) in a single high-value zone. Detected on region exit or when tracking is lost while still inside the zone.
+4. Repeated High-Value Zone Visits
+A person returns to the same high-value zone more than a configurable number of times (default: 3) within a single store session — a pattern associated with staged theft or reconnaissance.
+5. Restricted Zone Violation
+A person enters a region designated as restricted (stockroom, employee-only area, etc.). Triggers an immediate alert with no further evaluation required.
+ 
+
+System Components
+ 
+ 
+Component Roles and Responsibilities
+3.1 SceneScape
+SceneScape is Intel's multimodal object tracking and scene analytics platform. It serves as the foundational perception layer for this system.
+Responsibilities
+- Video ingestion from multiple camera streams
+- Per-camera object detection using deep learning models
+- Cross-camera tracking with persistent object identity assignment
+- Spatial analytics including region-of-interest (ROI) monitoring
+- Publishing all tracking data and events to the MQTT message bus
+Key Capabilities Used:
+- Persistent `object_id` assignment that survives camera transitions within a session
+- Region entry and exit event generation with automatic dwell time calculation on exit
+- Bounding box coordinates for each detected person per camera
+- Camera frame publishing on demand
+What SceneScape Does NOT Provide:
+- Session-level visit history (which regions a person visited earlier)
+- Visit counts per region per person
+These gaps are filled by the LossPreventionService session state.
+
+MQTT Topics Published by SceneScape:
+Topic Pattern	Purpose	Data Provided
+`scenescape/event/region/{scene_id}/{region_id}/count`	Region entry/exit events	`entered[]`, `exited[]` with `dwell`, `object_id`, `counts`
+`scenescape/data/camera/{camera_id}`	Per-camera detections	`objects[]` with `id`, `bbox`, `confidence`
+ `scenescape/image/camera/{camera_id}`	Camera frames	Base64 encoded image, `timestamp`
+
+3.4 Lossprevention Service (Application Service)
+The central service that owns all application-specific logic for loss prevention. This service combines MQTT subscription, session state management, and business rule execution into a single cohesive unit.
+
+Responsibilities:
+MQTT Subscription and Event Routing:
+- Subscribes directly to SceneScape MQTT topics
+- Parses incoming messages and routes to appropriate handlers
+- Manages connection lifecycle, reconnection, and error handling
+
+Session State Management:
+- Creates a PersonSession when a new `object_id` is first observed
+- Updates session on every relevant event (region entry/exit, camera detection)
+- Maintains per-person behavioral flags and visit history
+Field	Type	Purpose
+object_id	string	SceneScape's persistent person identifier
+first_seen	datetime	Session creation timestamp
+last_seen	datetime	Last activity timestamp for expiry
+
+visited_checkout	boolean	Whether the person entered any checkout zone
+visited_high_value	boolean	Whether the person entered any high-value zone
+zone_visit_counts	dict	Count of entries per region_id
+current_zones	dict	Currently occupied zones with entry timestamps
+loiter_alerted	dict	Tracks if a loiter alert has already been triggered per zone
+concealment_suspected	boolean	Set to true if VLM confirms suspicious behavior
+Business Logic Execution:
+- Evaluates rules on each region entry/exit event
+- Triggers pose analysis for persons in high-value zones
+- Escalates to VLM when suspicious patterns detected
+- Fires alerts through AlertService
+- Runs periodic background tasks (loiter check, session cleanup)
+4.3 SeaweedFS (Object Storage)
+
+SeaweedFS provides lightweight, S3-compatible object storage for frame data required by pose analysis and VLM escalation. SeaweedFS is chosen over alternatives for its simplicity, low resource footprint, and fast small-object performance — ideal for storing cropped person frames.
+
+Responsibilities:
+- Stores cropped person frames for pose analysis sliding window
+- Retains frames for VLM evidence assembly
+- Provides fast retrieval for real-time processing
+- Manages automatic expiration of old frames via lifecycle policies
+
+Storage Design:
+
+What Gets Stored:
+Only cropped person frames for individuals currently in HIGH_VALUE zones. Full camera frames are not stored — only the bounding box crop for each tracked person.
+
+Storage Frequency:
+Frames are stored at 2 frames per second (fps) per person in a high-value zone. This rate balances pose detection accuracy (need enough frames to detect motion patterns) against storage and compute costs.
+
+Bucket Structure:
+```
+bucket: loss-prevention-frames
+├── {object_id}/
+│   ├── {timestamp_1}.jpg    # Cropped person frame
+│   ├── {timestamp_2}.jpg
+│   └── ...                  # Rolling buffer of last 20 frames (~10 seconds)
+└── alerts/
+    └── {alert_id}/
+        └── evidence/        # Frames sent to VLM, retained for audit
+```
+
+Rolling Buffer Management:
+Each person has a rolling buffer of the last 20 frames (10 seconds at 2fps). When a new frame arrives, it is written to SeaweedFS and the oldest frame beyond the buffer size is deleted. This ensures storage remains bounded regardless of session duration.
+
+Retention Policy:
+- Active person frames: retained while person is in high-value zone plus 60 seconds after exit
+- Alert evidence frames: retained for 24 hours (configurable) for audit purposes
+- Lifecycle policy automatically deletes expired objects
+
+Storage Sizing Estimate:
+- Average crop size: 15-20 KB (JPEG, 150x300 pixels typical)
+- Per person in high-value zone: 20 frames × 20 KB = 400 KB
+- 10 concurrent persons: 4 MB active storage
+- Alert evidence (20 frames): 400 KB per alert, retained 24 hours
+
+
+3.5 BehavioralAnalysis Service (Generic Service)
+A reusable service that provides pose detection, motion pattern analysis, and VLM integration. This service has no knowledge of loss prevention concepts — it operates on generic entities and patterns.
+Responsibilities:
+
+Pose Detection:
+- Receives cropped person frames
+- Runs lightweight pose estimation model (OpenVINO human-pose-estimation-0001)
+- Extracts keypoints with confidence scores
+- Returns structured pose data to caller
+
+Pose History Management:
+- Maintains sliding window of recent pose frames per entity_id
+- Window size configurable (default: 20 frames)
+- Automatically evicts oldest frames when window is full
+- Provides history retrieval for pattern matching
+
+Motion Pattern Detection:
+- Accepts pattern definitions from config file
+- Evaluates pose history against pattern criteria
+- Returns match result with confidence
+- Pattern-agnostic — same service can detect different patterns for different applications
+
+VLM Integration:
+- Accepts prompt from config file
+- Sends to VLM service with structured request
+- Parses VLM response according to provided schema
+- Returns analysis result to caller
+
+Why This Service is Generic:
+The service knows nothing about "shelf-to-waist" or "concealment." It simply:
+1. Detects poses in images
+2. Stores pose history by entity ID
+3. Matches pose sequences against configured patterns
+4. Sends frames to VLM with configured prompts
+
+This allows reuse in other applications (queue frustration detection, workplace safety, gesture recognition) by providing different patterns and prompts.
+
+4.5 AlertService (Generic Service)
+
+A reusable service for alert publication and routing.
+
+Responsibilities:
+- Publishes alerts to configured destinations (MQTT, webhook, logging)
+- Provides alert type registration and schema validation
+- Implements deduplication to prevent alert flooding
+- Supports severity levels and escalation rules
+- Maintains alert history for audit
+
+**Alert Structure:**
+Field	Type	Description
+alert_id	UUID	Unique identifier
+alert_type	enum	CONCEALMENT, CHECKOUT_BYPASS, LOITERING, etc.
+severity	enum	INFO, WARNING, CRITICAL
+object_id	string	Person identifier
+timestamp	datetime	Alert generation time
+evidence	list	SeaweedFS keys for related frames
+metadata	dict	Type-specific additional data
+5. Loitering Detection — Approaches and Recommendation
+
+Loitering detection must handle two scenarios:
+1. **On Exit:** Detecting when a person exits a zone after staying too long
+2. **While Still in Zone:** Detecting when a person is currently in a zone and has exceeded the threshold (proactive alerting)
+
+For scenario 1, SceneScape provides dwell time in exit events — no design decision needed. For scenario 2, two approaches were evaluated.
+
+---
+
+5.1 On-Exit Detection (Always Used)
+
+How It Works:
+SceneScape automatically calculates dwell time when a person exits a region. The exit event includes a `dwell` field containing the time in seconds the person spent in the region.
+
+Implementation:
+When LossPreventionService receives a region exit event, it checks if the region type is HIGH_VALUE and if the dwell time exceeds the configured threshold. If so, it fires a LOITERING alert.
+
+Advantages:
+- Zero additional state tracking required — SceneScape does the calculation
+- Guaranteed accuracy — dwell time comes from the authoritative tracking source
+- No polling overhead
+- Simple implementation
+
+Limitations:
+- Only fires on exit — cannot alert while person is still in zone
+- If person never exits (tracking lost, store closes), alert may not fire
+
+This approach is always used and requires no design decision. The design question is how to detect loitering while the person is still in the zone.
+
+---
+
+5.2 Active Loitering Detection — Two Approaches Evaluated
+
+5.2.1 Approach A: Streaming Region Data
+
+How It Works:
+Subscribe to SceneScape's streaming region data topic: `scenescape/data/region/{scene_id}/{region_id}/{object_type}`. This topic provides continuous real-time updates for all objects currently within the region. Each object in the payload contains a `regions` field with the entry timestamp (`regions.{region_id}.entered`). On each message, calculate `now - entered` for each object and fire an alert if it exceeds the threshold.
+
+SceneScape Topic:
+```
+scenescape/data/region/{scene_id}/{region_id}/person
+```
+
+Data Provided:
+Each message contains all persons currently in the region, with each person object including:
+- `id` — object identifier
+- `regions.{region_id}.entered` — ISO timestamp when person entered
+
+Advantages:
+- Real-time detection — alert fires immediately when threshold is crossed
+- No internal timer or polling needed
+- Entry timestamp comes from SceneScape (authoritative)
+
+Disadvantages:
+- High message volume — continuous updates for every person in every monitored region
+- Must subscribe to one topic per HIGH_VALUE region (multiple subscriptions)
+- Processing overhead — must parse every message and calculate dwell for all objects
+- Network bandwidth consumption scales with number of regions × persons
+- Redundant data — most messages contain no actionable information (person still under threshold)
+
+5.2.2 Approach B: Entry Event + Periodic Timer (Recommended)
+
+How It Works:
+Subscribe only to region entry/exit events (`scenescape/event/region/+/+/count`). When a person enters a HIGH_VALUE zone, record the entry timestamp in the session's `current_zones` dictionary. A background task runs periodically (every 30 seconds) and checks all active sessions. For each person currently in a high-value zone, calculate `now - entry_time` and fire an alert if it exceeds the threshold.
+
+SceneScape Topic:
+```
+scenescape/event/region/{scene_id}/{region_id}/count
+```
+
+Data Provided:
+Entry events contain `entered[]` array with objects that just entered. Exit events contain `exited[]` array with `dwell` time.
+
+Advantages:
+- Low message volume — only fires on entry/exit, not continuously
+- Single wildcard subscription covers all regions
+- Minimal processing — only handle discrete events
+- Predictable resource usage — scales with event rate, not person count
+- Already subscribed to this topic for other detections (checkout bypass, restricted zone)
+
+Disadvantages:
+- Detection latency — up to timer interval (30 seconds) delay after threshold crossed
+- Requires internal state — must track entry timestamps per person per zone
+- Background task complexity — need to manage periodic execution
+
+6.3 Data Flow for Frame Processing
+
+```
+1. Camera image arrives on MQTT
+   └── scenescape/image/camera/{camera_id}
+
+2. Camera detection data arrives on MQTT
+   └── scenescape/data/camera/{camera_id}
+   └── Contains: object_id, bounding_box for each person
+
+3. LossPreventionService correlates image + detections by timestamp
+
+4. For each detection:
+   ├── Is object_id in a HIGH_VALUE zone? (check session.current_zones)
+   │   └── NO → skip
+   └── YES →
+       ├── Throttle check: has 500ms elapsed since last frame?
+       │   └── NO → skip
+       └── YES →
+           ├── Crop frame using bounding box
+           ├── Write crop to SeaweedFS: {object_id}/{timestamp}.jpg
+           ├── Update rolling buffer (delete oldest if > 20 frames)
+           └── Call BehavioralAnalysisService.analyze(object_id, frame, pattern)
+
+5. Inside BehavioralAnalysisService.analyze():
+   ┌─────────────────────────────────────────────────────────────────────┐
+   │ a. Run pose detection on frame → extract keypoints                  │
+   │                                                                     │
+   │ b. Append keypoints to pose_history[object_id]                      │
+   │    └── Sliding window: keep last 10 frames                          │
+   │                                                                     │
+   │ c. Check if pose_history has enough frames (minimum 10)             │
+   │    └── NO → return AnalysisResult(status="accumulating")            │
+   │                                                                     │
+   │ d. Evaluate pattern against pose_history                            │
+   │    └── NO match → return AnalysisResult(status="no_match")          │
+   │                                                                     │
+   │ e. PATTERN MATCH detected → escalate to VLM:                        │
+   │    ├── Retrieve last 10 frames from SeaweedFS                       │
+   │    ├── Wait for next 10 frames (async collection)                   │
+   │    ├── Call VLM with 20 frames + prompt                             │
+   │    └── return AnalysisResult(status="vlm_complete", vlm_result)     │
+   └─────────────────────────────────────────────────────────────────────┘
+
+6. LossPreventionService receives AnalysisResult:
+   ├── status="accumulating" → continue (not enough frames yet)
+   ├── status="no_match" → continue monitoring
+   └── status="vlm_complete" →
+       ├── Check vlm_result.confidence
+       ├── If >= 0.80 → set session.concealment_suspected = True
+       └── Fire CONCEALMENT alert via AlertService
+```
+
+Key Design Points:
+
+1. **Frame writes happen immediately** — Every throttled frame is written to SeaweedFS regardless of pose analysis outcome. This ensures the rolling buffer is always populated for VLM escalation.
+
+2. **BehavioralAnalysisService is called on every frame** — But it only performs pose detection and history accumulation. Pattern matching happens internally once enough frames exist.
+
+3. **Pose history accumulation** — The first 9 frames return `status="accumulating"`. Only after 10+ frames does pattern matching begin.
+
+4. **VLM escalation is internal to BehavioralAnalysisService** — LossPreventionService never sees intermediate pose keypoints. It only receives the final result: no match, or VLM confirmation/denial.
+
+5. **SeaweedFS access by BehavioralAnalysisService** — When VLM escalation triggers, BehavioralAnalysisService reads frames directly from SeaweedFS using the object_id path convention.
+
+)
+6. **Why SeaweedFS:**
+- Lightweight — single binary deployment, low memory footprint
+- Fast small-object storage — optimized for files under 1MB (typical frame crop is 15-20KB)
+- S3-compatible API — familiar interface, easy migration if needed
+- Built-in TTL — per-object expiration without external lifecycle policies
+- Horizontal scaling — can add volume servers as storage needs grow
+
+---
+
+## 7. Pose Detection — Shelf-to-Waist Pattern
+
+### 7.1 Sliding Window Design
+
+BehavioralAnalysisService maintains a sliding window of the last 10 pose frames (approximately 5 seconds at 2fps) per person. On each pose detection result, the new keypoints are appended and the oldest entry is dropped if the window exceeds 10 frames.
+
+### 7.2 Keypoints Used
+
+Only four keypoints are required:
+- Left wrist
+- Right wrist
+- Left hip
+- Right hip
+
+The waist midpoint is computed as the average of left hip and right hip positions.
+
+### 7.3 The Two-Step Check
+
+**Step 1 — Hand at Shelf Level (Earlier Frames):**
+In the first half of the window (frames 1-5), at least 2 consecutive frames must show:
+- `wrist_y < hip_midpoint_y` (hand raised above waist in image coordinates)
+- Wrist keypoint confidence > 0.5
+
+This confirms the hand was raised to shelf level, not just a passing position.
+
+**Step 2 — Hand at Waist (Later Frames):**
+In the second half of the window (frames 6-10), at least 3 consecutive frames must show:
+- `euclidean_distance(wrist, waist_midpoint) < 0.10` (normalized coordinates)
+- Wrist keypoint confidence > 0.5
+
+This confirms the hand came down and dwelled near the waistband.
+
+**Escalation Condition:**
+- Step 1 confirmed in frames 1-5
+- AND Step 2 confirmed in frames 6-10
+- AND the same wrist (left or right) triggered both steps
+
+When all conditions are met, the pattern is flagged and escalated to VLM.
+
+### 7.4 Why This Specific Pattern
+
+This is intentionally the minimum viable pose signal. It detects the single most physically specific gesture of concealment — the reach-and-pocket motion. The VLM then confirms whether merchandise was actually involved.
+
+This approach minimizes false positives (random arm movements) while catching the core suspicious gesture. Additional patterns (crouching, back-to-camera, repeated reaches) can be added later without architectural changes.
+
+---
+
+## 8. VLM Escalation — Concealment Confirmation
+
+### 8.1 Trigger Condition
+
+VLM analysis is triggered only after the shelf-to-waist pose pattern is detected. This ensures the expensive VLM call (300-500ms) is made only for genuinely suspicious cases.
+
+
+### 8.3 VLM Prompt
+
+The prompt provides context about what pose detection observed and asks for structured analysis:
+
+```
+You are analyzing security camera footage for potential merchandise concealment.
+
+Context: Pose detection identified a hand motion from shelf level to waist area for the highlighted person.
+
+Task: Review the 20-frame sequence and determine if merchandise concealment occurred.
+
+Respond with JSON:
+{
+  "concealment_occurred": boolean,
+  "confidence": float (0.0-1.0),
+  "key_frame_index": integer (most telling frame),
+  "observation": string (plain language description of what you observed)
+}
+```
+Decision:
+	Confidence >= 0.80: session.concealment_suspected = True, fire CONCEALMENT alert at WARNING level
+	Confidence 0.50–0.79: log internally, no alert, continue monitoring
+	Confidence < 0.50: ignore, resume normal monitoring
+
+10: Benchmarking
+10.1 Primary Metrics
+Three metrics are measured. Resource utilization and stream density are collected by the existing performance-tools framework (shared submodule). Two new KPI extractors are added for this use case.
+ 
+Metric	Definition	
+End-to-end latency L_e2e	T_alert-T_image, where T_image is the frame timestamp in the SceneScape image MQTT message and T_alert is the alert publish time	
+VLM call duration	Wall time from first frame submitted to VLM to response received	
+Resource utilization	CPU %, Memory %, GPU Compute %, NPU %, Socket Power W, Disk Write MB/s	
+
+
+Gap Analysis
+The following items are identified as future scope — not addressed in the current design but required for full compliance with Requirement 2. They are documented here so they can be planned as follow-on work without affecting the core detection pipeline delivery.
+________________________________________
+Gap 1 — ReID Pipeline
+Requirement: Cross-camera tracking must include ReID embeddings extracted by our own pipeline using OpenVINO person-reidentification-retail-0277 INT8. All embeddings stored in a vector database (FAISS) with 24-hour configurable retention. Gallery scaling benchmarks required at 30, 100, and 500 active persons.
+Current design scope: Cross-camera identity relies on SceneScape's persistent object_id. This handles the real-time tracking case correctly within a session. ReID embedding extraction, vector DB storage, and gallery-based identity matching are not part of the current design.
+Gap 2 — Offline VLM Recall Pipeline
+Requirement: An investigator can query the system in natural language (e.g., "person in blue shirt near aisle 7 between 2–3pm"). The system parses the query into structured attributes via VLM, searches the stored vector DB with metadata filtering, and returns ranked results with thumbnails and camera timelines. Target query latency: < 500ms at 1M vectors, < 2s at 10M vectors.
+Current design scope: The current design covers only the real-time detection pipeline. No offline query capability exists.
+Future scope: Add a POST /api/v1/recall endpoint. VLM parses the natural language query into structured attributes (clothing color, clothing type, time range, camera zone). FAISS search is filtered by metadata. Results are ranked by relevance score and returned with MinIO thumbnail keys and camera appearance timelines. 
+Gap 3 — Storage Scaling Measurement
+Requirement: Storage growth must be reported as a measured curve — MB per camera per hour under low (5 persons/cam/hr), medium (20 persons/cam/hr), and high (50 persons/cam/hr) foot traffic conditions. Partners need this to size their MinIO or disk deployment. Metadata and thumbnail overhead must be reported separately from raw embedding storage.
+Current design scope: MinIO bucket structure and TTL policies are defined. Actual storage growth measurement under varying foot traffic conditions is not included in the benchmarking protocol.
+Future scope: Add a storage measurement task to the benchmark harness that records MinIO object count and total bytes consumed at each reporting interval (5, 15, 30 minutes) during the stream density test. Run dedicated foot traffic sensitivity tests at low, medium, and high person-per-camera-per-hour rates. Publish a storage sizing rule of thumb: "For every 10 cameras at moderate traffic, budget X GB per 24 hours
+Gap 4 — Performance-Tools KPI Integration
+Requirement: New KPI extractors must be integrated into the shared performance-tools submodule following existing KPIExtractor patterns. Required KPIs: ReID_Inference_Latency_ms, Gallery_Size_Active_Persons, ReID_Match_Latency_ms, Vector_DB_Write_Throughput_per_sec, Cross_Camera_Handoff_Time_sec. Results must feed into make consolidate-metrics alongside other Intel-Retail repo benchmarks.
+Current design scope: The benchmarking section defines what latency and resource utilization metrics to capture, including end-to-end alert latency, VLM call duration, and hardware resource utilization (CPU, GPU, NPU, memory, power draw). These are logged in structured format from PersonTracker and BehavioralAnalysis.
+
