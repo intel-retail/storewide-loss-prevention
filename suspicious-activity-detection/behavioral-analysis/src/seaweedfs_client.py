@@ -1,9 +1,7 @@
 # Copyright (C) 2026 Intel Corporation
 # SPDX-License-Identifier: Apache-2.0
 """
-Frame Store Client for SeaweedFS
-
-Handles reading and writing cropped person frames to SeaweedFS.
+SeaweedFS Client — reads and deletes behavioral-analysis frames.
 """
 
 import logging
@@ -19,9 +17,9 @@ import numpy as np
 logger = logging.getLogger(__name__)
 
 
-class FrameStore:
+class SeaweedFSClient:
     """
-    Async client for storing and retrieving frames from SeaweedFS.
+    Async client for retrieving and deleting frames from SeaweedFS.
 
     Storage Structure:
         bucket: behavioral-frames
@@ -108,52 +106,6 @@ class FrameStore:
                 else:
                     logger.error(f"Failed to ensure bucket after retries: {e}")
                     raise
-
-    async def store_frame(
-        self,
-        entity_id: str,
-        frame: np.ndarray,
-        timestamp: Optional[int] = None,
-        region_id: Optional[str] = None,
-    ) -> str:
-        """
-        Store a cropped person frame.
-
-        Args:
-            entity_id: Entity identifier (person tracking ID)
-            frame: OpenCV image (BGR numpy array)
-            timestamp: Unix timestamp in milliseconds (auto-generated if not provided)
-            region_id: Region/zone identifier
-
-        Returns:
-            S3 key of stored frame
-        """
-        if timestamp is None:
-            timestamp = int(datetime.utcnow().timestamp() * 1000)
-
-        # Encode frame as JPEG
-        _, buffer = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 85])
-        frame_bytes = buffer.tobytes()
-
-        # S3 key: {entity_id}/{region_id}/frames/{timestamp}.jpg
-        if region_id:
-            key = f"{entity_id}/{region_id}/frames/{timestamp}.jpg"
-        else:
-            key = f"{entity_id}/frames/{timestamp}.jpg"
-
-        try:
-            async with self._get_client() as client:
-                await client.put_object(
-                    Bucket=self.bucket,
-                    Key=key,
-                    Body=frame_bytes,
-                    ContentType="image/jpeg",
-                )
-            logger.debug(f"Stored frame: {key}")
-            return key
-        except Exception as e:
-            logger.error(f"Failed to store frame {key}: {e}")
-            raise
 
     async def get_frames(
         self,
@@ -299,68 +251,4 @@ class FrameStore:
             logger.error(f"Failed to delete frames for {entity_id}: {e}")
             return deleted_count
 
-    async def cleanup_old_frames(
-        self,
-        entity_id: str,
-        max_frames: int = 20,
-        region_id: Optional[str] = None,
-    ) -> int:
-        """
-        Remove old frames beyond the rolling buffer limit.
 
-        Args:
-            entity_id: Entity identifier
-            max_frames: Maximum frames to keep
-            region_id: Region/zone identifier
-
-        Returns:
-            Number of frames deleted
-        """
-        if region_id:
-            prefix = f"{entity_id}/{region_id}/frames/"
-        else:
-            prefix = f"{entity_id}/frames/"
-        deleted_count = 0
-
-        try:
-            async with self._get_client() as client:
-                # List all frames
-                response = await client.list_objects_v2(
-                    Bucket=self.bucket,
-                    Prefix=prefix,
-                )
-
-                if "Contents" not in response:
-                    return 0
-
-                # Sort by timestamp
-                frame_keys = []
-                for obj in response["Contents"]:
-                    key = obj["Key"]
-                    try:
-                        filename = key.split("/")[-1]
-                        timestamp = int(filename.replace(".jpg", ""))
-                        frame_keys.append((key, timestamp))
-                    except ValueError:
-                        continue
-
-                frame_keys.sort(key=lambda x: x[1])
-
-                # Delete oldest frames if over limit
-                frames_to_delete = len(frame_keys) - max_frames
-                if frames_to_delete > 0:
-                    for key, _ in frame_keys[:frames_to_delete]:
-                        try:
-                            await client.delete_object(
-                                Bucket=self.bucket,
-                                Key=key,
-                            )
-                            deleted_count += 1
-                        except Exception as e:
-                            logger.warning(f"Failed to delete {key}: {e}")
-
-                return deleted_count
-
-        except Exception as e:
-            logger.error(f"Failed to cleanup frames for {entity_id}: {e}")
-            return deleted_count

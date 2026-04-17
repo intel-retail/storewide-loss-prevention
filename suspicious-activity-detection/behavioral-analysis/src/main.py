@@ -17,7 +17,7 @@ from pydantic import BaseModel
 from typing import Optional
 
 from pose_analyzer import PoseAnalyzer
-from frame_store import FrameStore
+from seaweedfs_client import SeaweedFSClient
 from vlm_client import VLMClient
 from ba_queue import BAQueueConsumer
 from config import Settings, load_pattern_config
@@ -59,7 +59,7 @@ async def lifespan(app: FastAPI):
         vlm_client=vlm_client,
         pattern_config=pattern_config,
     )
-    app.state.frame_store = FrameStore(
+    app.state.frame_store = SeaweedFSClient(
         endpoint=settings.seaweedfs_endpoint,
         bucket=settings.seaweedfs_bucket,
         access_key=settings.seaweedfs_access_key,
@@ -135,7 +135,7 @@ class HealthResponse(BaseModel):
 @app.get("/health", response_model=HealthResponse)
 async def health_check():
     """Check service health."""
-    frame_store: FrameStore = app.state.frame_store
+    frame_store: SeaweedFSClient = app.state.frame_store
     pose_analyzer: PoseAnalyzer = app.state.pose_analyzer
 
     return HealthResponse(
@@ -157,7 +157,7 @@ async def analyze_activity(request: AnalyzeRequest):
     4. Run pattern detection on pose sequence
     5. Return result
     """
-    frame_store: FrameStore = app.state.frame_store
+    frame_store: SeaweedFSClient = app.state.frame_store
     pose_analyzer: PoseAnalyzer = app.state.pose_analyzer
 
     entity_id = request.entity_id
@@ -271,7 +271,7 @@ async def analyze_activity(request: AnalyzeRequest):
 @app.delete("/api/v1/entities/{entity_id}/frames")
 async def clear_entity_frames(entity_id: str, region_id: Optional[str] = None):
     """Clear all frames for an entity (optionally scoped to a region)."""
-    frame_store: FrameStore = app.state.frame_store
+    frame_store: SeaweedFSClient = app.state.frame_store
 
     try:
         deleted_count = await frame_store.delete_frames(entity_id, region_id=region_id)
