@@ -35,7 +35,6 @@ class RuleEngineAdapter:
         config: ConfigService,
         session_manager: SessionManager,
         alert_service_client: AlertServiceClient | None = None,
-        behavioral_analysis_client=None,
         frame_manager=None,
         ba_publisher=None,
     ) -> None:
@@ -43,7 +42,6 @@ class RuleEngineAdapter:
         self.config = config
         self.session_mgr = session_manager
         self._alert_client = alert_service_client
-        self._ba_client = behavioral_analysis_client
         self._frame_mgr = frame_manager
         self._ba_publisher = ba_publisher
 

@@ -35,7 +35,6 @@ from services.rule_engine import RuleEngine
 from services.rule_adapter import RuleEngineAdapter
 from services.frame_manager import FrameManager
 from services.scenescape_client import SceneScapeClient
-from services.behavioral_analysis_client import BehavioralAnalysisClient
 from services.alert_service_client import AlertServiceClient
 from services.ba_queue import BAQueuePublisher, BAQueueConsumer
 
@@ -198,9 +197,6 @@ async def lifespan(app: FastAPI):
     alert_svc_client = AlertServiceClient(config)
     app.state.alert_service_client = alert_svc_client
 
-    ba_client = BehavioralAnalysisClient(config)
-    app.state.behavioral_analysis_client = ba_client
-
     # 4b. BA MQTT queue (publisher + result consumer)
     ba_publisher = BAQueuePublisher(mqtt_svc)
     app.state.ba_publisher = ba_publisher
@@ -225,7 +221,6 @@ async def lifespan(app: FastAPI):
     rule_adapter = RuleEngineAdapter(
         rule_engine, config, session_mgr,
         alert_service_client=alert_svc_client,
-        behavioral_analysis_client=ba_client,
         frame_manager=frame_mgr,
         ba_publisher=ba_publisher,
     )
