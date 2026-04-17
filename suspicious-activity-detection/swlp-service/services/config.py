@@ -117,6 +117,9 @@ class ConfigService:
     def get_behavioral_analysis_config(self) -> dict:
         return self._app_cfg.get("behavioral_analysis", {})
 
+    def get_alert_service_config(self) -> dict:
+        return self._app_cfg.get("alert_service", {})
+
     def get_rule_service_config(self) -> dict:
         return self._app_cfg.get("rule_service", {})
 

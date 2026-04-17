@@ -6,7 +6,6 @@ from .mqtt_service import MQTTService
 from .session_manager import SessionManager
 from .rule_engine import RuleEngine
 from .rule_adapter import RuleEngineAdapter
-from .alert_publisher import AlertPublisher
 
 __all__ = [
     "ConfigService",
@@ -14,5 +13,4 @@ __all__ = [
     "SessionManager",
     "RuleEngine",
     "RuleEngineAdapter",
-    "AlertPublisher",
 ]

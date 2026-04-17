@@ -4,14 +4,13 @@
 Behavioral Analysis Client — calls external BehavioralAnalysis Service via HTTP.
 
 The BehavioralAnalysis Service (separate container) handles:
-  - Pose analysis (shelf-to-waist gesture detection)
-  - VLM-based concealment confirmation
+  - Pose analysis (shelf-to-waist gesture detection via YOLO-Pose)
 
-This client sends frame data / references and receives analysis results.
-Called conditionally when a person is in a HIGH_VALUE zone.
+The BA service fetches frames directly from SeaweedFS (behavioral-frames bucket).
+This client only sends entity_id + pattern_id.
 """
 
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 
 import aiohttp
 import structlog
@@ -25,13 +24,13 @@ class BehavioralAnalysisClient:
     """
     HTTP client for the external BehavioralAnalysis Service.
 
-    Sends cropped person frames for analysis. The behavioral service
-    owns all analysis logic (pose detection, VLM escalation, etc.).
+    The BA service reads frames from SeaweedFS on its own —
+    this client only sends entity_id and pattern_id.
     """
 
     def __init__(self, config: ConfigService) -> None:
         ba_cfg = config.get_behavioral_analysis_config()
-        self.base_url = ba_cfg.get("base_url", "http://behavioral-analysis-service:8090")
+        self.base_url = ba_cfg.get("base_url", "http://behavioral-analysis:8080")
         self.timeout = ba_cfg.get("timeout_seconds", 30)
         self.enabled = ba_cfg.get("enabled", True)
 
@@ -43,22 +42,25 @@ class BehavioralAnalysisClient:
 
     async def analyze(
         self,
-        object_id: str,
-        frame_keys: List[str],
-        frames_base64: List[str],
-        zone_info: Optional[Dict[str, Any]] = None,
+        entity_id: str,
+        pattern_id: str = "shelf_to_waist",
+        region_id: Optional[str] = None,
+        entry_timestamp: Optional[str] = None,
     ) -> Optional[Dict[str, Any]]:
         """
-        Send frames to the BehavioralAnalysis Service for analysis.
+        Ask the BehavioralAnalysis Service to analyze frames for an entity.
 
-        The service handles pose detection, VLM escalation, etc. internally.
+        The service fetches frames from SeaweedFS itself.
 
         Returns:
             {
-                "concealment_suspected": bool,
-                "confidence": float,
-                "observation": str,
-                ...
+                "entity_id": str,
+                "status": "no_data" | "accumulating" | "no_match" | "suspicious",
+                "frames_available": int,
+                "frames_required": int,
+                "confidence": float | None,
+                "pattern_id": str | None,
+                "message": str | None,
             }
             or None on failure.
         """
@@ -66,13 +68,22 @@ class BehavioralAnalysisClient:
             return None
 
         payload = {
-            "object_id": object_id,
-            "frame_keys": frame_keys,
-            "frames": frames_base64,
-            "zone_info": zone_info or {},
+            "entity_id": entity_id,
+            "pattern_id": pattern_id,
         }
+        if region_id:
+            payload["region_id"] = region_id
+        if entry_timestamp:
+            payload["entry_timestamp"] = entry_timestamp
 
         return await self._post("/api/v1/analyze", payload)
+
+    async def delete_frames(self, entity_id: str, region_id: Optional[str] = None) -> bool:
+        """Tell the BA service to clear stored frames for an entity."""
+        url = f"/api/v1/entities/{entity_id}/frames"
+        if region_id:
+            url += f"?region_id={region_id}"
+        return await self._delete(url)
 
     async def health_check(self) -> bool:
         """Check if the BehavioralAnalysis service is available."""
@@ -113,3 +124,16 @@ class BehavioralAnalysisClient:
         except Exception:
             logger.exception("BehavioralAnalysis call error", path=path)
             return None
+
+    async def _delete(self, path: str) -> bool:
+        url = f"{self.base_url}{path}"
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.delete(
+                    url,
+                    timeout=aiohttp.ClientTimeout(total=self.timeout),
+                ) as resp:
+                    return resp.status == 200
+        except Exception:
+            logger.exception("BehavioralAnalysis DELETE error", path=path)
+            return False

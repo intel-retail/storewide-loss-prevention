@@ -21,6 +21,7 @@ from models.alerts import Alert, AlertType, AlertLevel
 from .config import ConfigService
 from .session_manager import SessionManager
 from .rule_engine import RuleEngine, Action
+from .alert_service_client import AlertServiceClient
 
 logger = structlog.get_logger(__name__)
 
@@ -33,28 +34,33 @@ class RuleEngineAdapter:
         engine: RuleEngine,
         config: ConfigService,
         session_manager: SessionManager,
-        alert_callback=None,
+        alert_service_client: AlertServiceClient | None = None,
         behavioral_analysis_client=None,
         frame_manager=None,
+        ba_publisher=None,
     ) -> None:
         self._engine = engine
         self.config = config
         self.session_mgr = session_manager
-        self._alert_callback = alert_callback
+        self._alert_client = alert_service_client
         self._ba_client = behavioral_analysis_client
         self._frame_mgr = frame_manager
+        self._ba_publisher = ba_publisher
 
         rules_cfg = config.get_rules_config()
         self.loiter_poll_interval = rules_cfg.get("loiter_poll_interval_seconds", 60)
+        self.ba_poll_interval = rules_cfg.get("ba_poll_interval_seconds", 1)
+        self._pending_cleanups: set[str] = set()  # track scheduled cleanups by "{object_id}:{region_id}"
 
         logger.info(
             "RuleEngineAdapter initialized",
             loiter_poll_interval=self.loiter_poll_interval,
+            ba_poll_interval=self.ba_poll_interval,
             rules_loaded=len(engine.rules),
         )
 
-    def set_alert_callback(self, callback) -> None:
-        self._alert_callback = callback
+    def set_alert_client(self, client: AlertServiceClient) -> None:
+        self._alert_client = client
 
     # ---- main entry point (same signature as old RuleEngine.on_event) ---------
 
@@ -83,6 +89,17 @@ class RuleEngineAdapter:
                 logger.info("Checkout visited", object_id=event.object_id)
             elif event.zone_type == ZoneType.EXIT:
                 session.visited_exit = True
+
+        elif event.event_type == EventType.EXITED:
+            if event.zone_type == ZoneType.HIGH_VALUE:
+                cleanup_key = f"{event.object_id}:{event.region_id}"
+                if cleanup_key not in self._pending_cleanups:
+                    self._pending_cleanups.add(cleanup_key)
+                    asyncio.create_task(
+                        self._deferred_frame_cleanup(
+                            event.object_id, event.region_id, event.region_name, event.dwell_seconds,
+                        )
+                    )
 
         # ---- Map event_type to rule trigger string ----
         trigger_event = (
@@ -279,72 +296,153 @@ class RuleEngineAdapter:
             except Exception:
                 logger.exception("Error in loiter check loop")
 
+    # ---- active BA polling ---------------------------------------------------
+
+    async def run_ba_check_loop(self) -> None:
+        """
+        Background task: periodically publish BA requests for persons in HIGH_VALUE zones.
+        Publishes to MQTT ba/requests topic; results come back via ba/results.
+        """
+        if not self._ba_publisher:
+            logger.info("No BA publisher configured — skipping BA poll loop")
+            return
+        if not self._engine.is_rule_enabled("behavioral_analysis"):
+            logger.info("Behavioral analysis rule disabled — skipping BA poll loop")
+            return
+
+        logger.info(
+            "BA poll loop started (queue mode)",
+            interval_seconds=self.ba_poll_interval,
+        )
+
+        while True:
+            await asyncio.sleep(self.ba_poll_interval)
+            try:
+                for session in self.session_mgr.get_all_sessions().values():
+                    for zone_id in list(session.current_zones.keys()):
+                        zone_type = self.config.get_zone_type(zone_id)
+                        if zone_type != "HIGH_VALUE":
+                            continue
+                        if session.ba_alerted.get(zone_id):
+                            continue
+                        self._publish_ba_request(
+                            session.object_id, zone_id
+                        )
+            except Exception:
+                logger.exception("Error in BA check loop")
+
+    # ---- Deferred frame cleanup on HIGH_VALUE zone exit ----------------------
+
+    async def _deferred_frame_cleanup(
+        self, object_id: str, region_id: str, region_name: str, dwell: float,
+    ) -> None:
+        """Cleanup disabled for now."""
+        logger.info(
+            "HIGH_VALUE zone exited — cleanup DISABLED",
+            object_id=object_id,
+            region=region_name,
+            dwell=dwell,
+        )
+        cleanup_key = f"{object_id}:{region_id}"
+        self._pending_cleanups.discard(cleanup_key)
+
     # ---- PERSON_LOST handler -------------------------------------------------
 
     async def _on_person_lost(self, event: RegionEvent) -> None:
-        """Clean up frame storage when a person's session expires."""
-        if self._frame_mgr:
-            self._frame_mgr.cleanup_person(event.object_id)
-        logger.info("Person lost — frames cleaned up", object_id=event.object_id)
+        """Cleanup disabled for now."""
+        logger.info("Person lost — cleanup DISABLED", object_id=event.object_id)
 
     # ---- External service calls ----------------------------------------------
 
-    async def _trigger_behavioral_analysis(
+    def _publish_ba_request(
         self, object_id: str, region_id: str
     ) -> None:
-        """Send frames to BehavioralAnalysis Service for HIGH_VALUE zone persons."""
-        if not self._ba_client or not self._frame_mgr:
+        """Publish a BA analysis request to the MQTT queue."""
+        if not self._ba_publisher:
             return
 
         session = self.session_mgr.get_session(object_id)
         if not session:
             return
 
-        frame_keys = self._frame_mgr.get_person_frame_keys(object_id)
-        if not frame_keys:
-            logger.debug("No frames for behavioral analysis", object_id=object_id)
+        # Skip if already alerted for this zone
+        if session.ba_alerted.get(region_id):
             return
 
-        frames_b64 = await self._frame_mgr.get_frames_base64(frame_keys)
-        if not frames_b64:
-            return
+        # Get zone entry timestamp for frame path
+        entry_ts_iso = session.current_zones.get(region_id, "")
+        entry_timestamp = ""
+        if entry_ts_iso:
+            entry_timestamp = entry_ts_iso.replace(":", "").replace("-", "").split("+")[0].split(".")[0]
 
-        zone_info = {
-            "region_id": region_id,
-            "zone_type": "HIGH_VALUE",
-            "zone_name": self.config.get_zone_name(region_id),
-        }
-
-        result = await self._ba_client.analyze(
-            object_id, frame_keys, frames_b64, zone_info
+        self._ba_publisher.publish_request(
+            person_id=object_id,
+            region_id=region_id,
+            entry_timestamp=entry_timestamp,
         )
 
-        if result and result.get("concealment_suspected"):
+    async def on_ba_result(self, result: dict) -> None:
+        """
+        Handle a BA analysis result received from the MQTT ba/results topic.
+
+        This replaces the old synchronous REST response handling.
+        """
+        person_id = result.get("person_id", "")
+        region_id = result.get("region_id", "")
+        status = result.get("status", "")
+
+        session = self.session_mgr.get_session(person_id)
+        if not session:
+            logger.debug("BA result for unknown session", person_id=person_id)
+            return
+
+        if status == "suspicious":
             session.concealment_suspected = True
+            session.ba_alerted[region_id] = True
+            zone_name = self.config.get_zone_name(region_id)
             alert = Alert(
                 alert_type=AlertType.CONCEALMENT,
                 alert_level=AlertLevel.WARNING,
-                object_id=object_id,
+                object_id=person_id,
                 timestamp=session.last_seen,
                 region_id=region_id,
-                region_name=zone_info["zone_name"],
+                region_name=zone_name,
                 details={
                     "confidence": result.get("confidence"),
-                    "observation": result.get("observation", ""),
+                    "message": result.get("vlm_response", ""),
+                    "frames_analyzed": result.get("frames_analyzed", 0),
                 },
-                evidence_keys=frame_keys,
             )
             logger.warning(
-                "Behavioral analysis flagged concealment",
-                object_id=object_id,
+                "BA queue: concealment detected",
+                person_id=person_id,
+                region_id=region_id,
                 confidence=result.get("confidence"),
             )
             await self._fire_alert(alert)
+        elif status == "no_match":
+            logger.debug(
+                "BA queue: no suspicious pattern",
+                person_id=person_id,
+                region_id=region_id,
+            )
+        elif status == "received":
+            logger.debug(
+                "BA queue: request acknowledged",
+                person_id=person_id,
+                region_id=region_id,
+            )
+        else:
+            logger.debug(
+                "BA queue: status update",
+                person_id=person_id,
+                status=status,
+            )
 
     # ---- alert dispatch ------------------------------------------------------
 
     async def _fire_alert(self, alert: Alert) -> None:
-        """Persist evidence frames and dispatch via callback."""
+        """Persist evidence frames and send to alert-service."""
         if self._frame_mgr and not alert.evidence_keys:
             frame_keys = self._frame_mgr.get_person_frame_keys(alert.object_id)
             if frame_keys:
@@ -364,8 +462,19 @@ class RuleEngineAdapter:
                         count=len(stored),
                     )
 
-        if self._alert_callback:
+        # Send to alert-service (handles MQTT delivery with dedup)
+        if self._alert_client:
             try:
-                await self._alert_callback(alert)
+                await self._alert_client.publish_alert(alert)
             except Exception:
-                logger.exception("Alert callback error", alert_id=alert.alert_id)
+                logger.exception("AlertService publish error", alert_id=alert.alert_id)
+
+        logger.warning(
+            "ALERT",
+            alert_id=alert.alert_id,
+            type=alert.alert_type.value,
+            level=alert.alert_level.value,
+            object_id=alert.object_id,
+            region=alert.region_name,
+            details=alert.details,
+        )

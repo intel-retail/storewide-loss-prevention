@@ -25,9 +25,10 @@
     "exit_retention_seconds": 60
   },
   "behavioral_analysis": {
-    "base_url": "http://behavioral-analysis-service:8090",
+    "base_url": "http://behavioral-analysis:8080",
     "timeout_seconds": 30,
-    "enabled": true
+    "enabled": true,
+    "pattern_id": "shelf_to_waist"
   },
   "rule_service": {
     "base_url": "http://rule-engine:8091",
@@ -35,14 +36,13 @@
     "enabled": true
   },
   "alert_service": {
-    "base_url": "http://alert-service:8092",
+    "base_url": "http://alert-service:8000",
     "timeout_seconds": 10,
     "enabled": true
   },
   "rules": {
     "session_timeout_seconds": 90,
-    "vlm_confidence_threshold": 0.80,
-    "vlm_log_threshold": 0.50,
-    "analysis_fps": 2
+    "behavioural_analysis_fps": 5,
+    "ba_poll_interval_seconds": 1
   }
 }

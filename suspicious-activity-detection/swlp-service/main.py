@@ -34,9 +34,10 @@ from services.session_manager import SessionManager
 from services.rule_engine import RuleEngine
 from services.rule_adapter import RuleEngineAdapter
 from services.frame_manager import FrameManager
-from services.alert_publisher import AlertPublisher
 from services.scenescape_client import SceneScapeClient
 from services.behavioral_analysis_client import BehavioralAnalysisClient
+from services.alert_service_client import AlertServiceClient
+from services.ba_queue import BAQueuePublisher, BAQueueConsumer
 
 # ---- Structured logging setup -----------------------------------------------
 logging.basicConfig(format="%(message)s", stream=__import__("sys").stdout, level=logging.DEBUG)
@@ -193,26 +194,40 @@ async def lifespan(app: FastAPI):
     mqtt_svc.set_event_loop(loop)
     app.state.mqtt_service = mqtt_svc
 
-    # 4. Alert publisher
-    alert_pub = AlertPublisher(config, mqtt_svc)
-    app.state.alert_publisher = alert_pub
+    # 4. External service clients
+    alert_svc_client = AlertServiceClient(config)
+    app.state.alert_service_client = alert_svc_client
+
+    ba_client = BehavioralAnalysisClient(config)
+    app.state.behavioral_analysis_client = ba_client
+
+    # 4b. BA MQTT queue (publisher + result consumer)
+    ba_publisher = BAQueuePublisher(mqtt_svc)
+    app.state.ba_publisher = ba_publisher
+
+    ba_result_consumer = BAQueueConsumer(mqtt_svc)
+    app.state.ba_result_consumer = ba_result_consumer
+
+    async def on_ba_result(result: dict) -> None:
+        """Handle BA analysis results from MQTT queue."""
+        await rule_adapter.on_ba_result(result)
+
+    ba_result_consumer.register_result_handler(on_ba_result)
+    ba_result_consumer.subscribe()
 
     # 5. Session manager
     session_mgr = SessionManager(config)
     app.state.session_manager = session_mgr
 
-    # 6. External service clients (called conditionally)
-    ba_client = BehavioralAnalysisClient(config)
-    app.state.behavioral_analysis_client = ba_client
-
-    # 7. Rule engine (local, in-process)
+    # 6. Rule engine (local, in-process)
     rules_yaml = config.get_rules_yaml_path()
     rule_engine = RuleEngine(rules_path=rules_yaml)
     rule_adapter = RuleEngineAdapter(
         rule_engine, config, session_mgr,
-        alert_callback=alert_pub.publish,
+        alert_service_client=alert_svc_client,
         behavioral_analysis_client=ba_client,
         frame_manager=frame_mgr,
+        ba_publisher=ba_publisher,
     )
     app.state.rule_engine = rule_engine
     app.state.rule_adapter = rule_adapter
@@ -250,8 +265,12 @@ async def lifespan(app: FastAPI):
             if in_high_value:
                 # Crop to person bounding box if available
                 frame_bytes = _crop_to_bbox(image_bytes, session.bbox)
+                # Use zone entry timestamp for grouping frames per visit
+                entry_ts_iso = session.current_zones.get(zone_id, "")
                 key = frame_mgr.store_person_frame(
-                    session.object_id, frame_bytes, ts
+                    session.object_id, frame_bytes, ts,
+                    region_id=zone_id,
+                    entry_timestamp=entry_ts_iso,
                 )
                 session.add_frame_key(key)
 
@@ -260,7 +279,8 @@ async def lifespan(app: FastAPI):
     # Background task: request frames from cameras that see people in HIGH_VALUE zones
     async def frame_request_loop() -> None:
         """Periodically send 'getimage' to cameras with active HIGH_VALUE sessions."""
-        FRAME_REQUEST_INTERVAL = 0.5  # ~2 fps
+        analysis_fps = int(os.environ.get("ANALYSIS_FPS", config.get_rules_config().get("behavioural_analysis_fps", 1)))
+        FRAME_REQUEST_INTERVAL = 1.0 / analysis_fps
         while True:
             try:
                 cameras_needed: set[str] = set()
@@ -285,6 +305,7 @@ async def lifespan(app: FastAPI):
     expiry_task = asyncio.create_task(session_mgr.run_expiry_loop())
     frame_req_task = asyncio.create_task(frame_request_loop())
     loiter_task = asyncio.create_task(rule_adapter.run_loiter_check_loop())
+    ba_task = asyncio.create_task(rule_adapter.run_ba_check_loop())
 
     logger.info(
         "Store-wide Loss Prevention started",
@@ -301,6 +322,7 @@ async def lifespan(app: FastAPI):
     expiry_task.cancel()
     frame_req_task.cancel()
     loiter_task.cancel()
+    ba_task.cancel()
     mqtt_task.cancel()
 
 

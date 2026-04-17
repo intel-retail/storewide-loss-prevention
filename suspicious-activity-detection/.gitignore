@@ -10,3 +10,14 @@ application.log
 .log_collector.pid
 region_events.json
 scenescape/sample_data/store-wide-loss-prevention.*
+
+# Python
+__pycache__/
+
+# Download models — ignore everything except the scripts
+download_models/*
+!download_models/model_download.sh
+!download_models/download_models.sh
+
+# Downloaded models
+models/

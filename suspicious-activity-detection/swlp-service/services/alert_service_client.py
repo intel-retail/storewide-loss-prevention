@@ -35,13 +35,13 @@ class AlertServiceClient:
     """
 
     def __init__(self, config: ConfigService) -> None:
-        alert_cfg = config.get_app_config().get("alert_service", {})
+        alert_cfg = config.get_alert_service_config()
         self.base_url = os.environ.get(
             "ALERT_SERVICE_URL",
-            alert_cfg.get("base_url", "http://alert-service:8092"),
+            alert_cfg.get("base_url", "http://alert-service:8000"),
         )
         self.timeout = alert_cfg.get("timeout_seconds", 10)
-        self.enabled = alert_cfg.get("enabled", False)
+        self.enabled = alert_cfg.get("enabled", True)
 
         logger.info(
             "AlertServiceClient initialized",
@@ -55,13 +55,21 @@ class AlertServiceClient:
 
         Payload matches the AlertService contract:
             {
-                "alert_id": UUID,
-                "alert_type": "CONCEALMENT" | "CHECKOUT_BYPASS" | "LOITERING" | "UNUSUAL_PATH" | "ZONE_VIOLATION",
-                "severity": "WARNING" | "CRITICAL",
-                "object_id": str,
-                "timestamp": ISO datetime,
-                "evidence": [str],       # SeaweedFS keys for related frames
-                "metadata": dict          # Type-specific additional data
+                "alert_type": "CONCEALMENT" | ...,
+                "metadata": {
+                    "alert_id": UUID,
+                    "poi_id": str,
+                    "camera_id": str,
+                    "zone_id": str,
+                    "zone_name": str,
+                    ...
+                },
+                "payload": {
+                    "severity": "WARNING" | "CRITICAL",
+                    "evidence": [str],
+                    ...details
+                },
+                "timestamp": ISO datetime
             }
 
         Returns the AlertService response dict, or None on failure.
@@ -70,15 +78,21 @@ class AlertServiceClient:
             return None
 
         payload = {
-            "alert_id": alert.alert_id,
             "alert_type": alert.alert_type.value,
-            "severity": alert.alert_level.value,
-            "object_id": alert.object_id,
             "timestamp": alert.timestamp.isoformat(),
-            "region_id": alert.region_id,
-            "region_name": alert.region_name,
-            "evidence": alert.evidence_keys,
-            "metadata": alert.details,
+            "metadata": {
+                "alert_id": alert.alert_id,
+                "person_id": alert.object_id,
+                "zone_id": alert.region_id or "",
+                "zone_name": alert.region_name or "",
+                "severity": alert.alert_level.value,
+                **alert.details,
+            },
+            "payload": {
+                "severity": alert.alert_level.value,
+                "evidence": alert.evidence_keys,
+                **alert.details,
+            },
         }
 
         return await self._post("/api/v1/alerts", payload)
@@ -155,6 +169,10 @@ class AlertServiceClient:
                 ) as resp:
                     if resp.status == 200:
                         return await resp.json()
+                    if resp.status == 405:
+                        # Alert service does not support GET queries
+                        logger.debug("AlertService does not support GET %s", path)
+                        return None
                     body = await resp.text()
                     logger.error(
                         "AlertService query failed",

@@ -9,7 +9,7 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel
 import structlog
 
-from services.alert_publisher import AlertPublisher
+from services.alert_service_client import AlertServiceClient
 from services.config import ConfigService
 from services.session_manager import SessionManager
 
@@ -18,8 +18,8 @@ logger = structlog.get_logger(__name__)
 router = APIRouter()
 
 
-def _get_alert_publisher(request: Request) -> AlertPublisher:
-    return request.app.state.alert_publisher
+def _get_alert_service_client(request: Request) -> AlertServiceClient:
+    return request.app.state.alert_service_client
 
 
 def _get_session_manager(request: Request) -> SessionManager:
@@ -39,19 +39,18 @@ async def get_alerts(
     object_id: Optional[str] = Query(None, description="Filter by person object_id"),
     limit: int = Query(50, ge=1, le=500),
 ) -> List[Dict[str, Any]]:
-    """Return recent alerts, optionally filtered by type or person."""
-    pub = _get_alert_publisher(request)
-    if object_id:
-        return pub.get_by_person(object_id)
-    if alert_type:
-        return pub.get_by_type(alert_type, limit)
-    return pub.get_recent(limit)
+    """Proxy to alert-service for recent alerts."""
+    client = _get_alert_service_client(request)
+    result = await client.get_alerts(alert_type=alert_type, object_id=object_id, limit=limit)
+    return result or []
 
 
 @router.get("/alerts/count")
 async def get_alert_count(request: Request) -> Dict[str, int]:
-    pub = _get_alert_publisher(request)
-    return {"total": pub.total_count}
+    client = _get_alert_service_client(request)
+    alerts = await client.get_alerts(limit=1)
+    # alert-service doesn't expose a count endpoint; return 0 if unavailable
+    return {"total": len(alerts) if alerts else 0}
 
 
 # ---- Sessions ----------------------------------------------------------------
@@ -156,13 +155,11 @@ async def get_session_count(request: Request) -> Dict[str, Any]:
 async def get_status(request: Request) -> Dict[str, Any]:
     """Service health and basic statistics."""
     sm = _get_session_manager(request)
-    pub = _get_alert_publisher(request)
     config = _get_config(request)
     zones = config.get_zones()
     return {
         "status": "operational",
         "active_sessions": sm.get_active_count(),
-        "total_alerts": pub.total_count,
         "zones_configured": len(zones),
         "zone_types": {
             zt: sum(1 for z in zones.values() if z.get("type") == zt)

@@ -25,18 +25,20 @@ demo:
 	@$(MAKE) -C $(SCENESCAPE_DIR) APP_DIR=$(CURDIR) init init-sample-data download-models init-volumes
 	@echo ""
 	@echo "=== Building LP images ==="
-	$(COMPOSE_ALL) build swlp-service gradio-ui
+	$(COMPOSE_ALL) build swlp-service behavioral-analysis gradio-ui
 	@echo ""
 	@echo "=== Starting all services ==="
 	$(COMPOSE_ALL) up -d
 	@rm -f application.log
-	@$(COMPOSE_ALL) logs -f swlp-service > application.log 2>&1 &
+	@$(COMPOSE_ALL) logs -f swlp-service behavioral-analysis alert-service > application.log 2>&1 &
 	@echo ""
 	@echo "Services running:"
 	@echo "  SceneScape UI:   https://localhost"
 	@echo "  Login:           admin / $$(grep SUPASS docker/.env | cut -d= -f2-)"
 	@echo "  Gradio UI:       http://localhost:7860"
 	@echo "  LP API:          http://localhost:8082"
+	@echo "  Alert Service:   http://localhost:8000"
+	@echo "  Alert WS:        ws://localhost:8000/api/v1/ws"
 	@echo "  LP logs:         application.log"
 	@echo ""
 	@echo "To stop: make down"
@@ -68,13 +70,20 @@ status:
 .PHONY: demo-lp
 demo-lp:
 	@echo "Building LP images..."
-	$(COMPOSE_ALL) build storewide-loss-prevention gradio-ui
+	$(COMPOSE_ALL) build swlp-service behavioral-analysis gradio-ui
 	@echo "Starting LP services only (SceneScape must be running)..."
 	$(COMPOSE_LP) up -d
 
 .PHONY: down-lp
 down-lp:
 	$(COMPOSE_LP) down
+
+# ---- Models ----
+
+.PHONY: download-models
+download-models:
+	@echo "Downloading models for Suspicious Activity Detection..."
+	bash download_models/model_download.sh
 
 # ---- Build ----
 

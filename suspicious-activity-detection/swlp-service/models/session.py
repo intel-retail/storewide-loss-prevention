@@ -72,6 +72,9 @@ class PersonSession:
     # Unusual-path alert tracking: {region_id: True} — prevents duplicate alerts
     unusual_path_alerted: Dict[str, bool] = field(default_factory=dict)
 
+    # BA concealment alert tracking: {region_id: True} — prevents duplicate alerts
+    ba_alerted: Dict[str, bool] = field(default_factory=dict)
+
     # Frame references (SeaweedFS keys for rolling buffer — cropped person frames)
     frame_buffer: List[str] = field(default_factory=list)
     max_frame_buffer: int = 20  # ~10s at 2fps per spec

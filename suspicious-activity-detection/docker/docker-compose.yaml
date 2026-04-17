@@ -17,8 +17,11 @@ services:
         condition: service_healthy
     environment:
       - LP_BASE_URL=http://swlp-service:8082
-      - no_proxy=swlp-service,localhost,127.0.0.1,10.0.0.0/8,172.16.0.0/12
-      - NO_PROXY=swlp-service,localhost,127.0.0.1,10.0.0.0/8,172.16.0.0/12
+      - MQTT_HOST=${MQTT_HOST:-broker.scenescape.intel.com}
+      - MQTT_PORT=${MQTT_PORT:-1883}
+      - MQTT_ALERT_TOPIC=alerts/#
+      - no_proxy=swlp-service,broker.scenescape.intel.com,localhost,127.0.0.1,10.0.0.0/8,172.16.0.0/12
+      - NO_PROXY=swlp-service,broker.scenescape.intel.com,localhost,127.0.0.1,10.0.0.0/8,172.16.0.0/12
       - http_proxy=
       - https_proxy=
       - HTTP_PROXY=
@@ -34,6 +37,7 @@ services:
       - "${SEAWEEDFS_S3_PORT:-8333}:8333"
       - "${SEAWEEDFS_MASTER_PORT:-9333}:9333"
       - "${SEAWEEDFS_VOLUME_PORT:-8080}:8080"
+      - "${SEAWEEDFS_FILER_PORT:-8888}:8888"
     networks:
       - storewide-lp
     environment:
@@ -43,7 +47,7 @@ services:
       - HTTPS_PROXY=${https_proxy}
       - no_proxy=${no_proxy:-${NO_PROXY:-}},seaweedfs,localhost,127.0.0.1,::1,172.18.0.0/16,10.0.0.0/8
       - NO_PROXY=${no_proxy:-${NO_PROXY:-}},seaweedfs,localhost,127.0.0.1,::1,172.18.0.0/16,10.0.0.0/8
-    command: "server -s3 -s3.config=/etc/seaweedfs/s3-config.json -dir=/data"
+    command: "server -s3 -filer -s3.config=/etc/seaweedfs/s3-config.json -dir=/data"
     volumes:
       - seaweedfs-data:/data
       - ./configs/s3-config.json:/etc/seaweedfs/s3-config.json:ro
@@ -54,12 +58,82 @@ services:
       retries: 20
       start_period: 30s
 
+  # ---------- OVMS VLM (OpenVINO Model Server) ----------
+  ovms-vlm:
+    image: openvino/model_server:2025.4.1-gpu
+    container_name: ovms-vlm
+    volumes:
+      - ${MODEL_PATH:-./models}:/models:ro
+    ports:
+      - "${OVMS_GRPC_PORT:-8002}:8000"
+      - "${OVMS_REST_PORT:-8003}:8001"
+    networks:
+      - storewide-lp
+    environment:
+      - LOG_LEVEL=INFO
+    devices:
+      - /dev/dri:/dev/dri
+    group_add:
+      - ${RENDER_GROUP_ID:-992}
+    command: >
+      --config_path /models/vlm_models/config.json
+      --port 8000
+      --rest_port 8001
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8001/v1/config"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 120s
+    restart: unless-stopped
+
+  # ---------- Behavioral Analysis (YOLO-Pose + VLM) ----------
+  behavioral-analysis:
+    build:
+      context: behavioral-analysis
+      dockerfile: Dockerfile
+    image: ${REGISTRY:-}behavioral-analysis:${TAG:-latest}
+    networks:
+      - storewide-lp
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8080/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 60s
+    depends_on:
+      seaweedfs:
+        condition: service_healthy
+      ovms-vlm:
+        condition: service_healthy
+    environment:
+      SEAWEEDFS_ENDPOINT: http://seaweedfs:8333
+      SEAWEEDFS_BUCKET: behavioral-frames
+      MIN_FRAMES_FOR_DETECTION: ${BA_MIN_FRAMES:-10}
+      MAX_FRAMES_TO_FETCH: ${BA_MAX_FRAMES:-20}
+      POSE_CONFIDENCE_THRESHOLD: ${BA_CONFIDENCE:-0.5}
+      YOLO_MODEL_PATH: /models/yolo_models/${YOLO_MODEL_NAME:-yolo11n-pose}/${YOLO_MODEL_NAME:-yolo11n-pose}.xml
+      VLM_ENDPOINT: http://ovms-vlm:8001
+      VLM_MODEL_NAME: ${VLM_MODEL_NAME:-Qwen/Qwen2.5-VL-7B-Instruct}
+      VLM_ENABLED: ${VLM_ENABLED:-true}
+      MQTT_HOST: ${MQTT_HOST:-broker.scenescape.intel.com}
+      MQTT_PORT: ${MQTT_PORT:-1883}
+      BA_REQUEST_TOPIC: ${BA_REQUEST_TOPIC:-ba/requests}
+      BA_RESULT_TOPIC: ${BA_RESULT_TOPIC:-ba/results}
+      http_proxy: ${http_proxy}
+      https_proxy: ${https_proxy}
+      no_proxy: ${no_proxy:-${NO_PROXY:-}},seaweedfs,ovms-vlm,broker.scenescape.intel.com,localhost,127.0.0.1,172.18.0.0/16,10.0.0.0/8
+    volumes:
+      - ${MODEL_PATH:-./models}:/models:ro
+      - ../scenescape/secrets:/app/secrets:ro
+    restart: unless-stopped
+
   # ---------- Store-wide Loss Prevention ----------
   swlp-service:
     build:
       context: .
       dockerfile: swlp-service/Dockerfile
-    image: ${REGISTRY:-}storewide-loss-prevention:${TAG:-latest}
+    image: ${REGISTRY:-}swlp-service:${TAG:-latest}
     ports:
       - "${LP_SERVICE_PORT:-8082}:8082"
     networks:
@@ -73,6 +147,8 @@ services:
     depends_on:
       seaweedfs:
         condition: service_healthy
+      behavioral-analysis:
+        condition: service_healthy
       web:
         condition: service_healthy
       scene-import:
@@ -81,7 +157,7 @@ services:
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
       http_proxy: ${http_proxy}
       https_proxy: ${https_proxy}
-      no_proxy: ${no_proxy:-${NO_PROXY:-}},.scenescape.intel.com,${HOST_IP},broker.scenescape.intel.com,seaweedfs,behavioral-analysis-service,localhost,127.0.0.1,172.18.0.0/16,10.0.0.0/8
+      no_proxy: ${no_proxy:-${NO_PROXY:-}},.scenescape.intel.com,${HOST_IP},broker.scenescape.intel.com,seaweedfs,behavioral-analysis,alert-service,localhost,127.0.0.1,172.18.0.0/16,10.0.0.0/8
       # Store
       STORE_NAME: ${STORE_NAME:-Retail}
       STORE_ID: ${STORE_ID:-store_001}
@@ -92,10 +168,39 @@ services:
       SCENESCAPE_API_USER: ${SCENESCAPE_API_USER:-}
       SCENESCAPE_API_PASSWORD: ${SCENESCAPE_API_PASSWORD:-}
       # External services
-      BEHAVIORAL_ANALYSIS_URL: ${BEHAVIORAL_ANALYSIS_URL:-http://behavioral-analysis-service:8090}
+      BEHAVIORAL_ANALYSIS_URL: ${BEHAVIORAL_ANALYSIS_URL:-http://behavioral-analysis:8080}
+      ALERT_SERVICE_URL: ${ALERT_SERVICE_URL:-http://alert-service:8000}
+      ANALYSIS_FPS: ${ANALYSIS_FPS:-1}
     volumes:
       - ./configs:/app/configs:ro
       - ../scenescape/secrets:/app/secrets:ro
+    restart: unless-stopped
+
+  # ---------- Alert Service ----------
+  alert-service:
+    image: intel/alert-service:0.0.1
+    ports:
+      - "${ALERT_SERVICE_PORT:-8000}:8000"
+    networks:
+      - storewide-lp
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/v1/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    environment:
+      MQTT_MODE: external
+      MQTT_HOST: ${MQTT_HOST:-broker.scenescape.intel.com}
+      MQTT_PORT: ${MQTT_PORT:-1883}
+      CONFIG_PATH: /app/config/config.yaml
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      DELIVERY_HANDLERS: log,mqtt,websocket
+      http_proxy: ${http_proxy}
+      https_proxy: ${https_proxy}
+      no_proxy: ${no_proxy:-${NO_PROXY:-}},broker.scenescape.intel.com,localhost,127.0.0.1,172.18.0.0/16,10.0.0.0/8
+    volumes:
+      - ./configs/alert-config.yaml:/app/config/config.yaml:ro
     restart: unless-stopped
 
 networks:

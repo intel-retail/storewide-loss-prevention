@@ -44,9 +44,11 @@ class FrameManager:
 
     Only stores crops for persons in HIGH_VALUE zones.
     Maintains a rolling buffer of 20 frames per person.
+    Also mirrors frames to the behavioral-frames bucket for the BA service.
     """
 
     BUCKET = "loss-prevention-frames"
+    BA_BUCKET = "behavioral-frames"
     ROLLING_BUFFER_SIZE = 20  # ~10 seconds at 2fps
     ALERT_EVIDENCE_PREFIX = "alerts"
 
@@ -61,6 +63,7 @@ class FrameManager:
 
         # Per-person key tracking for rolling buffer management
         self._person_keys: Dict[str, List[str]] = {}
+        self._person_ba_keys: Dict[str, List[str]] = {}
 
         self.client: Optional["Minio"] = None
         if Minio:
@@ -79,17 +82,18 @@ class FrameManager:
         )
 
     async def ensure_bucket(self) -> None:
-        """Create the frame bucket if it doesn't exist. Retries on connection failure."""
+        """Create the frame buckets if they don't exist. Retries on connection failure."""
         if not self.client:
             return
         import asyncio
         for attempt in range(5):
             try:
-                if not self.client.bucket_exists(self.BUCKET):
-                    self.client.make_bucket(self.BUCKET)
-                    logger.info("Created bucket", bucket=self.BUCKET)
-                else:
-                    logger.info("Bucket exists", bucket=self.BUCKET)
+                for bucket in (self.BUCKET, self.BA_BUCKET):
+                    if not self.client.bucket_exists(bucket):
+                        self.client.make_bucket(bucket)
+                        logger.info("Created bucket", bucket=bucket)
+                    else:
+                        logger.info("Bucket exists", bucket=bucket)
                 return
             except Exception:
                 if attempt < 4:
@@ -105,16 +109,34 @@ class FrameManager:
 
     # ---- Store cropped person frame ------------------------------------------
     def store_person_frame(
-        self, object_id: str, image_bytes: bytes, ts: Optional[datetime] = None
+        self, object_id: str, image_bytes: bytes, ts: Optional[datetime] = None,
+        region_id: Optional[str] = None,
+        entry_timestamp: Optional[str] = None,
     ) -> str:
         """
         Store a cropped person frame in the rolling buffer.
+        Also mirrors to behavioral-frames bucket for BA service consumption.
         Evicts the oldest frame if the buffer exceeds ROLLING_BUFFER_SIZE.
         Returns the SeaweedFS object key.
         """
         ts = ts or datetime.now(timezone.utc)
         key = f"{object_id}/{ts.strftime('%Y%m%dT%H%M%S_%f')}.jpg"
         self._put(key, image_bytes)
+
+        # Mirror to behavioral-frames bucket:
+        # {person_id}/{region_id}/{entry_timestamp}/frames/{ts_ms}.jpg
+        ts_ms = int(ts.timestamp() * 1000)
+        # Convert entry_timestamp ISO string to compact folder name
+        entry_folder = ""
+        if entry_timestamp:
+            entry_folder = entry_timestamp.replace(":", "").replace("-", "").replace("T", "T").split("+")[0].split(".")[0]
+        if region_id and entry_folder:
+            ba_key = f"{object_id}/{region_id}/{entry_folder}/frames/{ts_ms}.jpg"
+        elif region_id:
+            ba_key = f"{object_id}/{region_id}/frames/{ts_ms}.jpg"
+        else:
+            ba_key = f"{object_id}/frames/{ts_ms}.jpg"
+        self._put(ba_key, image_bytes, bucket=self.BA_BUCKET)
 
         # Track keys for rolling buffer management
         if object_id not in self._person_keys:
@@ -125,6 +147,11 @@ class FrameManager:
         while len(self._person_keys[object_id]) > self.ROLLING_BUFFER_SIZE:
             old_key = self._person_keys[object_id].pop(0)
             self._delete(old_key)
+
+        # Track BA keys (no eviction — BA service owns lifecycle)
+        if object_id not in self._person_ba_keys:
+            self._person_ba_keys[object_id] = []
+        self._person_ba_keys[object_id].append(ba_key)
 
         return key
 
@@ -159,11 +186,14 @@ class FrameManager:
     def cleanup_person(self, object_id: str) -> None:
         """
         Remove all frames for a person (called after exit_retention_seconds
-        or session expiry).
+        or session expiry).  Cleans both evidence and behavioral-frames buckets.
         """
         keys = self._person_keys.pop(object_id, [])
+        ba_keys = self._person_ba_keys.pop(object_id, [])
         for key in keys:
             self._delete(key)
+        # Clean up behavioral-frames bucket (covers both old and new key formats)
+        self._delete_prefix(f"{object_id}/", bucket=self.BA_BUCKET)
         if keys:
             logger.info("Cleaned up person frames", object_id=object_id, count=len(keys))
 
@@ -175,16 +205,17 @@ class FrameManager:
         return list(self._person_keys.get(object_id, []))
 
     # ---- Internal helpers ----------------------------------------------------
-    def _put(self, key: str, data: bytes) -> None:
+    def _put(self, key: str, data: bytes, bucket: Optional[str] = None) -> None:
         if not self.client:
             return
+        bucket = bucket or self.BUCKET
         try:
             self.client.put_object(
-                self.BUCKET, key, io.BytesIO(data), length=len(data),
+                bucket, key, io.BytesIO(data), length=len(data),
                 content_type="image/jpeg",
             )
         except S3Error:
-            logger.exception("SeaweedFS put failed", key=key)
+            logger.exception("SeaweedFS put failed", key=key, bucket=bucket)
 
     def _get(self, key: str) -> Optional[bytes]:
         if not self.client:
@@ -204,10 +235,23 @@ class FrameManager:
                 except Exception:
                     pass
 
-    def _delete(self, key: str) -> None:
+    def _delete(self, key: str, bucket: Optional[str] = None) -> None:
         if not self.client:
             return
+        bucket = bucket or self.BUCKET
         try:
-            self.client.remove_object(self.BUCKET, key)
+            self.client.remove_object(bucket, key)
         except S3Error:
             logger.debug("SeaweedFS delete miss", key=key)
+
+    def _delete_prefix(self, prefix: str, bucket: Optional[str] = None) -> None:
+        """Delete all objects under a prefix in the given bucket."""
+        if not self.client:
+            return
+        bucket = bucket or self.BUCKET
+        try:
+            objects = self.client.list_objects(bucket, prefix=prefix, recursive=True)
+            for obj in objects:
+                self.client.remove_object(bucket, obj.object_name)
+        except S3Error:
+            logger.debug("SeaweedFS prefix delete miss", prefix=prefix, bucket=bucket)

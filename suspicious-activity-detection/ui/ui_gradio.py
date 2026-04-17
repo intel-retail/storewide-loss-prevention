@@ -5,6 +5,10 @@ import requests
 import json
 import os
 import time
+import threading
+from collections import deque
+
+import paho.mqtt.client as mqtt
 
 # Use Docker service name for container-to-container communication
 LP_BASE_URL = os.environ.get("LP_BASE_URL", "http://storewide-loss-prevention:8082")
@@ -13,8 +17,50 @@ SESSIONS_API = f"{LP_BASE_URL}/api/v1/lp/sessions"
 ALERTS_API = f"{LP_BASE_URL}/api/v1/lp/alerts"
 ZONE_CONFIG = os.environ.get("ZONE_CONFIG", "/app/zone_config.json")
 
+# MQTT config for real-time alerts
+MQTT_HOST = os.environ.get("MQTT_HOST", "broker.scenescape.intel.com")
+MQTT_PORT = int(os.environ.get("MQTT_PORT", "1883"))
+MQTT_ALERT_TOPIC = os.environ.get("MQTT_ALERT_TOPIC", "alerts/#")
+
 MAX_RETRIES = 5
 RETRY_DELAY = 3  # seconds
+
+# Thread-safe alert store fed by MQTT
+_mqtt_alerts: deque = deque(maxlen=500)
+_mqtt_lock = threading.Lock()
+
+
+def _on_mqtt_connect(client, userdata, flags, rc):
+    if rc == 0:
+        client.subscribe(MQTT_ALERT_TOPIC, qos=1)
+        print(f"[MQTT] Subscribed to {MQTT_ALERT_TOPIC}")
+    else:
+        print(f"[MQTT] Connect failed, rc={rc}")
+
+
+def _on_mqtt_message(client, userdata, msg):
+    try:
+        alert = json.loads(msg.payload.decode())
+        with _mqtt_lock:
+            _mqtt_alerts.appendleft(alert)
+    except Exception as e:
+        print(f"[MQTT] Failed to parse message: {e}")
+
+
+def _start_mqtt_listener():
+    client = mqtt.Client()
+    client.on_connect = _on_mqtt_connect
+    client.on_message = _on_mqtt_message
+    try:
+        client.connect(MQTT_HOST, MQTT_PORT, keepalive=60)
+        client.loop_forever()
+    except Exception as e:
+        print(f"[MQTT] Connection error: {e}")
+
+
+# Start MQTT listener in background thread
+_mqtt_thread = threading.Thread(target=_start_mqtt_listener, daemon=True)
+_mqtt_thread.start()
 
 
 def api_get_with_retry(url, retries=MAX_RETRIES, delay=RETRY_DELAY):
@@ -77,52 +123,67 @@ def get_sessions():
                             "Type": z.get("zone_type", "?"),
                             "Visits": z.get("visit_count", 0),
                             "Dwell (s)": round(z.get("total_dwell_seconds", 0.0), 1),
-                            "Inside": "✔" if z.get("currently_inside") else "",
                         })
             if rows:
                 return pd.DataFrame(rows)
-            return pd.DataFrame(columns=["Person", "Zone", "Type", "Visits", "Dwell (s)", "Inside"])
+            return pd.DataFrame(columns=["Person", "Zone", "Type", "Visits", "Dwell (s)"])
         return pd.DataFrame([{"Error": f"API returned {resp.status_code}"}])
     except Exception as e:
         return pd.DataFrame([{"Error": str(e)}])
 
 def get_alerts():
     try:
-        resp = api_get_with_retry(ALERTS_API)
-        if resp.status_code == 200:
-            data = resp.json()
-            rows = []
-            for alert in data:
-                rows.append({
-                    "Alert ID": alert.get("alert_id", "")[:8],
-                    "Type": alert.get("alert_type"),
-                    "Level": alert.get("alert_level"),
-                    "Person": alert.get("object_id", "")[:8],
-                    "Region": alert.get("region_name", "N/A"),
-                    "Details": json.dumps(alert.get("details", {})),
-                    "Timestamp": alert.get("timestamp", ""),
-                })
-            if rows:
-                return pd.DataFrame(rows)
-            return pd.DataFrame(columns=["Alert ID", "Type", "Level", "Person", "Region", "Details", "Timestamp"])
-        return pd.DataFrame([{"Error": f"API returned {resp.status_code}"}])
+        # Use MQTT-fed alerts if available, fall back to REST
+        with _mqtt_lock:
+            data = list(_mqtt_alerts)
+        if not data:
+            resp = api_get_with_retry(ALERTS_API)
+            if resp.status_code == 200:
+                data = resp.json()
+            else:
+                return pd.DataFrame([{"Error": f"API returned {resp.status_code}"}])
+        rows = []
+        for alert in data:
+            meta = alert.get("metadata", {})
+            payload = alert.get("payload", {})
+            # Build details from metadata (survives MQTT) excluding known fields
+            detail_keys = {k: v for k, v in meta.items()
+                          if k not in ("alert_id", "person_id", "zone_id", "zone_name", "severity")}
+            if not detail_keys:
+                detail_keys = {k: v for k, v in payload.items() if k not in ("severity", "evidence")}
+            rows.append({
+                "Alert ID": (alert.get("alert_id") or meta.get("alert_id", ""))[:8],
+                "Type": alert.get("alert_type", ""),
+                "Level": alert.get("alert_level") or meta.get("severity") or payload.get("severity", ""),
+                "Person": (alert.get("object_id") or meta.get("person_id", ""))[:8],
+                "Region": alert.get("region_name") or meta.get("zone_name", "N/A"),
+                "Details": json.dumps(detail_keys) if detail_keys else "{}",
+                "Timestamp": alert.get("timestamp", ""),
+            })
+        if rows:
+            return pd.DataFrame(rows)
+        return pd.DataFrame(columns=["Alert ID", "Type", "Level", "Person", "Region", "Details", "Timestamp"])
     except Exception as e:
         return pd.DataFrame([{"Error": str(e)}])
 
 def get_alert_summary():
     try:
-        resp = api_get_with_retry(ALERTS_API)
-        if resp.status_code == 200:
-            data = resp.json()
-            counts = {}
-            for alert in data:
-                atype = alert.get("alert_type", "UNKNOWN")
-                counts[atype] = counts.get(atype, 0) + 1
-            rows = [{"Alert Type": k, "Count": v} for k, v in counts.items()]
-            if rows:
-                return pd.DataFrame(rows)
-            return pd.DataFrame(columns=["Alert Type", "Count"])
-        return pd.DataFrame([{"Error": f"API returned {resp.status_code}"}])
+        with _mqtt_lock:
+            data = list(_mqtt_alerts)
+        if not data:
+            resp = api_get_with_retry(ALERTS_API)
+            if resp.status_code == 200:
+                data = resp.json()
+            else:
+                return pd.DataFrame([{"Error": f"API returned {resp.status_code}"}])
+        counts = {}
+        for alert in data:
+            atype = alert.get("alert_type", "UNKNOWN")
+            counts[atype] = counts.get(atype, 0) + 1
+        rows = [{"Alert Type": k, "Count": v} for k, v in counts.items()]
+        if rows:
+            return pd.DataFrame(rows)
+        return pd.DataFrame(columns=["Alert Type", "Count"])
     except Exception as e:
         return pd.DataFrame([{"Error": str(e)}])
 
