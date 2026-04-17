@@ -1,0 +1,78 @@
+service:
+  retry_attempts: 3
+  retry_interval_seconds: 5
+
+subscriptions:
+  - alert_type: CONCEALMENT
+    dedup:
+      enabled: true
+      strategy: field_hash
+      fields:
+        - metadata.person_id
+        - metadata.zone_id
+      window_seconds: 30
+      on_missing: skip
+      hash:
+        algorithm: sha1
+        truncate: 16
+    delivery:
+      - type: mqtt
+        topic: alerts/concealment
+      - type: log
+
+  - alert_type: LOITERING
+    dedup:
+      enabled: true
+      strategy: field_hash
+      fields:
+        - metadata.zone_id
+      window_seconds: 120
+      on_missing: skip
+      hash:
+        algorithm: sha1
+        truncate: 16
+    delivery:
+      - type: mqtt
+        topic: alerts/loitering
+      - type: log
+      
+  - alert_type: UNUSUAL_PATH
+    dedup:
+      enabled: true
+      strategy: field_hash
+      fields:
+        - metadata.person_id
+        - metadata.zone_id
+      window_seconds: 60
+      on_missing: skip
+      hash:
+        algorithm: sha1
+        truncate: 16
+    delivery:
+      - type: mqtt
+        topic: alerts/unusual_path
+      - type: log
+
+  - alert_type: ZONE_VIOLATION
+    dedup:
+      enabled: false
+    delivery:
+      - type: mqtt
+        topic: alerts/zone_violation
+      - type: log
+
+  - alert_type: CHECKOUT_BYPASS
+    dedup:
+      enabled: true
+      strategy: field_hash
+      fields:
+        - metadata.person_id
+      window_seconds: 60
+      on_missing: skip
+      hash:
+        algorithm: sha1
+        truncate: 16
+    delivery:
+      - type: mqtt
+        topic: alerts/checkout_bypass
+      - type: log

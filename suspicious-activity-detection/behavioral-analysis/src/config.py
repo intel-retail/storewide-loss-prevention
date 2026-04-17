@@ -1,0 +1,73 @@
+# Copyright (C) 2026 Intel Corporation
+# SPDX-License-Identifier: Apache-2.0
+"""Configuration settings for BehavioralAnalysis Service."""
+
+import logging
+from pathlib import Path
+from typing import Any, Optional
+
+import yaml
+from pydantic_settings import BaseSettings
+
+logger = logging.getLogger(__name__)
+
+
+class Settings(BaseSettings):
+    """Service configuration loaded from environment variables."""
+
+    # Service settings
+    debug: bool = False
+    log_level: str = "INFO"
+
+    # YOLO-Pose model settings
+    yolo_model_path: str = "yolo11n-pose.pt"
+    pose_confidence_threshold: float = 0.5
+
+    # Frame analysis settings
+    min_frames_for_detection: int = 10
+    max_frames_to_fetch: int = 20
+
+    # SeaweedFS settings
+    seaweedfs_endpoint: str = "http://localhost:8333"
+    seaweedfs_bucket: str = "behavioral-frames"
+    seaweedfs_access_key: str = ""
+    seaweedfs_secret_key: str = ""
+    seaweedfs_max_frame_age: int = 120  # seconds
+
+    # VLM settings
+    vlm_endpoint: str = "http://ovms-vlm:8001"
+    vlm_model_name: str = "Qwen/Qwen2.5-VL-7B-Instruct"
+    vlm_enabled: bool = True
+    vlm_timeout: float = 60.0
+    vlm_max_tokens: int = 500
+    vlm_temperature: float = 0.1
+    vlm_max_image_size: int = 512
+
+    # Pattern config file path
+    pattern_config_path: str = "/app/config/patterns.yaml"
+
+    # MQTT settings (for BA request/result queue)
+    mqtt_host: str = "broker.scenescape.intel.com"
+    mqtt_port: int = 1883
+    ba_request_topic: str = "ba/requests"
+    ba_result_topic: str = "ba/results"
+
+    class Config:
+        env_prefix = ""  # No prefix, use exact variable names
+        case_sensitive = False
+
+
+def load_pattern_config(path: str) -> dict[str, Any]:
+    """Load pattern definitions from YAML config file."""
+    config_path = Path(path)
+    if not config_path.exists():
+        logger.warning(f"Pattern config not found: {path}, using defaults")
+        return {}
+
+    with open(config_path) as f:
+        config = yaml.safe_load(f)
+
+    patterns = config.get("patterns", {})
+    enabled = {k: v for k, v in patterns.items() if v.get("enabled", True)}
+    logger.info(f"Loaded {len(enabled)} enabled patterns from {path}")
+    return patterns
