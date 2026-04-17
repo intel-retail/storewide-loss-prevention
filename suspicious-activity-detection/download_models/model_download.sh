@@ -335,22 +335,53 @@ echo "  VLM PID:  ${VLM_PID}"
 echo "  YOLO PID: ${YOLO_PID}"
 echo ""
 
+# Show progress while waiting
+VLM_DONE=0
+YOLO_DONE=0
+VLM_LINES=0
+YOLO_LINES=0
+while true; do
+    # Check if processes finished
+    if [ ${VLM_DONE} -eq 0 ] && ! kill -0 ${VLM_PID} 2>/dev/null; then
+        wait ${VLM_PID}
+        VLM_RC=$?
+        VLM_DONE=1
+    fi
+    if [ ${YOLO_DONE} -eq 0 ] && ! kill -0 ${YOLO_PID} 2>/dev/null; then
+        wait ${YOLO_PID}
+        YOLO_RC=$?
+        YOLO_DONE=1
+    fi
+
+    # Stream new lines from VLM log
+    NEW_VLM=$(wc -l < "${VLM_LOG}")
+    if [ "${NEW_VLM}" -gt "${VLM_LINES}" ]; then
+        sed -n "$((VLM_LINES + 1)),${NEW_VLM}p" "${VLM_LOG}" | sed 's/^/  [VLM]  /'
+        VLM_LINES=${NEW_VLM}
+    fi
+
+    # Stream new lines from YOLO log
+    NEW_YOLO=$(wc -l < "${YOLO_LOG}")
+    if [ "${NEW_YOLO}" -gt "${YOLO_LINES}" ]; then
+        sed -n "$((YOLO_LINES + 1)),${NEW_YOLO}p" "${YOLO_LOG}" | sed 's/^/  [YOLO] /'
+        YOLO_LINES=${NEW_YOLO}
+    fi
+
+    # Both done? Break.
+    if [ ${VLM_DONE} -eq 1 ] && [ ${YOLO_DONE} -eq 1 ]; then
+        break
+    fi
+
+    sleep 2
+done
+
 FAILED=0
 
-wait ${VLM_PID}
-VLM_RC=$?
-echo "--- VLM output ---"
-cat "${VLM_LOG}"
 if [ ${VLM_RC} -ne 0 ]; then
     echo "  ✗ VLM download/export failed (exit code ${VLM_RC})"
     FAILED=1
 fi
 
-wait ${YOLO_PID}
-YOLO_RC=$?
-echo ""
-echo "--- YOLO output ---"
-cat "${YOLO_LOG}"
 if [ ${YOLO_RC} -ne 0 ]; then
     echo "  ✗ YOLO download/export failed (exit code ${YOLO_RC})"
     FAILED=1
