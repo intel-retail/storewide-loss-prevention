@@ -31,7 +31,7 @@ from api.routes import router
 from services.config import ConfigService
 from services.mqtt_service import MQTTService
 from services.session_manager import SessionManager
-from services.rule_engine import RuleEngine
+from rule_engine import RuleEngine
 from services.rule_adapter import RuleEngineAdapter
 from services.frame_manager import FrameManager
 from services.scenescape_client import SceneScapeClient

@@ -20,7 +20,7 @@ from models.events import EventType, RegionEvent, ZoneType
 from models.alerts import Alert, AlertType, AlertLevel
 from .config import ConfigService
 from .session_manager import SessionManager
-from .rule_engine import RuleEngine, Action
+from rule_engine import RuleEngine, Action
 from .alert_service_client import AlertServiceClient
 
 logger = structlog.get_logger(__name__)

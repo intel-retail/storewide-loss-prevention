@@ -10,3 +10,9 @@ dependencies = [
     "PyYAML>=6.0",
     "structlog>=24.1.0",
 ]
+
+[tool.setuptools]
+packages = ["rule_engine"]
+
+[tool.setuptools.package-dir]
+rule_engine = "."

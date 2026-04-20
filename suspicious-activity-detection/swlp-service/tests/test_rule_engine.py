@@ -11,7 +11,7 @@ import pytest
 from models.events import EventType, RegionEvent, ZoneType
 from models.alerts import AlertType, AlertLevel
 from models.session import PersonSession
-from services.rule_engine import RuleEngine, Action
+from rule_engine import RuleEngine, Action
 from services.rule_adapter import RuleEngineAdapter
 
 # Path to production rules.yaml
