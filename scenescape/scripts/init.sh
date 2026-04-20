@@ -55,10 +55,44 @@ if [ ! -f "${ZONE_CONFIG}" ]; then
     exit 1
 fi
 
-SCENE_NAME=$(python3 -c "import json; print(json.load(open('${ZONE_CONFIG}')).get('scene_name',''))" 2>/dev/null)
-CAMERA_NAME=$(python3 -c "import json; print(json.load(open('${ZONE_CONFIG}')).get('camera_name',''))" 2>/dev/null)
-SCENE_ZIP=$(python3 -c "import json; print(json.load(open('${ZONE_CONFIG}')).get('scene_zip',''))" 2>/dev/null)
-VIDEO_FILE=$(python3 -c "import json; print(json.load(open('${ZONE_CONFIG}')).get('video_file',''))" 2>/dev/null)
+SCENE_NAME=$(python3 -c "
+import json
+cfg = json.load(open('${ZONE_CONFIG}'))
+scenes = cfg.get('scenes', [])
+if scenes:
+    print(scenes[0].get('scene_name', ''))
+else:
+    print(cfg.get('scene_name', ''))
+" 2>/dev/null)
+CAMERA_NAME=$(python3 -c "
+import json
+cfg = json.load(open('${ZONE_CONFIG}'))
+scenes = cfg.get('scenes', [])
+if scenes:
+    cams = scenes[0].get('cameras', [])
+    print(cams[0] if cams else scenes[0].get('camera_name', ''))
+else:
+    print(cfg.get('camera_name', ''))
+" 2>/dev/null)
+SCENE_ZIP=$(python3 -c "
+import json
+cfg = json.load(open('${ZONE_CONFIG}'))
+scenes = cfg.get('scenes', [])
+if scenes:
+    zips = [s.get('scene_zip', '') for s in scenes if s.get('scene_zip')]
+    print(','.join(zips))
+else:
+    print(cfg.get('scene_zip', ''))
+" 2>/dev/null)
+VIDEO_FILE=$(python3 -c "
+import json
+cfg = json.load(open('${ZONE_CONFIG}'))
+scenes = cfg.get('scenes', [])
+if scenes:
+    print(scenes[0].get('video_file', ''))
+else:
+    print(cfg.get('video_file', ''))
+" 2>/dev/null)
 
 # Allow env var overrides
 SCENE_ZIP="${SCENE_ZIP:-storewide-loss-prevention.zip}"

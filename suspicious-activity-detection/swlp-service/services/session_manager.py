@@ -76,9 +76,9 @@ class SessionManager:
         Does NOT fire ENTERED/EXITED events — those come from on_region_event()
         via SceneScape's native region events.
         """
-        # Filter by resolved scene_id (read lazily — resolved after init)
-        scene_id_filter = self.config.get_scene_id()
-        if scene_id_filter and scene_id != scene_id_filter:
+        # Filter by resolved scene_ids (supports multiple scenes)
+        accepted_scene_ids = self.config.get_accepted_scene_ids()
+        if accepted_scene_ids and scene_id not in accepted_scene_ids:
             return
 
         if object_type not in ("person", "persons"):
@@ -118,11 +118,12 @@ class SessionManager:
                     object_id=oid,
                     first_seen=now,
                     last_seen=now,
+                    scene_id=scene_id,
                     current_cameras=list(cameras),
                     bbox=bbox,
                 )
                 self._sessions[oid] = session
-                logger.info("Session created", object_id=oid)
+                logger.info("Session created", object_id=oid, scene_id=scene_id)
 
     # ---- region-event handler: drives ENTERED / EXITED ----------------------
     async def on_region_event(
@@ -134,8 +135,8 @@ class SessionManager:
         SceneScape provides native enter/exit lists with dwell time,
         so we consume them directly instead of diffing region sets.
         """
-        scene_id_filter = self.config.get_scene_id()
-        if scene_id_filter and scene_id != scene_id_filter:
+        scene_id_filter = self.config.get_accepted_scene_ids()
+        if scene_id_filter and scene_id not in scene_id_filter:
             return
 
         now = datetime.now(timezone.utc)
@@ -159,6 +160,7 @@ class SessionManager:
                     object_id=oid,
                     first_seen=first_seen,
                     last_seen=now,
+                    scene_id=scene_id,
                     current_cameras=list(cameras),
                     bbox=obj.get("center_of_mass"),
                 )

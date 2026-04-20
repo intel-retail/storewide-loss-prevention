@@ -45,6 +45,7 @@ class PersonSession:
     object_id: str
     first_seen: datetime
     last_seen: datetime
+    scene_id: str = ""  # SceneScape scene UUID this person belongs to
 
     # Current position
     current_cameras: List[str] = field(default_factory=list)

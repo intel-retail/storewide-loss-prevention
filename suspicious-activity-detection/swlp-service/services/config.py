@@ -24,19 +24,40 @@ class ConfigService:
         self._app_cfg = self._load_json("app_config.json")
         self._zone_cfg = self._load_json("zone_config.json")
 
-        # Zone name → type from config: {"jewelry_zone": "HIGH_VALUE", ...}
-        self._zone_name_map: Dict[str, str] = dict(self._zone_cfg.get("zones", {}))
-        # Runtime zone map: {region_uuid: {name, type}} — populated by SceneScapeClient
+        # Multi-scene support: list of scene configs from zone_config.json
+        self._scene_configs: List[dict] = self._zone_cfg.get("scenes", [])
+        # Backward compat: if old flat format, wrap into scenes list
+        if not self._scene_configs and self._zone_cfg.get("scene_name"):
+            self._scene_configs = [{
+                "scene_name": self._zone_cfg["scene_name"],
+                "scene_zip": self._zone_cfg.get("scene_zip", ""),
+                "cameras": [self._zone_cfg["camera_name"]] if self._zone_cfg.get("camera_name") else [],
+                "video_file": self._zone_cfg.get("video_file", ""),
+                "zones": self._zone_cfg.get("zones", {}),
+            }]
+
+        # Zone name → type per scene: {"scene_name": {"region_name": "HIGH_VALUE"}}
+        self._zone_name_map_per_scene: Dict[str, Dict[str, str]] = {}
+        for sc in self._scene_configs:
+            name = sc.get("scene_name", "")
+            self._zone_name_map_per_scene[name] = dict(sc.get("zones", {}))
+
+        # Flat zone name map (all scenes merged) for backward compat
+        self._zone_name_map: Dict[str, str] = {}
+        for sc in self._scene_configs:
+            self._zone_name_map.update(sc.get("zones", {}))
+
+        # Runtime zone map: {region_uuid: {name, type, scene_id}} — populated by SceneScapeClient
         self._zones: Dict[str, dict] = {}
-        # Resolved at runtime from scene_name via SceneScape API
-        self._resolved_scene_id: Optional[str] = None
+        # Resolved scene_name → scene_id mapping
+        self._resolved_scene_ids: Dict[str, str] = {}  # scene_name → scene_uuid
         self._zone_lock = threading.Lock()
 
         logger.info(
             "ConfigService initialized",
             store_id=self.get_store_id(),
-            num_cameras=len(self.get_cameras()),
-            num_zones=len(self._zones),
+            num_scenes=len(self._scene_configs),
+            num_zones=len(self._zone_name_map),
         )
 
     # ---- loaders ----
@@ -55,18 +76,21 @@ class ConfigService:
     def get_store_name(self) -> str:
         return self._app_cfg.get("store", {}).get("name", "retail_store_1")
 
-    # ---- cameras (derived from zone_config.camera_name, fallback to app_config) ----
+    # ---- cameras (derived from scene configs) ----
     def get_cameras(self) -> List[dict]:
-        cam = self._zone_cfg.get("camera_name", "")
-        if cam:
-            return [{
-                "name": cam,
-                "number": 1,
-                "description": self._zone_cfg.get("scene_name", ""),
-                "data_topic": f"scenescape/data/camera/{cam}",
-                "image_topic": f"scenescape/image/camera/{cam}",
-            }]
-        return self._app_cfg.get("cameras", [])
+        cameras = []
+        for sc in self._scene_configs:
+            for cam in sc.get("cameras", []):
+                cameras.append({
+                    "name": cam,
+                    "number": len(cameras) + 1,
+                    "description": sc.get("scene_name", ""),
+                    "data_topic": f"scenescape/data/camera/{cam}",
+                    "image_topic": f"scenescape/image/camera/{cam}",
+                })
+        if not cameras:
+            return self._app_cfg.get("cameras", [])
+        return cameras
 
     def get_camera_topics(self) -> List[str]:
         return [c["data_topic"] for c in self.get_cameras()]
@@ -79,17 +103,55 @@ class ConfigService:
         return self._app_cfg.get("mqtt", {})
 
     def get_scene_name(self) -> Optional[str]:
-        """Return configured scene name for lookup, or None to accept all scenes."""
-        return self._zone_cfg.get("scene_name")
+        """Return first configured scene name (backward compat). Use get_scene_names() for multi-scene."""
+        if self._scene_configs:
+            return self._scene_configs[0].get("scene_name")
+        return None
+
+    def get_scene_names(self) -> List[str]:
+        """Return all configured scene names."""
+        return [sc.get("scene_name", "") for sc in self._scene_configs if sc.get("scene_name")]
+
+    def get_scene_configs(self) -> List[dict]:
+        """Return the list of scene configuration dicts."""
+        return list(self._scene_configs)
 
     def get_scene_id(self) -> Optional[str]:
-        """Return resolved scene UUID, or None to accept all scenes."""
-        return self._resolved_scene_id
+        """Return first resolved scene UUID (backward compat). Use get_scene_ids() for multi-scene."""
+        if self._resolved_scene_ids:
+            return next(iter(self._resolved_scene_ids.values()))
+        return None
+
+    def get_scene_ids(self) -> Dict[str, str]:
+        """Return {scene_name: scene_uuid} mapping for all resolved scenes."""
+        return dict(self._resolved_scene_ids)
+
+    def get_scene_id_for_name(self, scene_name: str) -> Optional[str]:
+        """Return scene UUID for a given scene name."""
+        return self._resolved_scene_ids.get(scene_name)
+
+    def get_accepted_scene_ids(self) -> set:
+        """Return set of all resolved scene UUIDs to accept MQTT messages from."""
+        return set(self._resolved_scene_ids.values())
 
     def set_scene_id(self, scene_id: str) -> None:
-        """Set the resolved scene UUID at runtime (from scene_name lookup)."""
-        self._resolved_scene_id = scene_id
+        """Set the resolved scene UUID at runtime (backward compat for single scene)."""
+        if self._scene_configs:
+            name = self._scene_configs[0].get("scene_name", "")
+            self._resolved_scene_ids[name] = scene_id
         logger.info("Scene ID resolved", scene_id=scene_id)
+
+    def set_scene_id_for_name(self, scene_name: str, scene_id: str) -> None:
+        """Set the resolved scene UUID for a specific scene name."""
+        self._resolved_scene_ids[scene_name] = scene_id
+        logger.info("Scene ID resolved", scene_name=scene_name, scene_id=scene_id)
+
+    def get_scene_id_reverse(self, scene_id: str) -> Optional[str]:
+        """Return scene name for a given scene UUID."""
+        for name, sid in self._resolved_scene_ids.items():
+            if sid == scene_id:
+                return name
+        return None
 
     def get_scene_data_topic(self) -> str:
         return self.get_mqtt_config().get(
@@ -146,6 +208,12 @@ class ConfigService:
             zone = self._zones.get(region_id)
         return zone["name"] if zone else None
 
+    def get_zone_scene_id(self, region_id: str) -> Optional[str]:
+        """Return the scene_id that a zone belongs to."""
+        with self._zone_lock:
+            zone = self._zones.get(region_id)
+        return zone.get("scene_id") if zone else None
+
     def set_zone(self, region_id: str, name: str, zone_type: str, **extra) -> None:
         """Add or update a single zone mapping at runtime."""
         with self._zone_lock:
@@ -173,8 +241,12 @@ class ConfigService:
 
     # ---- zone name map ----
     def get_zone_name_map(self) -> Dict[str, str]:
-        """Return {region_name: zone_type} from zone_config."""
+        """Return {region_name: zone_type} from all scenes (merged)."""
         return dict(self._zone_name_map)
+
+    def get_zone_name_map_for_scene(self, scene_name: str) -> Dict[str, str]:
+        """Return {region_name: zone_type} for a specific scene."""
+        return dict(self._zone_name_map_per_scene.get(scene_name, {}))
 
     # ---- scenescape api ----
     def get_scenescape_api_config(self) -> dict:

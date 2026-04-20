@@ -153,12 +153,11 @@ async def lifespan(app: FastAPI):
         if not authenticated:
             logger.error("SceneScape API authentication failed after retries")
         else:
-            # Resolve scene_name → scene_id via SceneScape API
-            scene_name = config.get_scene_name()
-            if scene_name:
+            # Resolve scene_name → scene_id for each configured scene
+            for scene_name in config.get_scene_names():
                 scene_id = await ss_client.resolve_scene_id(scene_name)
                 if scene_id:
-                    config.set_scene_id(scene_id)
+                    config.set_scene_id_for_name(scene_name, scene_id)
                     logger.info("Scene resolved from name", scene_name=scene_name, scene_id=scene_id)
                 else:
                     logger.error("Could not resolve scene_name to scene_id", scene_name=scene_name)
@@ -167,6 +166,13 @@ async def lifespan(app: FastAPI):
             regions = await ss_client.fetch_regions()
             if regions:
                 discovered = ss_client.map_zones(regions)
+                # Tag each zone with its scene_id
+                for rid, zinfo in discovered.items():
+                    scene_name_of_zone = zinfo.get("scene", "")
+                    for sname, sid in config.get_scene_ids().items():
+                        if sname == scene_name_of_zone or not scene_name_of_zone:
+                            zinfo["scene_id"] = sid
+                            break
                 if discovered:
                     config.merge_zones(discovered)
                     logger.info("Zone discovery complete", zones=len(config.get_zones()))
@@ -266,6 +272,7 @@ async def lifespan(app: FastAPI):
                     session.object_id, frame_bytes, ts,
                     region_id=zone_id,
                     entry_timestamp=entry_ts_iso,
+                    scene_id=session.scene_id,
                 )
                 session.add_frame_key(key)
 

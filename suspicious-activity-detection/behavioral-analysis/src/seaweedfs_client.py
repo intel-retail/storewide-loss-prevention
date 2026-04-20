@@ -114,6 +114,7 @@ class SeaweedFSClient:
         max_age_seconds: Optional[int] = None,
         region_id: Optional[str] = None,
         entry_timestamp: Optional[str] = None,
+        scene_id: Optional[str] = None,
     ) -> list[tuple[np.ndarray, int]]:
         """
         Get frames for an entity, sorted by timestamp (oldest first).
@@ -124,6 +125,7 @@ class SeaweedFSClient:
             max_age_seconds: Only return frames newer than this age
             region_id: Region/zone identifier
             entry_timestamp: Zone entry timestamp (compact ISO format)
+            scene_id: Scene UUID prefix
 
         Returns:
             List of (frame_image, timestamp) tuples
@@ -131,12 +133,14 @@ class SeaweedFSClient:
         if max_age_seconds is None:
             max_age_seconds = self.max_frame_age_seconds
 
+        # Build prefix: {scene_id}/{entity_id}/{region_id}/{entry_timestamp}/frames/
+        base = f"{scene_id}/{entity_id}" if scene_id else entity_id
         if region_id and entry_timestamp:
-            prefix = f"{entity_id}/{region_id}/{entry_timestamp}/frames/"
+            prefix = f"{base}/{region_id}/{entry_timestamp}/frames/"
         elif region_id:
-            prefix = f"{entity_id}/{region_id}/"
+            prefix = f"{base}/{region_id}/"
         else:
-            prefix = f"{entity_id}/"
+            prefix = f"{base}/"
 
         try:
             async with self._get_client() as client:
@@ -205,21 +209,24 @@ class SeaweedFSClient:
             logger.error(f"Failed to get frames for {entity_id}: {e}")
             return []
 
-    async def delete_frames(self, entity_id: str, region_id: Optional[str] = None) -> int:
+    async def delete_frames(self, entity_id: str, region_id: Optional[str] = None,
+                            scene_id: Optional[str] = None) -> int:
         """
         Delete all frames for an entity (optionally scoped to a region).
 
         Args:
             entity_id: Entity identifier
             region_id: Region/zone identifier (if None, deletes all frames for entity)
+            scene_id: Scene UUID prefix
 
         Returns:
             Number of frames deleted
         """
+        base = f"{scene_id}/{entity_id}" if scene_id else entity_id
         if region_id:
-            prefix = f"{entity_id}/{region_id}/frames/"
+            prefix = f"{base}/{region_id}/frames/"
         else:
-            prefix = f"{entity_id}/"
+            prefix = f"{base}/"
         deleted_count = 0
 
         try:

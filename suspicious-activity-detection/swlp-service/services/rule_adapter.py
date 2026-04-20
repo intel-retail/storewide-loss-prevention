@@ -377,6 +377,7 @@ class RuleEngineAdapter:
             person_id=object_id,
             region_id=region_id,
             entry_timestamp=entry_timestamp,
+            scene_id=session.scene_id,
         )
 
     async def on_ba_result(self, result: dict) -> None:
