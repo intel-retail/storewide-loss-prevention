@@ -24,17 +24,34 @@ class ConfigService:
         self._app_cfg = self._load_json("app_config.json")
         self._zone_cfg = self._load_json("zone_config.json")
 
-        # Multi-scene support: list of scene configs from zone_config.json
+        # Stream density: number of scene copies to run
+        self._stream_density = int(self._zone_cfg.get("stream_density", 1))
+
+        # Multi-scene support: build scene configs list
         self._scene_configs: List[dict] = self._zone_cfg.get("scenes", [])
         # Backward compat: if old flat format, wrap into scenes list
         if not self._scene_configs and self._zone_cfg.get("scene_name"):
-            self._scene_configs = [{
+            base = {
                 "scene_name": self._zone_cfg["scene_name"],
                 "scene_zip": self._zone_cfg.get("scene_zip", ""),
                 "cameras": [self._zone_cfg["camera_name"]] if self._zone_cfg.get("camera_name") else [],
                 "video_file": self._zone_cfg.get("video_file", ""),
                 "zones": self._zone_cfg.get("zones", {}),
-            }]
+            }
+            if self._stream_density > 1:
+                # Expand single scene × density into N scene configs
+                self._scene_configs = []
+                for i in range(1, self._stream_density + 1):
+                    cam = f"{base['cameras'][0]}-{i}" if base["cameras"] else ""
+                    self._scene_configs.append({
+                        "scene_name": f"{base['scene_name']} {i}",
+                        "scene_zip": f"{os.path.splitext(base['scene_zip'])[0]}-{i}.zip" if base["scene_zip"] else "",
+                        "cameras": [cam] if cam else [],
+                        "video_file": base["video_file"],
+                        "zones": dict(base["zones"]),
+                    })
+            else:
+                self._scene_configs = [base]
 
         # Zone name → type per scene: {"scene_name": {"region_name": "HIGH_VALUE"}}
         self._zone_name_map_per_scene: Dict[str, Dict[str, str]] = {}
@@ -115,6 +132,10 @@ class ConfigService:
     def get_scene_configs(self) -> List[dict]:
         """Return the list of scene configuration dicts."""
         return list(self._scene_configs)
+
+    def get_stream_density(self) -> int:
+        """Return the configured stream density."""
+        return self._stream_density
 
     def get_scene_id(self) -> Optional[str]:
         """Return first resolved scene UUID (backward compat). Use get_scene_ids() for multi-scene."""

@@ -5,8 +5,8 @@
 # Import SceneScape scene .zip file(s) via the REST API.
 # Runs as a sidecar container after the web service is healthy.
 #
-# SCENE_ZIP can be a single filename or comma-separated list of filenames.
-# If SCENE_ZIP is not set, imports all .zip files found in /webserver/.
+# When STREAM_DENSITY > 1, clones the base scene zip on-the-fly with unique
+# scene names and camera IDs, uploads each clone, then cleans up.
 
 set -e
 
@@ -14,6 +14,9 @@ set -e
 apt-get update -qq && apt-get install -y -qq curl > /dev/null 2>&1
 
 SCENE_ZIP_NAME="${SCENE_ZIP:-}"
+STREAM_DENSITY="${STREAM_DENSITY:-1}"
+SCENE_NAME="${SCENE_NAME:-}"
+CAMERA_NAME="${CAMERA_NAME:-}"
 SCENESCAPE_URL="${SCENESCAPE_URL:-https://web.scenescape.intel.com}"
 SCENESCAPE_USER="${SCENESCAPE_USER:-admin}"
 SCENESCAPE_PASSWORD="${SCENESCAPE_PASSWORD:-${SUPASS}}"
@@ -22,13 +25,31 @@ MAX_RETRIES="${MAX_RETRIES:-60}"
 RETRY_INTERVAL="${RETRY_INTERVAL:-5}"
 
 echo "=== SceneScape Scene Import ==="
+echo "  Stream density: ${STREAM_DENSITY}"
 
 # Build list of zip files to import
+# If STREAM_DENSITY > 1, clone the base zip on-the-fly
 ZIP_FILES=()
-if [ -n "${SCENE_ZIP_NAME}" ]; then
+CLONE_DIR=""
+
+if [ "${STREAM_DENSITY}" -gt 1 ] && [ -n "${SCENE_ZIP_NAME}" ]; then
+    BASE_ZIP="/webserver/${SCENE_ZIP_NAME}"
+    if [ ! -f "${BASE_ZIP}" ]; then
+        echo "ERROR: Base scene zip not found: ${BASE_ZIP}"
+        exit 1
+    fi
+    CLONE_DIR=$(mktemp -d)
+    echo "  Cloning base zip ${STREAM_DENSITY} times..."
+    python3 /scripts/clone_scene_zip.py \
+        "${BASE_ZIP}" "${CLONE_DIR}" "${SCENE_NAME}" "${CAMERA_NAME}" "${STREAM_DENSITY}" > /dev/null
+    for f in "${CLONE_DIR}"/*.zip; do
+        [ -f "$f" ] && ZIP_FILES+=("$f")
+    done
+    echo "  Generated ${#ZIP_FILES[@]} cloned zips in ${CLONE_DIR}"
+elif [ -n "${SCENE_ZIP_NAME}" ]; then
     IFS=',' read -ra ZIP_NAMES <<< "${SCENE_ZIP_NAME}"
     for name in "${ZIP_NAMES[@]}"; do
-        name=$(echo "$name" | xargs)  # trim whitespace
+        name=$(echo "$name" | xargs)
         [ -n "$name" ] && ZIP_FILES+=("/webserver/${name}")
     done
 else
@@ -38,7 +59,7 @@ else
 fi
 
 if [ ${#ZIP_FILES[@]} -eq 0 ]; then
-    echo "ERROR: No .zip files found in /webserver/ and SCENE_ZIP is not set."
+    echo "ERROR: No .zip files found and SCENE_ZIP is not set."
     exit 1
 fi
 
@@ -98,7 +119,6 @@ for SCENE_ZIP in "${ZIP_FILES[@]}"; do
         continue
     fi
 
-    # Import the scene .zip
     echo "  Uploading ${ZIP_BASENAME}..."
     IMPORT_RESPONSE=$(curl -s ${CURL_TLS_FLAGS} \
         -X POST "${SCENESCAPE_URL}/api/v1/import-scene/" \
@@ -108,6 +128,12 @@ for SCENE_ZIP in "${ZIP_FILES[@]}"; do
     echo "  Import response: ${IMPORT_RESPONSE}"
     IMPORT_SUCCESS=$((IMPORT_SUCCESS + 1))
 done
+
+# Cleanup cloned zips
+if [ -n "${CLONE_DIR}" ] && [ -d "${CLONE_DIR}" ]; then
+    rm -rf "${CLONE_DIR}"
+    echo "  Cleaned up temporary clones."
+fi
 
 echo ""
 echo "=== Scene Import Summary ==="

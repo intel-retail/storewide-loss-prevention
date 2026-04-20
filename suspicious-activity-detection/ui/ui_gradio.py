@@ -83,12 +83,16 @@ def get_scene_name():
     try:
         with open(ZONE_CONFIG, "r") as f:
             config = json.load(f)
+        scene_name = config.get("scene_name", "Unknown")
+        density = config.get("stream_density", 1)
+        # Support scenes array (backward compat)
         scenes = config.get("scenes", [])
         if scenes:
-            names = [s.get("scene_name", "Unknown") for s in scenes]
-            return ", ".join(names)
-        # Backward compat: flat format
-        return config.get("scene_name", "Unknown")
+            scene_name = scenes[0].get("scene_name", "Unknown")
+            density = len(scenes)
+        if density > 1:
+            return f"{scene_name} (x{density})"
+        return scene_name
     except Exception as e:
         return f"Unknown ({e})"
 

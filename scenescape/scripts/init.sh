@@ -55,63 +55,49 @@ if [ ! -f "${ZONE_CONFIG}" ]; then
     exit 1
 fi
 
-SCENE_NAME=$(python3 -c "
+# Read base scene config and stream_density
+CONFIG_VALUES=$(python3 -c "
 import json
 cfg = json.load(open('${ZONE_CONFIG}'))
+# Support both flat format and scenes array (backward compat)
 scenes = cfg.get('scenes', [])
 if scenes:
-    print(scenes[0].get('scene_name', ''))
+    s = scenes[0]
+    sn = s.get('scene_name', '')
+    cn = s.get('cameras', [s.get('camera_name', '')])[0] if s.get('cameras') or s.get('camera_name') else ''
+    vf = s.get('video_file', '')
+    sz = s.get('scene_zip', '')
+    sd = cfg.get('stream_density', 1)
 else:
-    print(cfg.get('scene_name', ''))
+    sn = cfg.get('scene_name', '')
+    cn = cfg.get('camera_name', '')
+    vf = cfg.get('video_file', '')
+    sz = cfg.get('scene_zip', '')
+    sd = cfg.get('stream_density', 1)
+print(f'{sn}|{cn}|{vf}|{sz}|{sd}')
 " 2>/dev/null)
-CAMERA_NAME=$(python3 -c "
-import json
-cfg = json.load(open('${ZONE_CONFIG}'))
-scenes = cfg.get('scenes', [])
-if scenes:
-    cams = scenes[0].get('cameras', [])
-    print(cams[0] if cams else scenes[0].get('camera_name', ''))
-else:
-    print(cfg.get('camera_name', ''))
-" 2>/dev/null)
-SCENE_ZIP=$(python3 -c "
-import json
-cfg = json.load(open('${ZONE_CONFIG}'))
-scenes = cfg.get('scenes', [])
-if scenes:
-    zips = [s.get('scene_zip', '') for s in scenes if s.get('scene_zip')]
-    print(','.join(zips))
-else:
-    print(cfg.get('scene_zip', ''))
-" 2>/dev/null)
-VIDEO_FILE=$(python3 -c "
-import json
-cfg = json.load(open('${ZONE_CONFIG}'))
-scenes = cfg.get('scenes', [])
-if scenes:
-    print(scenes[0].get('video_file', ''))
-else:
-    print(cfg.get('video_file', ''))
-" 2>/dev/null)
+IFS='|' read -r SCENE_NAME CAMERA_NAME VIDEO_FILE SCENE_ZIP_BASE STREAM_DENSITY <<< "${CONFIG_VALUES}"
 
-# Allow env var overrides
-SCENE_ZIP="${SCENE_ZIP:-storewide-loss-prevention.zip}"
+# Defaults
+STREAM_DENSITY="${STREAM_DENSITY:-1}"
 VIDEO_FILE="${VIDEO_FILE:-lp-camera1.mp4}"
+SCENE_ZIP_BASE="${SCENE_ZIP_BASE:-storewide-loss-prevention.zip}"
 
-echo "  Scene name:  ${SCENE_NAME}"
-echo "  Camera name: ${CAMERA_NAME}"
-echo "  Scene zip:   ${SCENE_ZIP}"
-echo "  Video file:  ${VIDEO_FILE}"
+echo "  Scene name:      ${SCENE_NAME}"
+echo "  Camera name:     ${CAMERA_NAME}"
+echo "  Video file:      ${VIDEO_FILE}"
+echo "  Base scene zip:  ${SCENE_ZIP_BASE}"
+echo "  Stream density:  ${STREAM_DENSITY}"
 
 if [ -z "${SCENE_NAME}" ] || [ -z "${CAMERA_NAME}" ]; then
     echo -e "${RED}ERROR: zone_config.json must have scene_name and camera_name${NC}"
     exit 1
 fi
 
-# Validate scene zip exists
-SCENE_ZIP_PATH="${SCENESCAPE_DIR}/webserver/${SCENE_ZIP}"
-if [ -n "${SCENE_ZIP}" ] && [ ! -f "${SCENE_ZIP_PATH}" ]; then
-    echo -e "${YELLOW}WARNING: Scene zip not found at ${SCENE_ZIP_PATH}${NC}"
+# Validate base scene zip exists
+BASE_ZIP_PATH="${SCENESCAPE_DIR}/webserver/${SCENE_ZIP_BASE}"
+if [ ! -f "${BASE_ZIP_PATH}" ]; then
+    echo -e "${YELLOW}WARNING: Base scene zip not found at ${BASE_ZIP_PATH}${NC}"
     echo "  Scene import will be skipped. Import manually via SceneScape UI."
 fi
 
@@ -122,8 +108,10 @@ if [ ! -f "${VIDEO_PATH}" ]; then
     echo "  Place your video file in scenescape/sample_data/"
 fi
 
-# ---- Step 3: Generate DLStreamer config.json ----
-echo -e "${YELLOW}[3/4] Generating DLStreamer pipeline config...${NC}"
+SCENE_ZIP="${SCENE_ZIP_BASE}"
+
+# ---- Step 3: Generate DLStreamer config + camera streams ----
+echo -e "${YELLOW}[3/4] Generating DLStreamer pipeline config + camera streams...${NC}"
 
 DLSTREAMER_TEMPLATE="${APP_DIR}/configs/pipeline-config.json"
 if [ ! -f "${DLSTREAMER_TEMPLATE}" ]; then
@@ -131,10 +119,64 @@ if [ ! -f "${DLSTREAMER_TEMPLATE}" ]; then
     exit 1
 fi
 
-sed "s/{{CAMERA_NAME}}/${CAMERA_NAME}/g" "${DLSTREAMER_TEMPLATE}" > "${DLSTREAMER_CONFIG}"
+# Generate DLStreamer config with N pipelines (one per camera)
+# and docker-compose.cameras.yaml with N ffmpeg services
+CAMERAS_COMPOSE="${APP_DIR}/docker/docker-compose.cameras.yaml"
+
+python3 -c "
+import json, sys
+
+template_path = '${DLSTREAMER_TEMPLATE}'
+dlstreamer_out = '${DLSTREAMER_CONFIG}'
+cameras_out = '${CAMERAS_COMPOSE}'
+camera_name = '${CAMERA_NAME}'
+video_file = '${VIDEO_FILE}'
+density = ${STREAM_DENSITY}
+
+# --- DLStreamer pipeline config ---
+with open(template_path) as f:
+    tpl = json.load(f)
+
+base_pipeline = tpl['config']['pipelines'][0]
+base_pipeline_str = json.dumps(base_pipeline)
+
+pipelines = []
+for i in range(1, density + 1):
+    cam = f'{camera_name}-{i}' if density > 1 else camera_name
+    p = json.loads(base_pipeline_str.replace('{{CAMERA_NAME}}', cam))
+    pipelines.append(p)
+
+tpl['config']['pipelines'] = pipelines
+with open(dlstreamer_out, 'w') as f:
+    json.dump(tpl, f, indent=2)
+
+# --- docker-compose.cameras.yaml ---
+services = {}
+for i in range(1, density + 1):
+    cam = f'{camera_name}-{i}' if density > 1 else camera_name
+    svc_name = f'lp-cams-{i}' if density > 1 else 'lp-cams'
+    services[svc_name] = {
+        'image': 'linuxserver/ffmpeg:version-8.0-cli',
+        'command': f'-nostdin -re -stream_loop -1 -i /workspace/media/{video_file} -c:v copy -an -f rtsp -rtsp_transport tcp rtsp://mediaserver:8554/{cam}',
+        'volumes': ['vol-sample-data:/workspace/media'],
+        'networks': ['storewide-lp'],
+        'depends_on': ['mediaserver'],
+        'restart': 'always',
+        'pids_limit': 1000,
+    }
+
+compose = {'services': services}
+
+import yaml
+with open(cameras_out, 'w') as f:
+    f.write('# Auto-generated by init.sh — do not edit\\n')
+    yaml.dump(compose, f, default_flow_style=False, sort_keys=False)
+
+print(f'Cameras: {density}', file=sys.stderr)
+" 2>&1
 
 echo "  Generated ${DLSTREAMER_CONFIG}"
-echo "  Pipeline: reid_${CAMERA_NAME}  cameraid: ${CAMERA_NAME}"
+echo "  Generated ${CAMERAS_COMPOSE}"
 
 # ---- Step 4: Generate .env file ----
 echo -e "${YELLOW}[4/4] Generating docker/.env...${NC}"
@@ -172,6 +214,7 @@ SCENE_NAME=${SCENE_NAME}
 CAMERA_NAME=${CAMERA_NAME}
 SCENE_ZIP=${SCENE_ZIP}
 VIDEO_FILE=${VIDEO_FILE}
+STREAM_DENSITY=${STREAM_DENSITY}
 
 # DLStreamer pipeline config (app-specific, generated by init.sh)
 PIPELINE_CONFIG=../scenescape/dlstreamer-pipeline-server/${APP_NAME}-pipeline-config.json
@@ -213,6 +256,7 @@ echo "  Env:              ${ENV_FILE}"
 echo ""
 echo "Scene: ${SCENE_NAME}"
 echo "  Camera: ${CAMERA_NAME}  Video: ${VIDEO_FILE}  Zip: ${SCENE_ZIP}"
+echo "  Stream density: ${STREAM_DENSITY}"
 echo -e "  SUPASS: ${YELLOW}${SUPASS}${NC}"
 echo ""
 echo "To change scene/camera: edit configs/zone_config.json, then re-run init.sh"

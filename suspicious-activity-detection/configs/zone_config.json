@@ -6,26 +6,13 @@
     "regions_path": "/api/v1/regions",
     "verify_ssl": false
   },
-  "scenes": [
-    {
-      "scene_name": "storewide loss prevention",
-      "scene_zip": "storewide-loss-prevention.zip",
-      "cameras": ["lp-camera1"],
-      "video_file": "lp-camera1.mp4",
-      "zones": {
-        "aisle1": "HIGH_VALUE",
-        "aisle2": "CHECKOUT"
-      }
-    },
-    {
-      "scene_name": "storewide loss prevention 1",
-      "scene_zip": "storewide-loss-prevention-1.zip",
-      "cameras": ["lp-camera1"],
-      "video_file": "lp-camera1.mp4",
-      "zones": {
-        "aisle1": "HIGH_VALUE",
-        "aisle2": "CHECKOUT"
-      }
-    }
-  ]
+  "stream_density": 1,
+  "scene_name": "storewide loss prevention",
+  "scene_zip": "storewide-loss-prevention.zip",
+  "camera_name": "lp-camera1",
+  "video_file": "lp-camera1.mp4",
+  "zones": {
+    "aisle1": "HIGH_VALUE",
+    "aisle2": "CHECKOUT"
+  }
 }
