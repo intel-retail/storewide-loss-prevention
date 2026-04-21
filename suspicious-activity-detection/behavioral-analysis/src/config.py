@@ -19,13 +19,24 @@ class Settings(BaseSettings):
     debug: bool = False
     log_level: str = "INFO"
 
-    # YOLO-Pose model settings
-    yolo_model_path: str = "yolo11n-pose.pt"
+    # Pose confidence threshold
     pose_confidence_threshold: float = 0.5
 
+    # Pose model settings
+    yolo_pose_model: str = "/models/yolo_models/yolo11n-pose/yolo11n-pose.xml"
+    gst_inference_device: str = "CPU"
+
+    # Legacy GStreamer settings (kept for backwards compatibility)
+    person_detector_model: str = "/omz_models/intel/person-detection-retail-0013/FP32/person-detection-retail-0013.xml"
+    rtmpose_model: str = "/models/rtmpose_models/rtmpose/rtmpose.xml"
+    gvapython_module: str = "/app/src/pose_logger_rtmpose.py"
+    gst_detect_threshold: float = 0.15
+    gst_pipeline_timeout: int = 120
+
     # Frame analysis settings
-    min_frames_for_detection: int = 10
+    min_frames_for_detection: int = 3
     max_frames_to_fetch: int = 20
+    pose_frames_count: int = 10
 
     # SeaweedFS settings
     seaweedfs_endpoint: str = "http://localhost:8333"
@@ -64,7 +75,7 @@ def load_pattern_config(path: str) -> dict[str, Any]:
         logger.warning(f"Pattern config not found: {path}, using defaults")
         return {}
 
-    with open(config_path) as f:
+    with open(config_path, encoding="utf-8") as f:
         config = yaml.safe_load(f)
 
     patterns = config.get("patterns", {})

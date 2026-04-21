@@ -169,9 +169,7 @@ class RuleEngineAdapter:
                 await self._execute_alert(action, event, session)
             elif action.type == "escalate":
                 if action.params.get("service") == "behavioral_analysis":
-                    await self._trigger_behavioral_analysis(
-                        event.object_id, event.region_id
-                    )
+                    self._publish_ba_request(event.object_id, event.region_id)
 
     async def _execute_alert(
         self, action: Action, event: RegionEvent, session
@@ -387,8 +385,10 @@ class RuleEngineAdapter:
             )
             await self._fire_alert(alert)
         elif status == "no_match":
+            # Do NOT set ba_alerted — allow re-analysis on next poll cycle
+            # so the pipeline can run again with newly accumulated frames.
             logger.debug(
-                "BA queue: no suspicious pattern",
+                "BA queue: no suspicious pattern — will re-analyze on next cycle",
                 person_id=person_id,
                 region_id=region_id,
             )

@@ -1,9 +1,11 @@
 # Copyright (C) 2026 Intel Corporation
 # SPDX-License-Identifier: Apache-2.0
 """
-Pose Analyzer using YOLO-Pose
+Pose Analyzer
 
-Extracts keypoints from frames and detects suspicious activity patterns.
+Detects suspicious activity patterns from pose sequences.
+Pose extraction is handled by the GStreamer DL Streamer pipeline
+(gvadetect + gvainference + gvapython with pose_logger_rtmpose.py).
 When a pose pattern matches, optionally sends frames to VLM for confirmation.
 The service is generic — patterns and prompts are loaded from config.
 """
@@ -13,7 +15,6 @@ from dataclasses import dataclass, field
 from typing import Any, Optional
 
 import numpy as np
-from yolo_pose_ov import YOLOPoseOV
 
 from vlm_client import VLMClient
 
@@ -113,85 +114,26 @@ class PoseAnalyzer:
     """
     Analyzes pose sequences to detect suspicious patterns.
 
-    Uses YOLO-Pose for keypoint extraction and rule-based pattern matching.
-    When a pose pattern matches, sends frames to VLM for visual confirmation.
+    Pose extraction is handled externally by the GStreamer DL Streamer pipeline.
+    This class provides pattern matching on pose sequences and VLM confirmation.
     """
 
     def __init__(
         self,
-        model_path: str = "yolo11n-pose.pt",
         min_frames: int = 10,
         confidence_threshold: float = 0.5,
         vlm_client: Optional[VLMClient] = None,
         pattern_config: Optional[dict[str, Any]] = None,
     ):
-        self.model_path = model_path
         self.min_frames = min_frames
         self.confidence_threshold = confidence_threshold
         self.vlm_client = vlm_client
         self.pattern_config = pattern_config or {}
-        self.model: Optional[YOLOPoseOV] = None
-
-        self._load_model()
-
-    def _load_model(self):
-        """Load YOLO-Pose model."""
-        try:
-            logger.info(f"Loading YOLO-Pose model: {self.model_path}")
-            self.model = YOLOPoseOV(self.model_path)
-            logger.info("Model loaded successfully")
-        except Exception as e:
-            logger.error(f"Failed to load model: {e}")
-            raise
+        logger.info("PoseAnalyzer initialized (pattern detection + VLM confirmation)")
 
     def is_loaded(self) -> bool:
-        """Check if model is loaded."""
-        return self.model is not None
-
-    def extract_poses(self, frames: list[tuple[np.ndarray, int]]) -> list[Pose]:
-        """
-        Extract pose keypoints from frames.
-
-        Args:
-            frames: List of (frame_image, timestamp) tuples
-
-        Returns:
-            List of Pose objects
-        """
-        poses = []
-
-        for frame_img, timestamp in frames:
-            try:
-                # Run YOLO-Pose inference
-                results = self.model(frame_img, verbose=False)
-
-                for result in results:
-                    if result.keypoints is None or len(result.keypoints.xy) == 0:
-                        continue
-
-                    # Get first person's keypoints (frame should be cropped to single person)
-                    kp_xy = result.keypoints.xy[0]  # Shape: [17, 2]
-                    kp_conf = result.keypoints.conf[0]  # Shape: [17]
-
-                    # Normalize coordinates to 0-1 range
-                    h, w = frame_img.shape[:2]
-                    kp_xy_norm = kp_xy.copy()
-                    kp_xy_norm[:, 0] /= w
-                    kp_xy_norm[:, 1] /= h
-
-                    pose = Pose(
-                        keypoints=kp_xy_norm,
-                        confidences=kp_conf,
-                        timestamp=timestamp,
-                    )
-                    poses.append(pose)
-                    break  # Only first person per frame
-
-            except Exception as e:
-                logger.warning(f"Failed to extract pose from frame: {e}")
-                continue
-
-        return poses
+        """Check if analyzer is ready."""
+        return True
 
     def detect_pattern(
         self,
@@ -221,12 +163,38 @@ class PoseAnalyzer:
         if pattern_id == "shelf_to_waist":
             return self._detect_shelf_to_waist(pose_sequence, pattern_cfg)
         else:
+            logger.warning(
+                "Pattern '%s' is configured but has no implementation — skipping",
+                pattern_id,
+            )
             return PatternResult(
                 matched=False,
                 confidence=0.0,
                 pattern_id=pattern_id,
-                description=f"Unknown pattern: {pattern_id}",
+                description=f"Pattern '{pattern_id}' not implemented",
             )
+
+    def detect_all_patterns(
+        self,
+        pose_sequence: list[Pose],
+    ) -> list[PatternResult]:
+        """
+        Run all enabled patterns against a pose sequence.
+
+        Args:
+            pose_sequence: List of Pose objects (chronological order)
+
+        Returns:
+            List of PatternResult for each enabled pattern
+        """
+        pattern_ids = list(self.pattern_config.keys()) if self.pattern_config else ["shelf_to_waist"]
+        results = []
+        for pattern_id in pattern_ids:
+            cfg = self.pattern_config.get(pattern_id, {})
+            if cfg and not cfg.get("enabled", True):
+                continue
+            results.append(self.detect_pattern(pose_sequence, pattern_id))
+        return results
 
     async def analyze_with_vlm(
         self,
@@ -334,17 +302,26 @@ class PoseAnalyzer:
 
         Pattern: Hand moves from above chest level to waist/pocket area.
 
-        Detection logic:
-        1. First half of window: hand should be ABOVE chest (reaching to shelf)
-        2. Second half of window: hand should be NEAR waist (concealing)
+        Detection logic (sliding window):
+        For each possible split point in the sequence, check whether the
+        early portion has enough "hand raised" frames and the late portion
+        has enough "hand at waist" frames.  This avoids requiring the
+        transition to happen exactly at the midpoint.
+
+        Body-relative threshold:
+        Instead of a fixed normalised distance, the waist proximity
+        threshold is expressed as a fraction of the person's torso length
+        (shoulder-midpoint to hip-midpoint), so it scales with distance
+        from the camera.
         """
         if pattern_cfg is None:
             pattern_cfg = {}
         pose_cfg = pattern_cfg.get("pose", {})
 
         min_raised = pose_cfg.get("min_hand_raised_frames", 2)
-        min_at_waist = pose_cfg.get("min_hand_at_waist_frames", 3)
-        waist_threshold = pose_cfg.get("waist_proximity_threshold", 0.15)
+        min_at_waist = pose_cfg.get("min_hand_at_waist_frames", 2)
+        waist_ratio = pose_cfg.get("waist_proximity_ratio", 0.6)
+
         if len(poses) < self.min_frames:
             return PatternResult(
                 matched=False,
@@ -353,70 +330,90 @@ class PoseAnalyzer:
                 description=f"Not enough frames: {len(poses)}/{self.min_frames}",
             )
 
-        # Split into first half (reaching) and second half (concealing)
-        mid = len(poses) // 2
-        first_half = poses[:mid]
-        second_half = poses[mid:]
-
-        # Check both wrists
+        # Pre-classify each frame per wrist: "raised", "at_waist", or None
         for wrist_name, wrist_getter in [
             ("left", lambda p: p.left_wrist),
             ("right", lambda p: p.right_wrist),
         ]:
-            # Step 1: Check if hand was above chest in first half
-            hand_raised_count = 0
-            for pose in first_half:
+            raised_flags: list[bool] = []
+            waist_flags: list[bool] = []
+
+            for pose in poses:
                 wrist = wrist_getter(pose)
-                chest = pose.chest_midpoint
+                ls = pose.left_shoulder
+                rs = pose.right_shoulder
+                lh = pose.left_hip
+                rh = pose.right_hip
 
-                # Check confidence
-                if wrist[2] < self.confidence_threshold:
-                    continue
-
-                # Hand above chest? (lower y = higher in image)
-                if wrist[1] < chest[1]:
-                    hand_raised_count += 1
-
-            # Need at least min_raised frames with hand raised
-            if hand_raised_count < min_raised:
-                continue
-
-            # Step 2: Check if hand moved to waist in second half
-            hand_at_waist_count = 0
-            for pose in second_half:
-                wrist = wrist_getter(pose)
-                waist = pose.waist_midpoint
-
-                # Check confidence
-                if wrist[2] < self.confidence_threshold:
-                    continue
-
-                # Hand near waist? (within 15% of frame height)
-                distance = self._euclidean_distance(
-                    (wrist[0], wrist[1]),
-                    waist,
+                # Skip frame if wrist or body keypoints are low confidence
+                body_ok = (
+                    wrist[2] >= self.confidence_threshold
+                    and ls[2] >= self.confidence_threshold
+                    and rs[2] >= self.confidence_threshold
+                    and lh[2] >= self.confidence_threshold
+                    and rh[2] >= self.confidence_threshold
                 )
 
-                if distance < waist_threshold:
-                    hand_at_waist_count += 1
+                if not body_ok:
+                    raised_flags.append(False)
+                    waist_flags.append(False)
+                    continue
 
-            # Need at least min_at_waist frames with hand at waist
-            if hand_at_waist_count < min_at_waist:
-                continue
+                chest = pose.chest_midpoint
+                waist = pose.waist_midpoint
 
-            # Pattern detected!
-            confidence = min(
-                1.0,
-                (hand_raised_count + hand_at_waist_count) / (mid + len(second_half)),
-            )
+                # Torso length for body-relative threshold
+                torso_len = self._euclidean_distance(chest, waist)
+                if torso_len < 1e-4:
+                    raised_flags.append(False)
+                    waist_flags.append(False)
+                    continue
 
-            return PatternResult(
-                matched=True,
-                confidence=confidence,
-                pattern_id="shelf_to_waist",
-                description=f"{wrist_name.capitalize()} hand: raised in {hand_raised_count} frames, "
-                f"at waist in {hand_at_waist_count} frames",
-            )
+                wrist_pt = (wrist[0], wrist[1])
+
+                # Hand above waist? (lower y = higher in image)
+                # Uses waist midpoint as reference — retail shelves are
+                # typically at chest-to-waist height from store cameras.
+                is_raised = wrist[1] < waist[1]
+
+                # Hand near waist? (distance < waist_ratio * torso_len)
+                dist_to_waist = self._euclidean_distance(wrist_pt, waist)
+                is_at_waist = dist_to_waist < (waist_ratio * torso_len)
+
+                raised_flags.append(is_raised)
+                waist_flags.append(is_at_waist)
+
+            # Sliding split: try every split point from min_raised .. len-min_at_waist
+            n = len(poses)
+            best_conf = 0.0
+            best_split = -1
+            best_raised = 0
+            best_waist = 0
+
+            for split in range(min_raised, n - min_at_waist + 1):
+                r_count = sum(raised_flags[:split])
+                w_count = sum(waist_flags[split:])
+
+                if r_count >= min_raised and w_count >= min_at_waist:
+                    conf = (r_count + w_count) / n
+                    if conf > best_conf:
+                        best_conf = conf
+                        best_split = split
+                        best_raised = r_count
+                        best_waist = w_count
+
+            if best_split >= 0:
+                return PatternResult(
+                    matched=True,
+                    confidence=min(1.0, best_conf),
+                    pattern_id="shelf_to_waist",
+                    description=(
+                        f"{wrist_name.capitalize()} hand: raised in "
+                        f"{best_raised} frames (0-{best_split - 1}), "
+                        f"at waist in {best_waist} frames "
+                        f"({best_split}-{n - 1})"
+                    ),
+                )
 
         # No pattern detected
         return PatternResult(

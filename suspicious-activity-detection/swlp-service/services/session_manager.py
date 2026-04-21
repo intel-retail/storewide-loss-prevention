@@ -96,7 +96,7 @@ class SessionManager:
                 continue
 
             cameras = obj.get("visibility", obj.get("camera_ids", obj.get("cameras", [])))
-            bbox = obj.get("center_of_mass", obj.get("bounding_box", obj.get("bbox")))
+            bbox = obj.get("bounding_box", obj.get("bbox"))
 
             # Filter: only track persons visible on configured cameras
             if self._allowed_cameras:
