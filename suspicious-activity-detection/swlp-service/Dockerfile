@@ -18,6 +18,9 @@ RUN pip install --no-cache-dir uv==0.9.22
 # Copy detection service
 COPY swlp-service/ /app/
 
+# Copy stream density utility
+COPY stream_density.py /app/stream_density.py
+
 # Copy and install rule-engine package
 COPY rule-engine/ /tmp/rule-engine/
 

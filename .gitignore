@@ -14,3 +14,9 @@ scenescape/secrets/*.auth
 
 # Generated DLStreamer config (created by init.sh from pipeline-config.json)
 scenescape/dlstreamer-pipeline-server/*-pipeline-config.json
+
+# Generated camera compose (created by init.sh / stream_density.py)
+suspicious-activity-detection/docker/docker-compose.cameras.yaml
+
+# Copied by init.sh for scene-import container
+scenescape/webserver/stream_density.py

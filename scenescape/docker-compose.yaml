@@ -172,7 +172,6 @@ services:
       - NO_PROXY=${NO_PROXY:-},web.scenescape.intel.com,localhost,127.0.0.1
     volumes:
       - ../scenescape/webserver:/webserver:ro
-      - ../scenescape/scripts/clone_scene_zip.py:/scripts/clone_scene_zip.py:ro
     secrets:
       - source: root-cert
         target: certs/scenescape-ca.pem

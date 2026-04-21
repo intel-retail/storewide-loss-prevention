@@ -33,6 +33,10 @@ ZIP_FILES=()
 CLONE_DIR=""
 
 if [ "${STREAM_DENSITY}" -gt 1 ] && [ -n "${SCENE_ZIP_NAME}" ]; then
+    if [ ! -f "/webserver/stream_density.py" ]; then
+        echo "ERROR: stream_density.py not found — cannot clone zips for density ${STREAM_DENSITY}"
+        exit 1
+    fi
     BASE_ZIP="/webserver/${SCENE_ZIP_NAME}"
     if [ ! -f "${BASE_ZIP}" ]; then
         echo "ERROR: Base scene zip not found: ${BASE_ZIP}"
@@ -40,7 +44,7 @@ if [ "${STREAM_DENSITY}" -gt 1 ] && [ -n "${SCENE_ZIP_NAME}" ]; then
     fi
     CLONE_DIR=$(mktemp -d)
     echo "  Cloning base zip ${STREAM_DENSITY} times..."
-    python3 /scripts/clone_scene_zip.py \
+    python3 /webserver/stream_density.py clone-zip \
         "${BASE_ZIP}" "${CLONE_DIR}" "${SCENE_NAME}" "${CAMERA_NAME}" "${STREAM_DENSITY}" > /dev/null
     for f in "${CLONE_DIR}"/*.zip; do
         [ -f "$f" ] && ZIP_FILES+=("$f")

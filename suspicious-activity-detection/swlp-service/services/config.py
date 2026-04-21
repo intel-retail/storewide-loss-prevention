@@ -9,6 +9,12 @@ from pathlib import Path
 from typing import Dict, List, Optional
 
 import structlog
+import yaml
+
+try:
+    from stream_density import expand_scene_configs
+except ImportError:
+    expand_scene_configs = None
 
 logger = structlog.get_logger(__name__)
 
@@ -23,6 +29,7 @@ class ConfigService:
             self._config_dir = Path(__file__).resolve().parent.parent.parent / "configs"
         self._app_cfg = self._load_json("app_config.json")
         self._zone_cfg = self._load_json("zone_config.json")
+        self._rules_settings = self._load_rules_settings()
 
         # Stream density: number of scene copies to run
         self._stream_density = int(self._zone_cfg.get("stream_density", 1))
@@ -38,18 +45,8 @@ class ConfigService:
                 "video_file": self._zone_cfg.get("video_file", ""),
                 "zones": self._zone_cfg.get("zones", {}),
             }
-            if self._stream_density > 1:
-                # Expand single scene × density into N scene configs
-                self._scene_configs = []
-                for i in range(1, self._stream_density + 1):
-                    cam = f"{base['cameras'][0]}-{i}" if base["cameras"] else ""
-                    self._scene_configs.append({
-                        "scene_name": f"{base['scene_name']} {i}",
-                        "scene_zip": f"{os.path.splitext(base['scene_zip'])[0]}-{i}.zip" if base["scene_zip"] else "",
-                        "cameras": [cam] if cam else [],
-                        "video_file": base["video_file"],
-                        "zones": dict(base["zones"]),
-                    })
+            if expand_scene_configs:
+                self._scene_configs = expand_scene_configs(base, self._stream_density)
             else:
                 self._scene_configs = [base]
 
@@ -85,6 +82,15 @@ class ConfigService:
             return {}
         with open(path, "r") as f:
             return json.load(f)
+
+    def _load_rules_settings(self) -> dict:
+        path = self._config_dir / "rules.yaml"
+        if not path.exists():
+            logger.warning("rules.yaml not found, using empty settings")
+            return {}
+        with open(path, "r") as f:
+            data = yaml.safe_load(f) or {}
+        return data.get("settings", {})
 
     # ---- store ----
     def get_store_id(self) -> str:
@@ -208,7 +214,7 @@ class ConfigService:
 
     # ---- rules ----
     def get_rules_config(self) -> dict:
-        return self._app_cfg.get("rules", {})
+        return self._rules_settings
 
     def get_rules_yaml_path(self) -> Path:
         return self._config_dir / "rules.yaml"

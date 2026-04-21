@@ -46,14 +46,14 @@ class RuleEngineAdapter:
         self._ba_publisher = ba_publisher
 
         rules_cfg = config.get_rules_config()
-        self.loiter_poll_interval = rules_cfg.get("loiter_poll_interval_seconds", 60)
         self.ba_poll_interval = rules_cfg.get("ba_poll_interval_seconds", 1)
+        self._loiter_threshold = float(rules_cfg.get("loiter_threshold_seconds", 20))
         self._pending_cleanups: set[str] = set()  # track scheduled cleanups by "{object_id}:{region_id}"
 
         logger.info(
             "RuleEngineAdapter initialized",
-            loiter_poll_interval=self.loiter_poll_interval,
             ba_poll_interval=self.ba_poll_interval,
+            loiter_threshold=self._loiter_threshold,
             rules_loaded=len(engine.rules),
         )
 
@@ -98,6 +98,33 @@ class RuleEngineAdapter:
                             event.object_id, event.region_id, event.region_name, event.dwell_seconds,
                         )
                     )
+
+        elif event.event_type == EventType.LOITER:
+            # Loiter detected by continuous region-data feed — fire alert directly
+            if session.loiter_alerted.get(event.region_id):
+                return
+            alert = Alert(
+                alert_type=AlertType.LOITERING,
+                alert_level=AlertLevel.WARNING,
+                object_id=event.object_id,
+                timestamp=event.timestamp,
+                region_id=event.region_id,
+                region_name=event.region_name,
+                details={
+                    "dwell_seconds": event.dwell_seconds,
+                    "threshold": self._loiter_threshold,
+                    "source": "region_data_feed",
+                },
+            )
+            logger.warning(
+                "Loitering detected (region data feed)",
+                object_id=event.object_id,
+                zone=event.region_name,
+                dwell=event.dwell_seconds,
+            )
+            session.loiter_alerted[event.region_id] = True
+            await self._fire_alert(alert)
+            return
 
         # ---- Map event_type to rule trigger string ----
         trigger_event = (
@@ -230,69 +257,6 @@ class RuleEngineAdapter:
                 "threshold": params.get("threshold", 120),
             }
         return {}
-
-    # ---- active loiter polling -----------------------------------------------
-
-    async def run_loiter_check_loop(self) -> None:
-        """
-        Background task: poll for persons still in HIGH_VALUE zones
-        whose dwell exceeds the loitering threshold.
-        """
-        if not self._engine.is_rule_enabled("loitering"):
-            logger.info("Loitering rule disabled — skipping poll loop")
-            return
-
-        loiter_rule = self._engine.get_rule("loitering")
-        threshold = 120.0
-        if loiter_rule:
-            for cond in loiter_rule.get("conditions", []):
-                if "dwell" in cond.get("field", ""):
-                    threshold = float(cond["value"])
-                    break
-
-        while True:
-            await asyncio.sleep(self.loiter_poll_interval)
-            try:
-                now = datetime.now(timezone.utc)
-                for session in self.session_mgr.get_all_sessions().values():
-                    for zone_id, entry_ts_iso in session.current_zones.items():
-                        zone_type = self.config.get_zone_type(zone_id)
-                        if zone_type != "HIGH_VALUE":
-                            continue
-                        if session.loiter_alerted.get(zone_id):
-                            continue
-
-                        try:
-                            entry_ts = datetime.fromisoformat(entry_ts_iso)
-                        except (ValueError, TypeError):
-                            continue
-
-                        dwell = (now - entry_ts).total_seconds()
-                        if dwell > threshold:
-                            zone_name = self.config.get_zone_name(zone_id) or zone_id
-                            alert = Alert(
-                                alert_type=AlertType.LOITERING,
-                                alert_level=AlertLevel.WARNING,
-                                object_id=session.object_id,
-                                timestamp=now,
-                                region_id=zone_id,
-                                region_name=zone_name,
-                                details={
-                                    "dwell_seconds": round(dwell, 1),
-                                    "threshold": threshold,
-                                    "source": "active_poll",
-                                },
-                            )
-                            logger.warning(
-                                "Loitering detected (active poll)",
-                                object_id=session.object_id,
-                                zone=zone_name,
-                                dwell=round(dwell, 1),
-                            )
-                            session.loiter_alerted[zone_id] = True
-                            await self._fire_alert(alert)
-            except Exception:
-                logger.exception("Error in loiter check loop")
 
     # ---- active BA polling ---------------------------------------------------
 

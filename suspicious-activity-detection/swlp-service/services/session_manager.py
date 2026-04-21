@@ -3,16 +3,15 @@
 """
 Session Manager — owns the live state of every person currently in the store.
 
-Consumes two SceneScape MQTT feeds:
-  1. scene-data  (scenescape/data/scene/+/+)   — position updates, camera visibility
+Consumes three SceneScape MQTT feeds:
+  1. scene-data    (scenescape/data/scene/+/+)    — position updates, camera visibility
   2. region-events (scenescape/event/region/+/+/+) — native ENTERED / EXITED with dwell
-
-The scene-data feed keeps sessions alive (last_seen) and tracks cameras/bbox.
-The region-event feed drives ENTERED / EXITED / PERSON_LOST events using
-SceneScape's own boundary detection and dwell calculation — no local diffing needed.
+  3. region-data   (scenescape/data/region/+/+)    — continuous per-frame object presence
+     for real-time loiter detection (dwell computed from SceneScape's entry timestamps)
 """
 
 import asyncio
+import time
 from datetime import datetime, timezone
 from typing import Callable, Dict, List, Optional, Set
 
@@ -39,6 +38,7 @@ class SessionManager:
         self.config = config
         rules = config.get_rules_config()
         self.session_timeout = rules.get("session_timeout_seconds", 30)
+        self._loiter_threshold = float(rules.get("loiter_threshold_seconds", 20))
 
         # Build set of configured camera names for filtering
         self._allowed_cameras = {c["name"] for c in config.get_cameras()} if config.get_cameras() else set()
@@ -186,6 +186,69 @@ class SessionManager:
             session.last_seen = now
 
             await self._fire_exit(session, region_id, now, dwell_override=dwell)
+
+    # ---- region-data handler: continuous dwell checking ----------------------
+    async def on_region_data(
+        self, scene_id: str, region_id: str, data: dict
+    ) -> None:
+        """
+        Process a scenescape/data/region/{scene_id}/{region_id} message.
+
+        This is the continuous feed — every frame, SceneScape publishes all
+        objects currently inside a region. Each object carries
+        regions.{name}.entered (epoch timestamp) from which we compute live dwell.
+
+        Used for loiter detection without any local timestamp tracking or polling.
+        """
+        scene_id_filter = self.config.get_accepted_scene_ids()
+        if scene_id_filter and scene_id not in scene_id_filter:
+            return
+
+        zone_type = self.config.get_zone_type(region_id)
+        if zone_type != "HIGH_VALUE":
+            return
+
+        now_epoch = time.time()
+
+        for obj in data.get("objects", []):
+            oid = str(obj.get("id", ""))
+            if not oid:
+                continue
+
+            session = self._sessions.get(oid)
+            if not session:
+                continue
+
+            # Already alerted for this zone — skip
+            if session.loiter_alerted.get(region_id):
+                continue
+
+            # Read SceneScape's entry timestamp from the object's region data
+            regions = obj.get("regions", {})
+            for rname, rinfo in regions.items():
+                entered_str = rinfo.get("entered")
+                if not entered_str:
+                    continue
+                try:
+                    entered_dt = datetime.fromisoformat(entered_str.replace("Z", "+00:00"))
+                    entered_epoch = entered_dt.timestamp()
+                except (ValueError, TypeError):
+                    continue
+
+                dwell = now_epoch - entered_epoch
+                if dwell > self._loiter_threshold:
+                    zone_name = self.config.get_zone_name(region_id) or region_id
+                    event = RegionEvent(
+                        event_type=EventType.LOITER,
+                        object_id=oid,
+                        region_id=region_id,
+                        region_name=zone_name,
+                        zone_type=ZoneType(zone_type),
+                        timestamp=datetime.now(timezone.utc),
+                        dwell_seconds=round(dwell, 1),
+                    )
+                    await self._emit(event)
+                    break  # one alert per object per region_data message
 
     # ---- session expiry ------------------------------------------------------
     async def _expire_session(self, oid: str) -> None:

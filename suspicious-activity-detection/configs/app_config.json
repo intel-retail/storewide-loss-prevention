@@ -39,10 +39,5 @@
     "base_url": "http://alert-service:8000",
     "timeout_seconds": 10,
     "enabled": true
-  },
-  "rules": {
-    "session_timeout_seconds": 90,
-    "behavioural_analysis_fps": 5,
-    "ba_poll_interval_seconds": 1
   }
 }

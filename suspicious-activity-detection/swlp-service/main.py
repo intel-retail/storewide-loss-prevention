@@ -243,6 +243,9 @@ async def lifespan(app: FastAPI):
     # MQTT region events → session manager (enter/exit with dwell from SceneScape)
     mqtt_svc.register_region_event_handler(session_mgr.on_region_event)
 
+    # MQTT region data → session manager (continuous dwell checking via SceneScape feed)
+    mqtt_svc.register_region_data_handler(session_mgr.on_region_data)
+
     # MQTT camera images → frame storage (cropped person frames for HIGH_VALUE zones)
     async def on_camera_image(camera_name: str, data: dict) -> None:
         image_b64 = data.get("image", data.get("data", ""))
@@ -306,7 +309,6 @@ async def lifespan(app: FastAPI):
     mqtt_task = asyncio.create_task(mqtt_svc.start())
     expiry_task = asyncio.create_task(session_mgr.run_expiry_loop())
     frame_req_task = asyncio.create_task(frame_request_loop())
-    loiter_task = asyncio.create_task(rule_adapter.run_loiter_check_loop())
     ba_task = asyncio.create_task(rule_adapter.run_ba_check_loop())
 
     logger.info(
@@ -323,7 +325,6 @@ async def lifespan(app: FastAPI):
     await mqtt_svc.stop()
     expiry_task.cancel()
     frame_req_task.cancel()
-    loiter_task.cancel()
     ba_task.cancel()
     mqtt_task.cancel()
 

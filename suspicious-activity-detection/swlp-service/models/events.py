@@ -11,6 +11,7 @@ from typing import Optional
 class EventType(str, Enum):
     ENTERED = "ENTERED"
     EXITED = "EXITED"
+    LOITER = "LOITER"
     PERSON_LOST = "PERSON_LOST"
 
 
