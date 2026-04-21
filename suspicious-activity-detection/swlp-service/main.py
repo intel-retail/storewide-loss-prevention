@@ -16,7 +16,6 @@ External services (called conditionally):
 
 import asyncio
 import base64
-import io
 import logging
 import os
 from contextlib import asynccontextmanager
@@ -25,8 +24,6 @@ from datetime import datetime, timezone
 import structlog
 import uvicorn
 from fastapi import FastAPI
-from PIL import Image
-
 from api.routes import router
 from services.config import ConfigService
 from services.mqtt_service import MQTTService
@@ -61,66 +58,6 @@ structlog.configure(
 )
 
 logger = structlog.get_logger(__name__)
-
-
-# ---- Frame cropping helper ---------------------------------------------------
-
-def _crop_to_bbox(image_bytes: bytes, bbox) -> bytes:
-    """
-    Crop image to bounding box if valid pixel-space bbox is available.
-
-    Supports bbox formats:
-      - dict with {x, y, w, h}  (top-left + dimensions)
-      - dict with {x1, y1, x2, y2}  (corner coordinates)
-      - list/tuple [x1, y1, x2, y2] or [x, y, w, h]
-    Falls back to full frame if bbox is missing or unusable.
-    """
-    if not bbox:
-        return image_bytes
-    try:
-        img = Image.open(io.BytesIO(image_bytes))
-        img_w, img_h = img.size
-
-        # Parse bbox into (left, upper, right, lower) for PIL
-        if isinstance(bbox, dict):
-            if "x1" in bbox and "y1" in bbox:
-                left, upper = int(bbox["x1"]), int(bbox["y1"])
-                right = int(bbox.get("x2", img_w))
-                lower = int(bbox.get("y2", img_h))
-            elif "x" in bbox and "y" in bbox and "w" in bbox and "h" in bbox:
-                left, upper = int(bbox["x"]), int(bbox["y"])
-                right, lower = left + int(bbox["w"]), upper + int(bbox["h"])
-            else:
-                return image_bytes
-        elif isinstance(bbox, (list, tuple)) and len(bbox) == 4:
-            vals = [int(v) for v in bbox]
-            # Heuristic: if 3rd/4th values are small relative to image,
-            # treat as [x, y, w, h]; otherwise [x1, y1, x2, y2]
-            if vals[2] <= img_w and vals[3] <= img_h and vals[2] > vals[0]:
-                left, upper, right, lower = vals
-            else:
-                left, upper = vals[0], vals[1]
-                right, lower = vals[0] + vals[2], vals[1] + vals[3]
-        else:
-            return image_bytes
-
-        # Clamp to image bounds
-        left = max(0, min(left, img_w - 1))
-        upper = max(0, min(upper, img_h - 1))
-        right = max(left + 1, min(right, img_w))
-        lower = max(upper + 1, min(lower, img_h))
-
-        # Only crop if the region is meaningfully smaller than the full frame
-        crop_area = (right - left) * (lower - upper)
-        if crop_area >= img_w * img_h * 0.95:
-            return image_bytes
-
-        cropped = img.crop((left, upper, right, lower))
-        buf = io.BytesIO()
-        cropped.save(buf, format="JPEG", quality=85)
-        return buf.getvalue()
-    except Exception:
-        return image_bytes
 
 
 # ---- FastAPI lifespan --------------------------------------------------------
@@ -204,13 +141,6 @@ async def lifespan(app: FastAPI):
     ba_result_consumer = BAQueueConsumer(mqtt_svc)
     app.state.ba_result_consumer = ba_result_consumer
 
-    async def on_ba_result(result: dict) -> None:
-        """Handle BA analysis results from MQTT queue."""
-        await rule_adapter.on_ba_result(result)
-
-    ba_result_consumer.register_result_handler(on_ba_result)
-    ba_result_consumer.subscribe()
-
     # 5. Session manager
     session_mgr = SessionManager(config)
     app.state.session_manager = session_mgr
@@ -226,6 +156,14 @@ async def lifespan(app: FastAPI):
     )
     app.state.rule_engine = rule_engine
     app.state.rule_adapter = rule_adapter
+
+    # Wire BA result consumer → rule adapter (must be after rule_adapter creation)
+    async def on_ba_result(result: dict) -> None:
+        """Handle BA analysis results from MQTT queue."""
+        await rule_adapter.on_ba_result(result)
+
+    ba_result_consumer.register_result_handler(on_ba_result)
+    ba_result_consumer.subscribe()
 
     # ---- Wire callbacks ----
     # Session manager fires events → rule adapter (business logic)
@@ -258,12 +196,10 @@ async def lifespan(app: FastAPI):
                     break
 
             if in_high_value:
-                # Crop to person bounding box if available
-                frame_bytes = _crop_to_bbox(image_bytes, session.bbox)
-                # Use zone entry timestamp for grouping frames per visit
+                # Store full camera frame (gvadetect handles person detection)
                 entry_ts_iso = session.current_zones.get(zone_id, "")
                 key = frame_mgr.store_person_frame(
-                    session.object_id, frame_bytes, ts,
+                    session.object_id, image_bytes, ts,
                     region_id=zone_id,
                     entry_timestamp=entry_ts_iso,
                 )

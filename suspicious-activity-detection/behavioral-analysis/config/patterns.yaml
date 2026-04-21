@@ -9,7 +9,7 @@
 #   - VLM prompt for visual confirmation
 #   - Response schema the VLM must follow
 #
-# The service is generic — add new patterns here without code changes.
+# The service is generic -- add new patterns here without code changes.
 
 patterns:
   shelf_to_waist:
@@ -18,9 +18,9 @@ patterns:
 
     # Pose-based detection parameters
     pose:
-      min_hand_raised_frames: 2      # Frames with hand above chest in first half
-      min_hand_at_waist_frames: 3    # Frames with hand near waist in second half
-      waist_proximity_threshold: 0.15 # Normalized distance threshold
+      min_hand_raised_frames: 2      # Frames with hand above waist level in early window
+      min_hand_at_waist_frames: 2    # Frames with hand near waist in late window
+      waist_proximity_ratio: 0.6     # Max wrist-waist dist as fraction of torso length
 
     # VLM confirmation (sent after pose match)
     vlm:

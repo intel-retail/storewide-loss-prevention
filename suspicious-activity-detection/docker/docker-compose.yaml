@@ -87,16 +87,18 @@ services:
       start_period: 120s
     restart: unless-stopped
 
-  # ---------- Behavioral Analysis (YOLO-Pose + VLM) ----------
+  # ---------- Behavioral Analysis (DL Streamer + RTMPose + VLM) ----------
   behavioral-analysis:
     build:
       context: behavioral-analysis
       dockerfile: Dockerfile
     image: ${REGISTRY:-}behavioral-analysis:${TAG:-latest}
+    ports:
+      - "${BA_SERVICE_PORT:-8085}:8080"
     networks:
       - storewide-lp
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8080/health')"]
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8080/health')"]
       interval: 10s
       timeout: 5s
       retries: 10
@@ -109,10 +111,11 @@ services:
     environment:
       SEAWEEDFS_ENDPOINT: http://seaweedfs:8333
       SEAWEEDFS_BUCKET: behavioral-frames
-      MIN_FRAMES_FOR_DETECTION: ${BA_MIN_FRAMES:-10}
+      MIN_FRAMES_FOR_DETECTION: ${BA_MIN_FRAMES:-3}
       MAX_FRAMES_TO_FETCH: ${BA_MAX_FRAMES:-20}
       POSE_CONFIDENCE_THRESHOLD: ${BA_CONFIDENCE:-0.5}
-      YOLO_MODEL_PATH: /models/yolo_models/${YOLO_MODEL_NAME:-yolo11n-pose}/${YOLO_MODEL_NAME:-yolo11n-pose}.xml
+      YOLO_POSE_MODEL: /models/yolo_models/yolo11n-pose/yolo11n-pose.xml
+      GST_INFERENCE_DEVICE: ${BA_GST_DEVICE:-CPU}
       VLM_ENDPOINT: http://ovms-vlm:8001
       VLM_MODEL_NAME: ${VLM_MODEL_NAME:-Qwen/Qwen2.5-VL-7B-Instruct}
       VLM_ENABLED: ${VLM_ENABLED:-true}
@@ -125,6 +128,7 @@ services:
       no_proxy: ${no_proxy:-${NO_PROXY:-}},seaweedfs,ovms-vlm,broker.scenescape.intel.com,localhost,127.0.0.1,172.18.0.0/16,10.0.0.0/8
     volumes:
       - ${MODEL_PATH:-./models}:/models:ro
+      - ${OMZ_VOLUME:-storewide-lp_vol-models}:/omz_models:ro
       - ../scenescape/secrets:/app/secrets:ro
     restart: unless-stopped
 
@@ -209,3 +213,5 @@ networks:
 
 volumes:
   seaweedfs-data:
+  storewide-lp_vol-models:
+    external: true

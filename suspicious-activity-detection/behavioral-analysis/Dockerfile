@@ -1,11 +1,7 @@
-FROM python:3.11-slim
+FROM docker.io/intel/dlstreamer:latest
 
+USER root
 WORKDIR /app
-
-# Install system dependencies for OpenCV headless
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    libglib2.0-0 \
-    && rm -rf /var/lib/apt/lists/*
 
 # Copy only pyproject.toml first for dependency caching
 COPY pyproject.toml .
@@ -13,16 +9,20 @@ COPY pyproject.toml .
 RUN mkdir -p src/behavioral_analysis && touch src/behavioral_analysis/__init__.py
 
 # Install Python dependencies (cached unless pyproject.toml changes)
-RUN pip install --no-cache-dir .
+# --ignore-installed: base image has system numpy/openvino via apt (no RECORD),
+# pip cannot uninstall them but the versions already satisfy our requirements.
+RUN pip install --no-cache-dir --break-system-packages --ignore-installed .
 
 # Now copy actual source and config
 COPY src/ ./src/
 COPY config/ ./config/
 
-# Set Python path
-ENV PYTHONPATH=/app/src
+# Extend PYTHONPATH to include our source (gstgva already on PYTHONPATH from base image)
+ENV PYTHONPATH=${PYTHONPATH}:/app/src
+ENV PYTHONIOENCODING=utf-8
+
 # Expose port
 EXPOSE 8080
 
 # Run the service
-CMD ["python", "-m", "uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8080"]
+CMD ["python3", "-m", "uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8080"]

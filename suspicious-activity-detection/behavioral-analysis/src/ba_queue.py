@@ -11,9 +11,11 @@ import json
 import logging
 from typing import Optional
 
+import numpy as np
 import paho.mqtt.client as mqtt
 
 from config import Settings
+from yolo_pipeline import run_yolo_pipeline
 
 logger = logging.getLogger(__name__)
 
@@ -144,7 +146,7 @@ class BAQueueConsumer:
         """
         Core analysis pipeline:
         1. Fetch frames from SeaweedFS
-        2. If enough frames -> run pose detection on last 10
+        2. If enough frames -> run pose detection via GStreamer DL Streamer pipeline
         3. If suspicious -> call VLM with all frames
         4. Publish result
         """
@@ -159,28 +161,30 @@ class BAQueueConsumer:
             )
 
             frames_available = len(frames)
-
-            # Step 2: Not enough frames — stay silent, swlp re-publishes in 1s
+            print(f"BAQueueConsumer: frames available - {frames_available}")
+            for i, (_, ts) in enumerate(frames):
+                print(f"  Frame {i}: {person_id}/{region_id}/{entry_timestamp}/frames/{ts}.jpg")
+            # Step 2: Not enough frames — wait before allowing retry
             if frames_available < self.min_frames:
                 logger.debug(
                     f"Entity {person_id}: {frames_available}/{self.min_frames} frames, need more"
                 )
+                # Keep dedup_key for a few seconds to prevent hot-loop retries
+                await asyncio.sleep(5)
                 return
 
-            # Step 3: Run pose on last 10 frames
-            last_10 = frames[-10:]
-            pose_sequence = self.pose_analyzer.extract_poses(last_10)
+            # Step 3: Run pose detection via YOLO-Pose pipeline
+            result = await run_yolo_pipeline(frames, person_id, self.settings)
 
-            if len(pose_sequence) < self.min_frames:
-                logger.debug(
-                    f"Entity {person_id}: only {len(pose_sequence)} poses extracted, need more"
-                )
+            if result is None:
+                # GStreamer pipeline returned no result (not enough poses)
+                self.publish_result({
+                    "person_id": person_id, "region_id": region_id,
+                    "entry_timestamp": entry_timestamp, "status": "no_match",
+                    "confidence": 0.0, "vlm_response": None,
+                    "frames_analyzed": frames_available,
+                })
                 return
-
-            result = self.pose_analyzer.detect_pattern(
-                pose_sequence=pose_sequence,
-                pattern_id="shelf_to_waist",
-            )
 
             # Step 4: If suspicious -> call VLM with ALL frames
             if result.matched:

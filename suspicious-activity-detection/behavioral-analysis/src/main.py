@@ -21,6 +21,7 @@ from seaweedfs_client import SeaweedFSClient
 from vlm_client import VLMClient
 from ba_queue import BAQueueConsumer
 from config import Settings, load_pattern_config
+from gst_pipeline import run_gst_pipeline
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -53,7 +54,6 @@ async def lifespan(app: FastAPI):
         logger.info("VLM disabled — pose-only detection")
 
     app.state.pose_analyzer = PoseAnalyzer(
-        model_path=settings.yolo_model_path,
         min_frames=settings.min_frames_for_detection,
         confidence_threshold=settings.pose_confidence_threshold,
         vlm_client=vlm_client,
@@ -198,12 +198,11 @@ async def analyze_activity(request: AnalyzeRequest):
                 message=f"Need {min_frames - frames_available} more frames",
             )
 
-        # Step 3: Extract poses from frames
-        pose_sequence = pose_analyzer.extract_poses(frames)
-        logger.info(f"Entity {entity_id}: extracted {len(pose_sequence)} poses from {frames_available} frames")
+        # Step 3: Run pose extraction + pattern detection via GStreamer pipeline
+        result = await run_gst_pipeline(frames, entity_id, settings)
 
-        if len(pose_sequence) < min_frames:
-            logger.info(f"Entity {entity_id}: not enough poses ({len(pose_sequence)}/{min_frames}), accumulating")
+        if result is None:
+            logger.info(f"Entity {entity_id}: GStreamer pipeline could not extract poses")
             return AnalyzeResponse(
                 entity_id=entity_id,
                 status="accumulating",
@@ -212,13 +211,7 @@ async def analyze_activity(request: AnalyzeRequest):
                 message="Could not extract poses from enough frames",
             )
 
-        # Step 4: Run pattern detection
-        result = pose_analyzer.detect_pattern(
-            pose_sequence=pose_sequence,
-            pattern_id=pattern_id,
-        )
-
-        # Step 5: If pose pattern matched, send to VLM for confirmation
+        # Step 4: If pose pattern matched, send to VLM for confirmation
         if result.matched and settings.vlm_enabled:
             result = await pose_analyzer.analyze_with_vlm(
                 frames=frames,

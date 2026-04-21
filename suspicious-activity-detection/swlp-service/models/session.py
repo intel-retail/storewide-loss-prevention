@@ -105,6 +105,8 @@ class PersonSession:
         """Record zone entry."""
         self.current_zones[region_id] = timestamp.isoformat()
         self.zone_visit_counts[region_id] = self.zone_visit_counts.get(region_id, 0) + 1
+        # Reset BA alert flag so the pipeline can re-analyze on re-entry
+        self.ba_alerted.pop(region_id, None)
 
     def exit_zone(self, region_id: str) -> Optional[str]:
         """Record zone exit. Returns the entry timestamp if was present."""

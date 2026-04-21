@@ -1,19 +1,19 @@
 # Copyright (C) 2026 Intel Corporation
 # SPDX-License-Identifier: Apache-2.0
 """
-Frame Manager — manages cropped person frames in SeaweedFS (S3-compatible).
+Frame Manager -- manages person frames in SeaweedFS (S3-compatible).
 
 Bucket structure:
   loss-prevention-frames/
-  ├── {object_id}/
-  │   ├── {timestamp_1}.jpg    # Cropped person frame
-  │   ├── {timestamp_2}.jpg
-  │   └── ...                  # Rolling buffer of last 20 frames (~10s at 2fps)
-  └── alerts/
-      └── {alert_id}/
-          └── evidence/        # Frames sent to behavioral analysis, retained for audit
+  +-- {object_id}/
+  |   +-- {timestamp_1}.jpg    # Full camera frame
+  |   +-- {timestamp_2}.jpg
+  |   +-- ...                  # Rolling buffer of last 20 frames (~10s at 2fps)
+  +-- alerts/
+      +-- {alert_id}/
+          +-- evidence/        # Frames sent to behavioral analysis, retained for audit
 
-Only stores cropped person frames for individuals currently in HIGH_VALUE zones.
+Only stores frames for individuals currently in HIGH_VALUE zones.
 Storage rate: 2 fps per person in a high-value zone.
 Rolling buffer: 20 frames per person.
 """
@@ -40,9 +40,9 @@ except ImportError:
 
 class FrameManager:
     """
-    Manages cropped person frames in SeaweedFS via S3-compatible API.
+    Manages person frames in SeaweedFS via S3-compatible API.
 
-    Only stores crops for persons in HIGH_VALUE zones.
+    Only stores frames for persons in HIGH_VALUE zones.
     Maintains a rolling buffer of 20 frames per person.
     Also mirrors frames to the behavioral-frames bucket for the BA service.
     """
@@ -107,14 +107,14 @@ class FrameManager:
                 else:
                     logger.exception("Bucket check/create failed after retries", bucket=self.BUCKET)
 
-    # ---- Store cropped person frame ------------------------------------------
+    # ---- Store person frame --------------------------------------------------
     def store_person_frame(
         self, object_id: str, image_bytes: bytes, ts: Optional[datetime] = None,
         region_id: Optional[str] = None,
         entry_timestamp: Optional[str] = None,
     ) -> str:
         """
-        Store a cropped person frame in the rolling buffer.
+        Store a full camera frame in the rolling buffer.
         Also mirrors to behavioral-frames bucket for BA service consumption.
         Evicts the oldest frame if the buffer exceeds ROLLING_BUFFER_SIZE.
         Returns the SeaweedFS object key.
