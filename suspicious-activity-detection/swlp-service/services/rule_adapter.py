@@ -108,6 +108,7 @@ class RuleEngineAdapter:
                 alert_level=AlertLevel.WARNING,
                 object_id=event.object_id,
                 timestamp=event.timestamp,
+                scene_id=event.scene_id,
                 region_id=event.region_id,
                 region_name=event.region_name,
                 details={
@@ -213,6 +214,7 @@ class RuleEngineAdapter:
             alert_level=alert_level,
             object_id=event.object_id,
             timestamp=event.timestamp,
+            scene_id=event.scene_id,
             region_id=event.region_id,
             region_name=event.region_name,
             details=details,
@@ -368,6 +370,7 @@ class RuleEngineAdapter:
                 alert_level=AlertLevel.WARNING,
                 object_id=person_id,
                 timestamp=session.last_seen,
+                scene_id=session.scene_id,
                 region_id=region_id,
                 region_name=zone_name,
                 details={

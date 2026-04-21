@@ -31,5 +31,6 @@ class RegionEvent:
     region_name: str
     zone_type: ZoneType
     timestamp: datetime
+    scene_id: str = ""  # SceneScape scene UUID
     dwell_seconds: Optional[float] = None   # populated on EXIT
     minio_thumbnail_key: Optional[str] = None

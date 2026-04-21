@@ -125,6 +125,58 @@ class SessionManager:
                 self._sessions[oid] = session
                 logger.info("Session created", object_id=oid, scene_id=scene_id)
 
+            # Real-time loiter check using region entry timestamps from scene data
+            regions = obj.get("regions", {})
+            if regions:
+                await self._check_loiter_from_scene_data(session, regions, now)
+            else:
+                logger.debug("No regions in scene data object",
+                             object_id=oid, keys=list(obj.keys())[:10])
+
+    async def _check_loiter_from_scene_data(
+        self, session: PersonSession, regions: dict, now: datetime
+    ) -> None:
+        """Check dwell time for each region in scene data and emit LOITER if threshold exceeded."""
+        now_epoch = time.time()
+        for region_id, rinfo in regions.items():
+            # Already alerted for this zone — skip
+            if session.loiter_alerted.get(region_id):
+                continue
+
+            zone_type = self.config.get_zone_type(region_id)
+            if zone_type != "HIGH_VALUE":
+                continue
+
+            entered_str = rinfo.get("entered") if isinstance(rinfo, dict) else None
+            if not entered_str:
+                continue
+            try:
+                entered_dt = datetime.fromisoformat(entered_str.replace("Z", "+00:00"))
+                entered_epoch = entered_dt.timestamp()
+            except (ValueError, TypeError):
+                continue
+
+            dwell = now_epoch - entered_epoch
+            logger.debug("Loiter check", object_id=session.object_id,
+                         region_id=region_id, dwell=round(dwell, 1),
+                         threshold=self._loiter_threshold)
+            if dwell > self._loiter_threshold:
+                zone_name = self.config.get_zone_name(region_id) or region_id
+                logger.info("Loiter threshold exceeded (scene data)",
+                            object_id=session.object_id,
+                            region=zone_name, dwell=round(dwell, 1))
+                event = RegionEvent(
+                    event_type=EventType.LOITER,
+                    object_id=session.object_id,
+                    region_id=region_id,
+                    region_name=zone_name,
+                    zone_type=ZoneType(zone_type),
+                    timestamp=now,
+                    scene_id=session.scene_id,
+                    dwell_seconds=round(dwell, 1),
+                )
+                await self._emit(event)
+
     # ---- region-event handler: drives ENTERED / EXITED ----------------------
     async def on_region_event(
         self, scene_id: str, region_id: str, data: dict
@@ -200,12 +252,17 @@ class SessionManager:
 
         Used for loiter detection without any local timestamp tracking or polling.
         """
+        logger.info("on_region_data called", scene_id=scene_id, region_id=region_id,
+                    num_objects=len(data.get("objects", [])))
+
         scene_id_filter = self.config.get_accepted_scene_ids()
         if scene_id_filter and scene_id not in scene_id_filter:
+            logger.info("region_data: scene filtered", scene_id=scene_id)
             return
 
         zone_type = self.config.get_zone_type(region_id)
         if zone_type != "HIGH_VALUE":
+            logger.info("region_data: zone not HIGH_VALUE", region_id=region_id, zone_type=zone_type)
             return
 
         now_epoch = time.time()
@@ -217,6 +274,7 @@ class SessionManager:
 
             session = self._sessions.get(oid)
             if not session:
+                logger.info("region_data: no session for object", object_id=oid)
                 continue
 
             # Already alerted for this zone — skip
@@ -225,6 +283,10 @@ class SessionManager:
 
             # Read SceneScape's entry timestamp from the object's region data
             regions = obj.get("regions", {})
+            if not regions:
+                logger.info("region_data: no regions in object", object_id=oid,
+                            keys=list(obj.keys())[:10])
+                continue
             for rname, rinfo in regions.items():
                 entered_str = rinfo.get("entered")
                 if not entered_str:
@@ -236,6 +298,8 @@ class SessionManager:
                     continue
 
                 dwell = now_epoch - entered_epoch
+                logger.info("region_data dwell", object_id=oid, region=rname,
+                            dwell=round(dwell, 1), threshold=self._loiter_threshold)
                 if dwell > self._loiter_threshold:
                     zone_name = self.config.get_zone_name(region_id) or region_id
                     event = RegionEvent(
@@ -245,6 +309,7 @@ class SessionManager:
                         region_name=zone_name,
                         zone_type=ZoneType(zone_type),
                         timestamp=datetime.now(timezone.utc),
+                        scene_id=session.scene_id,
                         dwell_seconds=round(dwell, 1),
                     )
                     await self._emit(event)
@@ -273,6 +338,7 @@ class SessionManager:
                     region_name=visit.region_name,
                     zone_type=ZoneType(zone_type),
                     timestamp=now,
+                    scene_id=session.scene_id,
                     dwell_seconds=visit.duration_seconds,
                 )
                 await self._emit(event)
@@ -288,6 +354,7 @@ class SessionManager:
             region_name="",
             zone_type=ZoneType.HIGH_VALUE,
             timestamp=now,
+            scene_id=session.scene_id,
         )
         await self._emit(lost_event)
 
@@ -335,6 +402,7 @@ class SessionManager:
             region_name=zone_name,
             zone_type=ZoneType(zone_type),
             timestamp=now,
+            scene_id=session.scene_id,
         )
         await self._emit(event)
 
@@ -366,6 +434,7 @@ class SessionManager:
             region_name=zone_name,
             zone_type=ZoneType(zone_type),
             timestamp=now,
+            scene_id=session.scene_id,
             dwell_seconds=dwell,
         )
         await self._emit(event)

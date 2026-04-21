@@ -164,6 +164,7 @@ class MQTTService:
         # Region data (continuous feed with objects in each region)
         region_data_match = self._region_data_pattern.match(topic)
         if region_data_match:
+            logger.info("MATCHED region data topic", topic=topic)
             self._dispatch_region_data(
                 region_data_match.group(1), region_data_match.group(2), msg.payload,
             )

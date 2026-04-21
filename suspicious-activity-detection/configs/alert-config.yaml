@@ -8,6 +8,7 @@ subscriptions:
       enabled: true
       strategy: field_hash
       fields:
+        - metadata.scene_id
         - metadata.person_id
         - metadata.zone_id
       window_seconds: 30
@@ -25,6 +26,7 @@ subscriptions:
       enabled: true
       strategy: field_hash
       fields:
+        - metadata.scene_id
         - metadata.zone_id
       window_seconds: 120
       on_missing: skip
@@ -41,6 +43,7 @@ subscriptions:
       enabled: true
       strategy: field_hash
       fields:
+        - metadata.scene_id
         - metadata.person_id
         - metadata.zone_id
       window_seconds: 60
@@ -66,6 +69,7 @@ subscriptions:
       enabled: true
       strategy: field_hash
       fields:
+        - metadata.scene_id
         - metadata.person_id
       window_seconds: 60
       on_missing: skip

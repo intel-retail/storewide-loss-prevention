@@ -228,12 +228,20 @@ class ConfigService:
     def get_zone_type(self, region_id: str) -> Optional[str]:
         with self._zone_lock:
             zone = self._zones.get(region_id)
-        return zone["type"] if zone else None
+        if zone:
+            return zone["type"]
+        # Fallback: region_id may be a region name (e.g. from MQTT topic)
+        return self._zone_name_map.get(region_id)
 
     def get_zone_name(self, region_id: str) -> Optional[str]:
         with self._zone_lock:
             zone = self._zones.get(region_id)
-        return zone["name"] if zone else None
+        if zone:
+            return zone["name"]
+        # Fallback: if region_id is already the name, return it if known
+        if region_id in self._zone_name_map:
+            return region_id
+        return None
 
     def get_zone_scene_id(self, region_id: str) -> Optional[str]:
         """Return the scene_id that a zone belongs to."""
