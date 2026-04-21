@@ -1,19 +1,20 @@
 # Copyright (C) 2026 Intel Corporation
 # SPDX-License-Identifier: Apache-2.0
 """
-YOLO-Pose pipeline runner for pose extraction + pattern detection.
+YOLO-Pose pipeline runner for pose extraction.
 
 Pure-Python replacement for the GStreamer DL Streamer pipeline.
 Uses YOLOv11n-pose via OpenVINO for single-stage person detection + keypoint
-estimation, then feeds poses to PoseAnalyzer for pattern matching.
+estimation.  Returns extracted poses — pattern detection and VLM confirmation
+are handled by the caller via a single PoseAnalyzer instance.
 """
 
 import logging
 
 import numpy as np
 
-from config import Settings, load_pattern_config
-from pose_analyzer import PatternResult, Pose, PoseAnalyzer
+from config import Settings
+from pose_analyzer import Pose
 from yolo_pose_ov import YOLOPoseOV
 
 logger = logging.getLogger(__name__)
@@ -32,15 +33,13 @@ def _get_model(settings: Settings) -> YOLOPoseOV:
     return _yolo_model
 
 
-async def run_yolo_pipeline(
+async def extract_poses(
     frames: list[tuple[np.ndarray, int]],
     entity_id: str,
     settings: Settings,
-) -> PatternResult | None:
+) -> list[Pose]:
     """
-    Run YOLO-Pose pipeline for pose extraction + pattern detection.
-
-    Drop-in replacement for ``run_gst_pipeline`` — same signature and return type.
+    Run YOLO-Pose inference and return extracted poses.
 
     Args:
         frames: List of (frame_image_bgr, timestamp_ms) tuples.
@@ -48,8 +47,7 @@ async def run_yolo_pipeline(
         settings: Settings object with model paths and thresholds.
 
     Returns:
-        PatternResult if analysis completed (matched or not).
-        None if pipeline failed critically.
+        List of Pose objects extracted from frames.
     """
     model = _get_model(settings)
     conf_threshold = settings.pose_confidence_threshold
@@ -96,40 +94,4 @@ async def run_yolo_pipeline(
         entity_id, len(poses), len(frame_images),
     )
 
-    if not poses:
-        return PatternResult(
-            matched=False,
-            confidence=0.0,
-            pattern_id="shelf_to_waist",
-            description="No usable poses extracted (YOLO pipeline)",
-        )
-
-    # Run pattern detection
-    pattern_config = load_pattern_config(settings.pattern_config_path)
-    analyzer = PoseAnalyzer(
-        min_frames=settings.min_frames_for_detection,
-        confidence_threshold=conf_threshold,
-        pattern_config=pattern_config,
-    )
-    results = analyzer.detect_all_patterns(poses)
-
-    # Return the best match (or first no-match)
-    matched = [r for r in results if r.matched]
-    if matched:
-        best = max(matched, key=lambda r: r.confidence)
-        logger.info(
-            "Entity %s: YOLO pipeline detected pattern=%s confidence=%.3f",
-            entity_id, best.pattern_id, best.confidence,
-        )
-        return best
-
-    # No match — return the first result for context
-    if results:
-        return results[0]
-
-    return PatternResult(
-        matched=False,
-        confidence=0.0,
-        pattern_id="shelf_to_waist",
-        description="No suspicious pattern detected (YOLO pipeline)",
-    )
+    return poses

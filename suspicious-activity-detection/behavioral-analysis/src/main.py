@@ -16,12 +16,12 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from typing import Optional
 
-from pose_analyzer import PoseAnalyzer
+from pose_analyzer import PoseAnalyzer, PatternResult
 from seaweedfs_client import SeaweedFSClient
 from vlm_client import VLMClient
 from ba_queue import BAQueueConsumer
 from config import Settings, load_pattern_config
-from gst_pipeline import run_gst_pipeline
+from yolo_pipeline import extract_poses
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -198,11 +198,12 @@ async def analyze_activity(request: AnalyzeRequest):
                 message=f"Need {min_frames - frames_available} more frames",
             )
 
-        # Step 3: Run pose extraction + pattern detection via GStreamer pipeline
-        result = await run_gst_pipeline(frames, entity_id, settings)
+        # Step 3: Extract poses from last N frames via YOLO-Pose pipeline
+        pose_frames = frames[-settings.pose_frames_count:]
+        poses = await extract_poses(pose_frames, entity_id, settings)
 
-        if result is None:
-            logger.info(f"Entity {entity_id}: GStreamer pipeline could not extract poses")
+        if not poses:
+            logger.info(f"Entity {entity_id}: YOLO pipeline could not extract poses")
             return AnalyzeResponse(
                 entity_id=entity_id,
                 status="accumulating",
@@ -211,7 +212,21 @@ async def analyze_activity(request: AnalyzeRequest):
                 message="Could not extract poses from enough frames",
             )
 
-        # Step 4: If pose pattern matched, send to VLM for confirmation
+        # Step 4: Run pattern detection
+        results = pose_analyzer.detect_all_patterns(poses)
+        matched = [r for r in results if r.matched]
+        result = (
+            max(matched, key=lambda r: r.confidence)
+            if matched
+            else results[0] if results
+            else PatternResult(
+                matched=False, confidence=0.0,
+                pattern_id=pattern_id,
+                description="No patterns evaluated",
+            )
+        )
+
+        # Step 5: If pose pattern matched, send to VLM for confirmation
         if result.matched and settings.vlm_enabled:
             result = await pose_analyzer.analyze_with_vlm(
                 frames=frames,

@@ -113,6 +113,7 @@ services:
       SEAWEEDFS_BUCKET: behavioral-frames
       MIN_FRAMES_FOR_DETECTION: ${BA_MIN_FRAMES:-3}
       MAX_FRAMES_TO_FETCH: ${BA_MAX_FRAMES:-20}
+      POSE_FRAMES_COUNT: ${BA_POSE_FRAMES:-10}
       POSE_CONFIDENCE_THRESHOLD: ${BA_CONFIDENCE:-0.5}
       YOLO_POSE_MODEL: /models/yolo_models/yolo11n-pose/yolo11n-pose.xml
       GST_INFERENCE_DEVICE: ${BA_GST_DEVICE:-CPU}

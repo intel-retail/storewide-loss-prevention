@@ -15,7 +15,8 @@ import numpy as np
 import paho.mqtt.client as mqtt
 
 from config import Settings
-from yolo_pipeline import run_yolo_pipeline
+from pose_analyzer import PatternResult
+from yolo_pipeline import extract_poses
 
 logger = logging.getLogger(__name__)
 
@@ -146,9 +147,10 @@ class BAQueueConsumer:
         """
         Core analysis pipeline:
         1. Fetch frames from SeaweedFS
-        2. If enough frames -> run pose detection via GStreamer DL Streamer pipeline
-        3. If suspicious -> call VLM with all frames
-        4. Publish result
+        2. If enough frames -> extract poses via YOLO-Pose
+        3. Run pattern detection via PoseAnalyzer
+        4. If suspicious -> call VLM for confirmation
+        5. Publish result
         """
         try:
             # Step 1: Fetch frames
@@ -170,14 +172,14 @@ class BAQueueConsumer:
                     f"Entity {person_id}: {frames_available}/{self.min_frames} frames, need more"
                 )
                 # Keep dedup_key for a few seconds to prevent hot-loop retries
-                await asyncio.sleep(5)
+                await asyncio.sleep(1)
                 return
 
-            # Step 3: Run pose detection via YOLO-Pose pipeline
-            result = await run_yolo_pipeline(frames, person_id, self.settings)
+            # Step 3: Extract poses from last N frames via YOLO-Pose pipeline
+            pose_frames = frames[-self.settings.pose_frames_count:]
+            poses = await extract_poses(pose_frames, person_id, self.settings)
 
-            if result is None:
-                # GStreamer pipeline returned no result (not enough poses)
+            if not poses:
                 self.publish_result({
                     "person_id": person_id, "region_id": region_id,
                     "entry_timestamp": entry_timestamp, "status": "no_match",
@@ -186,7 +188,21 @@ class BAQueueConsumer:
                 })
                 return
 
-            # Step 4: If suspicious -> call VLM with ALL frames
+            # Step 4: Run pattern detection via the single PoseAnalyzer
+            results = self.pose_analyzer.detect_all_patterns(poses)
+            matched = [r for r in results if r.matched]
+            result = (
+                max(matched, key=lambda r: r.confidence)
+                if matched
+                else results[0] if results
+                else PatternResult(
+                    matched=False, confidence=0.0,
+                    pattern_id="shelf_to_waist",
+                    description="No patterns evaluated",
+                )
+            )
+
+            # Step 5: If suspicious -> call VLM with ALL frames
             if result.matched:
                 logger.warning(
                     f"Entity {person_id}: pose pattern matched "
@@ -230,7 +246,7 @@ class BAQueueConsumer:
                         "frames_analyzed": frames_available,
                     })
             else:
-                # Step 5: Not suspicious
+                # Step 6: Not suspicious
                 logger.info(
                     f"Entity {person_id}: no match (confidence={result.confidence:.3f})"
                 )
