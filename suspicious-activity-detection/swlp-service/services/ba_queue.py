@@ -33,19 +33,22 @@ class BAQueuePublisher:
         self._mqtt = mqtt_service
 
     def publish_request(
-        self, person_id: str, region_id: str, entry_timestamp: str
+        self, person_id: str, region_id: str, entry_timestamp: str,
+        scene_id: str = "",
     ) -> None:
         """Publish an analysis request for a person in a HIGH_VALUE zone."""
         payload = {
             "person_id": person_id,
             "region_id": region_id,
             "entry_timestamp": entry_timestamp,
+            "scene_id": scene_id,
         }
         self._mqtt.publish(BA_REQUEST_TOPIC, payload)
         logger.debug(
             "Published BA request",
             person_id=person_id,
             region_id=region_id,
+            scene_id=scene_id,
         )
 
 

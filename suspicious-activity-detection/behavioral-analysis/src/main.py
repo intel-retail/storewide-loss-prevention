@@ -105,12 +105,14 @@ class AnalyzeRequest(BaseModel):
     entity_id: str
     region_id: Optional[str] = None
     entry_timestamp: Optional[str] = None
+    scene_id: Optional[str] = None
     pattern_id: str = "shelf_to_waist"  # Pattern to detect
 
 
 class AnalyzeResponse(BaseModel):
     """Response from pose analysis."""
     entity_id: str
+    scene_id: Optional[str] = None
     status: str  # "no_data" | "accumulating" | "no_match" | "suspicious"
     frames_available: int
     frames_required: int
@@ -163,6 +165,7 @@ async def analyze_activity(request: AnalyzeRequest):
     entity_id = request.entity_id
     region_id = request.region_id
     entry_timestamp = request.entry_timestamp
+    scene_id = request.scene_id
     pattern_id = request.pattern_id
     min_frames = settings.min_frames_for_detection
 
@@ -174,6 +177,7 @@ async def analyze_activity(request: AnalyzeRequest):
             max_age_seconds=0,
             region_id=region_id,
             entry_timestamp=entry_timestamp,
+            scene_id=scene_id,
         )
 
         frames_available = len(frames)
@@ -183,6 +187,7 @@ async def analyze_activity(request: AnalyzeRequest):
         if frames_available == 0:
             return AnalyzeResponse(
                 entity_id=entity_id,
+                scene_id=scene_id,
                 status="no_data",
                 frames_available=0,
                 frames_required=min_frames,
@@ -192,6 +197,7 @@ async def analyze_activity(request: AnalyzeRequest):
         if frames_available < min_frames:
             return AnalyzeResponse(
                 entity_id=entity_id,
+                scene_id=scene_id,
                 status="accumulating",
                 frames_available=frames_available,
                 frames_required=min_frames,
@@ -206,6 +212,7 @@ async def analyze_activity(request: AnalyzeRequest):
             logger.info(f"Entity {entity_id}: YOLO pipeline could not extract poses")
             return AnalyzeResponse(
                 entity_id=entity_id,
+                scene_id=scene_id,
                 status="accumulating",
                 frames_available=frames_available,
                 frames_required=min_frames,
@@ -247,6 +254,7 @@ async def analyze_activity(request: AnalyzeRequest):
             )
             return AnalyzeResponse(
                 entity_id=entity_id,
+                scene_id=scene_id,
                 status="suspicious",
                 frames_available=frames_available,
                 frames_required=min_frames,
@@ -263,6 +271,7 @@ async def analyze_activity(request: AnalyzeRequest):
             )
             return AnalyzeResponse(
                 entity_id=entity_id,
+                scene_id=scene_id,
                 status="no_match",
                 frames_available=frames_available,
                 frames_required=min_frames,
@@ -277,13 +286,13 @@ async def analyze_activity(request: AnalyzeRequest):
 
 
 @app.delete("/api/v1/entities/{entity_id}/frames")
-async def clear_entity_frames(entity_id: str, region_id: Optional[str] = None):
-    """Clear all frames for an entity (optionally scoped to a region)."""
+async def clear_entity_frames(entity_id: str, region_id: Optional[str] = None, scene_id: Optional[str] = None):
+    """Clear all frames for an entity (optionally scoped to a region/scene)."""
     frame_store: SeaweedFSClient = app.state.frame_store
 
     try:
-        deleted_count = await frame_store.delete_frames(entity_id, region_id=region_id)
-        return {"entity_id": entity_id, "region_id": region_id, "deleted_frames": deleted_count}
+        deleted_count = await frame_store.delete_frames(entity_id, region_id=region_id, scene_id=scene_id)
+        return {"entity_id": entity_id, "region_id": region_id, "scene_id": scene_id, "deleted_frames": deleted_count}
     except Exception as e:
         logger.error(f"Error clearing frames for {entity_id}: {e}")
         raise HTTPException(status_code=500, detail=str(e))

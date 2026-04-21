@@ -112,6 +112,7 @@ class FrameManager:
         self, object_id: str, image_bytes: bytes, ts: Optional[datetime] = None,
         region_id: Optional[str] = None,
         entry_timestamp: Optional[str] = None,
+        scene_id: Optional[str] = None,
     ) -> str:
         """
         Store a full camera frame in the rolling buffer.
@@ -120,22 +121,24 @@ class FrameManager:
         Returns the SeaweedFS object key.
         """
         ts = ts or datetime.now(timezone.utc)
-        key = f"{object_id}/{ts.strftime('%Y%m%dT%H%M%S_%f')}.jpg"
+        # Key: {scene_id}/{object_id}/{timestamp}.jpg
+        prefix = f"{scene_id}/{object_id}" if scene_id else object_id
+        key = f"{prefix}/{ts.strftime('%Y%m%dT%H%M%S_%f')}.jpg"
         self._put(key, image_bytes)
 
         # Mirror to behavioral-frames bucket:
-        # {person_id}/{region_id}/{entry_timestamp}/frames/{ts_ms}.jpg
+        # {scene_id}/{person_id}/{region_id}/{entry_timestamp}/frames/{ts_ms}.jpg
         ts_ms = int(ts.timestamp() * 1000)
         # Convert entry_timestamp ISO string to compact folder name
         entry_folder = ""
         if entry_timestamp:
             entry_folder = entry_timestamp.replace(":", "").replace("-", "").replace("T", "T").split("+")[0].split(".")[0]
         if region_id and entry_folder:
-            ba_key = f"{object_id}/{region_id}/{entry_folder}/frames/{ts_ms}.jpg"
+            ba_key = f"{prefix}/{region_id}/{entry_folder}/frames/{ts_ms}.jpg"
         elif region_id:
-            ba_key = f"{object_id}/{region_id}/frames/{ts_ms}.jpg"
+            ba_key = f"{prefix}/{region_id}/frames/{ts_ms}.jpg"
         else:
-            ba_key = f"{object_id}/frames/{ts_ms}.jpg"
+            ba_key = f"{prefix}/frames/{ts_ms}.jpg"
         self._put(ba_key, image_bytes, bucket=self.BA_BUCKET)
 
         # Track keys for rolling buffer management
@@ -157,10 +160,12 @@ class FrameManager:
 
     # ---- Store alert evidence ------------------------------------------------
     def store_evidence_frame(
-        self, alert_id: str, idx: int, image_bytes: bytes
+        self, alert_id: str, idx: int, image_bytes: bytes,
+        scene_id: Optional[str] = None,
     ) -> str:
         """Store an evidence frame for audit retention."""
-        key = f"{self.ALERT_EVIDENCE_PREFIX}/{alert_id}/evidence/frame_{idx:03d}.jpg"
+        prefix = f"{scene_id}/{self.ALERT_EVIDENCE_PREFIX}" if scene_id else self.ALERT_EVIDENCE_PREFIX
+        key = f"{prefix}/{alert_id}/evidence/frame_{idx:03d}.jpg"
         self._put(key, image_bytes)
         return key
 
@@ -183,7 +188,7 @@ class FrameManager:
         return list(self._person_keys.get(object_id, []))
 
     # ---- Cleanup -------------------------------------------------------------
-    def cleanup_person(self, object_id: str) -> None:
+    def cleanup_person(self, object_id: str, scene_id: Optional[str] = None) -> None:
         """
         Remove all frames for a person (called after exit_retention_seconds
         or session expiry).  Cleans both evidence and behavioral-frames buckets.
@@ -192,8 +197,9 @@ class FrameManager:
         ba_keys = self._person_ba_keys.pop(object_id, [])
         for key in keys:
             self._delete(key)
-        # Clean up behavioral-frames bucket (covers both old and new key formats)
-        self._delete_prefix(f"{object_id}/", bucket=self.BA_BUCKET)
+        # Clean up behavioral-frames bucket
+        prefix = f"{scene_id}/{object_id}/" if scene_id else f"{object_id}/"
+        self._delete_prefix(prefix, bucket=self.BA_BUCKET)
         if keys:
             logger.info("Cleaned up person frames", object_id=object_id, count=len(keys))
 

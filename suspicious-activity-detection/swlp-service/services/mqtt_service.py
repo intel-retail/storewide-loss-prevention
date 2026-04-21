@@ -49,6 +49,8 @@ class MQTTService:
 
         # Scene data pattern: scenescape/data/scene/{scene_id}/{object_type}
         self._scene_pattern = re.compile(r"scenescape/data/scene/([^/]+)/([^/]+)")
+        # Region data pattern: scenescape/data/region/{scene_id}/{region_id}
+        self._region_data_pattern = re.compile(r"scenescape/data/region/([^/]+)/([^/]+)")
         # Region event pattern: scenescape/event/region/{scene_id}/{region_id}/{suffix}
         self._region_event_pattern = re.compile(r"scenescape/event/region/([^/]+)/([^/]+)/([^/]+)")
         # Image pattern: scenescape/image/camera/{camera_name}
@@ -56,6 +58,7 @@ class MQTTService:
 
         # Callbacks set by the application layer
         self._on_scene_data: Optional[Callable] = None
+        self._on_region_data: Optional[Callable] = None
         self._on_region_event: Optional[Callable] = None
         self._on_camera_image: Optional[Callable] = None
 
@@ -72,6 +75,9 @@ class MQTTService:
     # ---- public registration ------------------------------------------------
     def register_scene_data_handler(self, handler: Callable) -> None:
         self._on_scene_data = handler
+
+    def register_region_data_handler(self, handler: Callable) -> None:
+        self._on_region_data = handler
 
     def register_region_event_handler(self, handler: Callable) -> None:
         self._on_region_event = handler
@@ -133,6 +139,7 @@ class MQTTService:
             self.connected = True
             logger.info("MQTT connected, subscribing to topics")
             client.subscribe(self.scene_data_topic, qos=1)
+            client.subscribe("scenescape/data/region/+/+/+", qos=1)
             client.subscribe(self.region_event_topic, qos=1)
             client.subscribe(self.image_topic_pattern, qos=1)
         else:
@@ -145,12 +152,21 @@ class MQTTService:
     def _on_message(self, client, userdata, msg: mqtt.MQTTMessage) -> None:
         topic = msg.topic
 
-        # Region events take priority (more specific pattern)
+        # Region events take priority (most specific pattern)
         region_match = self._region_event_pattern.match(topic)
         if region_match:
             self._dispatch_region_event(
                 region_match.group(1), region_match.group(2),
                 region_match.group(3), msg.payload,
+            )
+            return
+
+        # Region data (continuous feed with objects in each region)
+        region_data_match = self._region_data_pattern.match(topic)
+        if region_data_match:
+            logger.info("MATCHED region data topic", topic=topic)
+            self._dispatch_region_data(
+                region_data_match.group(1), region_data_match.group(2), msg.payload,
             )
             return
 
@@ -175,6 +191,19 @@ class MQTTService:
             )
         except json.JSONDecodeError:
             logger.error("Invalid JSON in scene message")
+
+    def _dispatch_region_data(
+        self, scene_id: str, region_id: str, payload: bytes
+    ) -> None:
+        if not self._on_region_data or not self.loop:
+            return
+        try:
+            data = json.loads(payload)
+            asyncio.run_coroutine_threadsafe(
+                self._on_region_data(scene_id, region_id, data), self.loop
+            )
+        except json.JSONDecodeError:
+            logger.error("Invalid JSON in region data message")
 
     def _dispatch_region_event(
         self, scene_id: str, region_id: str, suffix: str, payload: bytes

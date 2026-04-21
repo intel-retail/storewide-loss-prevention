@@ -83,7 +83,16 @@ def get_scene_name():
     try:
         with open(ZONE_CONFIG, "r") as f:
             config = json.load(f)
-        return config.get("scene_name", "Unknown")
+        scene_name = config.get("scene_name", "Unknown")
+        density = config.get("stream_density", 1)
+        # Support scenes array (backward compat)
+        scenes = config.get("scenes", [])
+        if scenes:
+            scene_name = scenes[0].get("scene_name", "Unknown")
+            density = len(scenes)
+        if density > 1:
+            return f"{scene_name} (x{density})"
+        return scene_name
     except Exception as e:
         return f"Unknown ({e})"
 
@@ -114,11 +123,13 @@ def get_sessions():
             rows = []
             for session in data:
                 person_id = session.get("object_id", "")[:8]
+                scene_name = session.get("scene_name", "")
                 zone_summary = session.get("zone_summary", [])
                 if zone_summary:
                     for z in zone_summary:
                         rows.append({
                             "Person": person_id,
+                            "Scene": scene_name,
                             "Zone": z.get("zone_name", "?"),
                             "Type": z.get("zone_type", "?"),
                             "Visits": z.get("visit_count", 0),
@@ -126,7 +137,7 @@ def get_sessions():
                         })
             if rows:
                 return pd.DataFrame(rows)
-            return pd.DataFrame(columns=["Person", "Zone", "Type", "Visits", "Dwell (s)"])
+            return pd.DataFrame(columns=["Person", "Scene", "Zone", "Type", "Visits", "Dwell (s)"])
         return pd.DataFrame([{"Error": f"API returned {resp.status_code}"}])
     except Exception as e:
         return pd.DataFrame([{"Error": str(e)}])
@@ -228,7 +239,7 @@ with gr.Blocks(title="Storewide Loss Prevention Dashboard") as demo:
     </style>""")
     gr.HTML(HEADER_HTML)
 
-    gr.Markdown(f"# Scene: {get_scene_name()}")
+    gr.Markdown(f"# Scenes: {get_scene_name()}")
     gr.Markdown("---")
 
     with gr.Row():

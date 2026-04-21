@@ -18,11 +18,14 @@ RUN pip install --no-cache-dir uv==0.9.22
 # Copy detection service
 COPY swlp-service/ /app/
 
-# Copy rule-engine package into services/ (matches the symlink used in local dev)
-COPY rule-engine/ /app/services/rule_engine/
+# Copy stream density utility
+COPY stream_density.py /app/stream_density.py
+
+# Copy and install rule-engine package
+COPY rule-engine/ /tmp/rule-engine/
 
 # Create virtual environment and install dependencies
-RUN uv sync
+RUN uv sync && uv pip install /tmp/rule-engine/ && rm -rf /tmp/rule-engine/
 
 # Create non-root user
 RUN useradd -m -u 1000 lpuser && \

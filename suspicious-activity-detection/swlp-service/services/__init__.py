@@ -4,7 +4,7 @@
 from .config import ConfigService
 from .mqtt_service import MQTTService
 from .session_manager import SessionManager
-from .rule_engine import RuleEngine
+from rule_engine import RuleEngine
 from .rule_adapter import RuleEngineAdapter
 
 __all__ = [

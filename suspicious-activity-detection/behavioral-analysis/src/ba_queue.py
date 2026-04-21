@@ -123,13 +123,14 @@ class BAQueueConsumer:
         person_id = payload.get("person_id", "")
         region_id = payload.get("region_id", "")
         entry_timestamp = payload.get("entry_timestamp", "")
+        scene_id = payload.get("scene_id", "")
 
         if not person_id:
             logger.warning("BA request missing person_id, skipping")
             return
 
-        # Dedup: skip if already processing this person+region
-        dedup_key = f"{person_id}:{region_id}"
+        # Dedup: skip if already processing this person+region+scene
+        dedup_key = f"{scene_id}:{person_id}:{region_id}"
         if dedup_key in self._processing:
             return
         self._processing.add(dedup_key)
@@ -137,12 +138,13 @@ class BAQueueConsumer:
         # Dispatch async analysis
         if self.loop:
             asyncio.run_coroutine_threadsafe(
-                self._analyze(person_id, region_id, entry_timestamp, dedup_key),
+                self._analyze(person_id, region_id, entry_timestamp, dedup_key, scene_id),
                 self.loop,
             )
 
     async def _analyze(
-        self, person_id: str, region_id: str, entry_timestamp: str, dedup_key: str
+        self, person_id: str, region_id: str, entry_timestamp: str, dedup_key: str,
+        scene_id: str = "",
     ) -> None:
         """
         Core analysis pipeline:
@@ -160,6 +162,7 @@ class BAQueueConsumer:
                 max_age_seconds=0,
                 region_id=region_id,
                 entry_timestamp=entry_timestamp,
+                scene_id=scene_id,
             )
 
             frames_available = len(frames)
@@ -182,7 +185,8 @@ class BAQueueConsumer:
             if not poses:
                 self.publish_result({
                     "person_id": person_id, "region_id": region_id,
-                    "entry_timestamp": entry_timestamp, "status": "no_match",
+                    "entry_timestamp": entry_timestamp, "scene_id": scene_id,
+                    "status": "no_match",
                     "confidence": 0.0, "vlm_response": None,
                     "frames_analyzed": frames_available,
                 })
@@ -230,6 +234,7 @@ class BAQueueConsumer:
                         "person_id": person_id,
                         "region_id": region_id,
                         "entry_timestamp": entry_timestamp,
+                        "scene_id": scene_id,
                         "status": "no_match",
                         "confidence": result.confidence,
                         "vlm_response": vlm_response,
@@ -240,6 +245,7 @@ class BAQueueConsumer:
                         "person_id": person_id,
                         "region_id": region_id,
                         "entry_timestamp": entry_timestamp,
+                        "scene_id": scene_id,
                         "status": "suspicious",
                         "confidence": result.confidence,
                         "vlm_response": vlm_response,
@@ -254,6 +260,7 @@ class BAQueueConsumer:
                     "person_id": person_id,
                     "region_id": region_id,
                     "entry_timestamp": entry_timestamp,
+                    "scene_id": scene_id,
                     "status": "no_match",
                     "confidence": result.confidence,
                     "vlm_response": None,

@@ -7,7 +7,8 @@
 
 SCENESCAPE_DIR := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))
 ENV_FILE := $(APP_DIR)/docker/.env
-COMPOSE_SCENESCAPE := docker compose --env-file $(ENV_FILE) -f $(SCENESCAPE_DIR)/docker-compose.yaml
+CAMERAS_COMPOSE := $(APP_DIR)/docker/docker-compose.cameras.yaml
+COMPOSE_SCENESCAPE := docker compose --env-file $(ENV_FILE) -f $(SCENESCAPE_DIR)/docker-compose.yaml $(if $(wildcard $(CAMERAS_COMPOSE)),-f $(CAMERAS_COMPOSE))
 SAMPLE_DATA_DIR := $(SCENESCAPE_DIR)/sample_data
 
 # ---- Init ----

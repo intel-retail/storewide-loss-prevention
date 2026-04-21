@@ -28,7 +28,7 @@ from api.routes import router
 from services.config import ConfigService
 from services.mqtt_service import MQTTService
 from services.session_manager import SessionManager
-from services.rule_engine import RuleEngine
+from rule_engine import RuleEngine
 from services.rule_adapter import RuleEngineAdapter
 from services.frame_manager import FrameManager
 from services.scenescape_client import SceneScapeClient
@@ -90,12 +90,11 @@ async def lifespan(app: FastAPI):
         if not authenticated:
             logger.error("SceneScape API authentication failed after retries")
         else:
-            # Resolve scene_name → scene_id via SceneScape API
-            scene_name = config.get_scene_name()
-            if scene_name:
+            # Resolve scene_name → scene_id for each configured scene
+            for scene_name in config.get_scene_names():
                 scene_id = await ss_client.resolve_scene_id(scene_name)
                 if scene_id:
-                    config.set_scene_id(scene_id)
+                    config.set_scene_id_for_name(scene_name, scene_id)
                     logger.info("Scene resolved from name", scene_name=scene_name, scene_id=scene_id)
                 else:
                     logger.error("Could not resolve scene_name to scene_id", scene_name=scene_name)
@@ -104,6 +103,13 @@ async def lifespan(app: FastAPI):
             regions = await ss_client.fetch_regions()
             if regions:
                 discovered = ss_client.map_zones(regions)
+                # Tag each zone with its scene_id
+                for rid, zinfo in discovered.items():
+                    scene_name_of_zone = zinfo.get("scene", "")
+                    for sname, sid in config.get_scene_ids().items():
+                        if sname == scene_name_of_zone or not scene_name_of_zone:
+                            zinfo["scene_id"] = sid
+                            break
                 if discovered:
                     config.merge_zones(discovered)
                     logger.info("Zone discovery complete", zones=len(config.get_zones()))
@@ -175,6 +181,9 @@ async def lifespan(app: FastAPI):
     # MQTT region events → session manager (enter/exit with dwell from SceneScape)
     mqtt_svc.register_region_event_handler(session_mgr.on_region_event)
 
+    # MQTT region data → session manager (continuous dwell checking via SceneScape feed)
+    mqtt_svc.register_region_data_handler(session_mgr.on_region_data)
+
     # MQTT camera images → frame storage (cropped person frames for HIGH_VALUE zones)
     async def on_camera_image(camera_name: str, data: dict) -> None:
         image_b64 = data.get("image", data.get("data", ""))
@@ -202,6 +211,7 @@ async def lifespan(app: FastAPI):
                     session.object_id, image_bytes, ts,
                     region_id=zone_id,
                     entry_timestamp=entry_ts_iso,
+                    scene_id=session.scene_id,
                 )
                 session.add_frame_key(key)
 
@@ -235,7 +245,6 @@ async def lifespan(app: FastAPI):
     mqtt_task = asyncio.create_task(mqtt_svc.start())
     expiry_task = asyncio.create_task(session_mgr.run_expiry_loop())
     frame_req_task = asyncio.create_task(frame_request_loop())
-    loiter_task = asyncio.create_task(rule_adapter.run_loiter_check_loop())
     ba_task = asyncio.create_task(rule_adapter.run_ba_check_loop())
 
     logger.info(
@@ -252,7 +261,6 @@ async def lifespan(app: FastAPI):
     await mqtt_svc.stop()
     expiry_task.cancel()
     frame_req_task.cancel()
-    loiter_task.cancel()
     ba_task.cancel()
     mqtt_task.cancel()
 

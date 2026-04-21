@@ -29,6 +29,7 @@ class Alert:
     alert_level: AlertLevel
     object_id: str
     timestamp: datetime
+    scene_id: str = ""  # SceneScape scene UUID
     region_id: Optional[str] = None
     region_name: Optional[str] = None
     details: Dict[str, Any] = field(default_factory=dict)
@@ -41,6 +42,7 @@ class Alert:
             "alert_type": self.alert_type.value,
             "alert_level": self.alert_level.value,
             "object_id": self.object_id,
+            "scene_id": self.scene_id,
             "timestamp": self.timestamp.isoformat(),
             "region_id": self.region_id,
             "region_name": self.region_name,

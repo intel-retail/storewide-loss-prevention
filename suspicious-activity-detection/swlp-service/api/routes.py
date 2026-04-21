@@ -93,8 +93,11 @@ def _serialize_session(session, config: ConfigService, include_visits: bool = Fa
         zone_summary[rid]["visit_count"] += 1
         zone_summary[rid]["total_dwell_seconds"] += round(visit.duration_seconds, 1)
 
+    scene_name = config.get_scene_id_reverse(session.scene_id) or session.scene_id or ""
+
     result: Dict[str, Any] = {
         "object_id": session.object_id,
+        "scene_name": scene_name,
         "first_seen": session.first_seen.isoformat(),
         "last_seen": session.last_seen.isoformat(),
         "current_cameras": session.current_cameras,
