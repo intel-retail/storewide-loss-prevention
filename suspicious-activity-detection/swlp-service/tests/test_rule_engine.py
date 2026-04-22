@@ -71,13 +71,13 @@ class TestRuleEngineGeneric:
         engine = self._engine()
         ctx = {"zone_visit_counts": {"r1": 4}, "region_id": "r1"}
         actions = engine.evaluate("zone_entry", "HIGH_VALUE", ctx)
-        assert any(a.params.get("alert_type") == "UNUSUAL_PATH" for a in actions)
+        assert any(a.params.get("alert_type") == "REPEATED_VISIT" for a in actions)
 
     def test_repeated_visits_no_match_below_threshold(self):
         engine = self._engine()
         ctx = {"zone_visit_counts": {"r1": 1}, "region_id": "r1"}
         actions = engine.evaluate("zone_entry", "HIGH_VALUE", ctx)
-        assert not any(a.params.get("alert_type") == "UNUSUAL_PATH" for a in actions)
+        assert not any(a.params.get("alert_type") == "REPEATED_VISIT" for a in actions)
 
     def test_behavioral_analysis_escalate(self):
         engine = self._engine()
@@ -143,11 +143,15 @@ def setup():
     sm = FakeSessionManager()
     alerts = []
 
-    async def collect(alert):
+    engine = RuleEngine(rules_path=_RULES_YAML)
+    adapter = RuleEngineAdapter(engine, config, sm)
+
+    # Monkeypatch _fire_alert to capture alerts in tests
+    async def capture_alert(alert):
         alerts.append(alert)
 
-    engine = RuleEngine(rules_path=_RULES_YAML)
-    adapter = RuleEngineAdapter(engine, config, sm, alert_callback=collect)
+    adapter._fire_alert = capture_alert
+
     return adapter, sm, alerts
 
 
@@ -245,7 +249,7 @@ async def test_repeated_visits_alert(setup):
     await adapter.on_event(event)
 
     assert len(alerts) == 1
-    assert alerts[0].alert_type == AlertType.UNUSUAL_PATH
+    assert alerts[0].alert_type == AlertType.REPEATED_VISIT
 
 
 @pytest.mark.asyncio
@@ -261,5 +265,133 @@ async def test_loitering_dedup_per_zone(setup):
 
     # Second exit from same zone should not fire again
     event2 = _make_event(EventType.EXITED, ZoneType.HIGH_VALUE, dwell=200.0)
+    await adapter.on_event(event2)
+    assert len(alerts) == 1  # still 1, not 2
+
+
+@pytest.mark.asyncio
+async def test_loitering_via_region_data_feed(setup):
+    """LOITER event from /data/region/ feed should fire alert directly."""
+    adapter, sm, alerts = setup
+    session = PersonSession(object_id="42", first_seen=datetime.now(timezone.utc), last_seen=datetime.now(timezone.utc))
+    sm.add(session)
+
+    event = _make_event(EventType.LOITER, ZoneType.HIGH_VALUE, dwell=25.0)
+    await adapter.on_event(event)
+
+    assert len(alerts) == 1
+    assert alerts[0].alert_type == AlertType.LOITERING
+    assert alerts[0].details["source"] == "region_data_feed"
+    assert alerts[0].details["dwell_seconds"] == 25.0
+
+
+@pytest.mark.asyncio
+async def test_loitering_via_region_data_dedup(setup):
+    """LOITER from region-data feed should only fire once per zone."""
+    adapter, sm, alerts = setup
+    session = PersonSession(object_id="42", first_seen=datetime.now(timezone.utc), last_seen=datetime.now(timezone.utc))
+    sm.add(session)
+
+    event1 = _make_event(EventType.LOITER, ZoneType.HIGH_VALUE, dwell=25.0)
+    await adapter.on_event(event1)
+    assert len(alerts) == 1
+
+    # Second LOITER for same zone should be suppressed
+    event2 = _make_event(EventType.LOITER, ZoneType.HIGH_VALUE, dwell=30.0)
+    await adapter.on_event(event2)
+    assert len(alerts) == 1  # still 1
+
+
+@pytest.mark.asyncio
+async def test_loitering_region_data_prevents_exit_duplicate(setup):
+    """If loiter already fired via region-data, exit-based rule should not duplicate."""
+    adapter, sm, alerts = setup
+    session = PersonSession(object_id="42", first_seen=datetime.now(timezone.utc), last_seen=datetime.now(timezone.utc))
+    sm.add(session)
+
+    # First: loiter fires via region-data feed
+    loiter_event = _make_event(EventType.LOITER, ZoneType.HIGH_VALUE, dwell=25.0)
+    await adapter.on_event(loiter_event)
+    assert len(alerts) == 1
+
+    # Then: person exits with high dwell — exit-based loiter rule should be suppressed
+    exit_event = _make_event(EventType.EXITED, ZoneType.HIGH_VALUE, dwell=90.0)
+    await adapter.on_event(exit_event)
+    assert len(alerts) == 1  # still 1, not 2
+
+
+@pytest.mark.asyncio
+async def test_concealment_alert_from_ba_result(setup):
+    """BA result with status=suspicious should fire CONCEALMENT alert."""
+    adapter, sm, alerts = setup
+    session = PersonSession(
+        object_id="42",
+        first_seen=datetime.now(timezone.utc),
+        last_seen=datetime.now(timezone.utc),
+    )
+    sm.add(session)
+
+    result = {
+        "person_id": "42",
+        "region_id": "r1",
+        "status": "suspicious",
+        "confidence": 0.85,
+        "vlm_response": "shelf-to-waist hand motion detected",
+        "frames_analyzed": 10,
+    }
+    await adapter.on_ba_result(result)
+
+    assert len(alerts) == 1
+    assert alerts[0].alert_type == AlertType.CONCEALMENT
+    assert alerts[0].alert_level == AlertLevel.WARNING
+    assert alerts[0].details["confidence"] == 0.85
+    assert alerts[0].details["frames_analyzed"] == 10
+    assert session.concealment_suspected is True
+
+
+@pytest.mark.asyncio
+async def test_concealment_no_alert_on_no_match(setup):
+    """BA result with status=no_match should NOT fire an alert."""
+    adapter, sm, alerts = setup
+    session = PersonSession(
+        object_id="42",
+        first_seen=datetime.now(timezone.utc),
+        last_seen=datetime.now(timezone.utc),
+    )
+    sm.add(session)
+
+    result = {
+        "person_id": "42",
+        "region_id": "r1",
+        "status": "no_match",
+    }
+    await adapter.on_ba_result(result)
+
+    assert len(alerts) == 0
+    assert session.concealment_suspected is False
+    # ba_alerted should NOT be set so re-analysis can happen
+    assert not session.ba_alerted.get("r1")
+
+
+@pytest.mark.asyncio
+async def test_repeated_visit_dedup_per_zone(setup):
+    """Repeated-visit alert should only fire once per zone per session."""
+    adapter, sm, alerts = setup
+    session = PersonSession(
+        object_id="42",
+        first_seen=datetime.now(timezone.utc),
+        last_seen=datetime.now(timezone.utc),
+        zone_visit_counts={"r1": 4},
+    )
+    sm.add(session)
+
+    event1 = _make_event(EventType.ENTERED, ZoneType.HIGH_VALUE)
+    await adapter.on_event(event1)
+    assert len(alerts) == 1
+    assert alerts[0].alert_type == AlertType.REPEATED_VISIT
+
+    # Second entry with even higher count — should not duplicate
+    session.zone_visit_counts["r1"] = 5
+    event2 = _make_event(EventType.ENTERED, ZoneType.HIGH_VALUE)
     await adapter.on_event(event2)
     assert len(alerts) == 1  # still 1, not 2

@@ -187,7 +187,7 @@ class RuleEngineAdapter:
 
         alert_level = AlertLevel[severity]
 
-        # Dedup: one alert per zone per session for loitering and unusual-path
+        # Dedup: one alert per zone per session for loitering and repeated-visit
         if alert_type == AlertType.LOITERING:
             if session.loiter_alerted.get(event.region_id):
                 logger.debug(
@@ -196,10 +196,10 @@ class RuleEngineAdapter:
                     region_id=event.region_id,
                 )
                 return
-        if alert_type == AlertType.UNUSUAL_PATH:
-            if session.unusual_path_alerted.get(event.region_id):
+        if alert_type == AlertType.REPEATED_VISIT:
+            if session.repeated_visit_alerted.get(event.region_id):
                 logger.debug(
-                    "Unusual-path alert already fired for zone",
+                    "Repeated-visit alert already fired for zone",
                     object_id=event.object_id,
                     region_id=event.region_id,
                 )
@@ -230,8 +230,8 @@ class RuleEngineAdapter:
         # Mark as fired for dedup
         if alert_type == AlertType.LOITERING:
             session.loiter_alerted[event.region_id] = True
-        if alert_type == AlertType.UNUSUAL_PATH:
-            session.unusual_path_alerted[event.region_id] = True
+        if alert_type == AlertType.REPEATED_VISIT:
+            session.repeated_visit_alerted[event.region_id] = True
 
     @staticmethod
     def _build_details(
@@ -240,7 +240,7 @@ class RuleEngineAdapter:
         """Build contextual details dict for the alert."""
         if alert_type == AlertType.ZONE_VIOLATION:
             return {"zone_type": event.zone_type.value}
-        elif alert_type == AlertType.UNUSUAL_PATH:
+        elif alert_type == AlertType.REPEATED_VISIT:
             return {
                 "visit_count": session.zone_visit_counts.get(event.region_id, 0),
                 "threshold": params.get("threshold", 2),
@@ -360,6 +360,14 @@ class RuleEngineAdapter:
             return
 
         if status == "suspicious":
+            # Dedup: skip if a previous in-flight request already fired
+            if session.ba_alerted.get(region_id):
+                logger.debug(
+                    "BA result: concealment alert already fired for zone",
+                    person_id=person_id,
+                    region_id=region_id,
+                )
+                return
             session.concealment_suspected = True
             session.ba_alerted[region_id] = True
             zone_name = self.config.get_zone_name(region_id)

@@ -46,7 +46,7 @@ rules:
     actions:
       - type: alert
         params:
-          alert_type: UNUSUAL_PATH
+          alert_type: REPEATED_VISIT
           severity: WARNING
           threshold: ${repeat_visit_threshold:4}
 

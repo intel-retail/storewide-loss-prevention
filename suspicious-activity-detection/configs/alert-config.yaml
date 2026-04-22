@@ -38,7 +38,7 @@ subscriptions:
         topic: alerts/loitering
       - type: log
       
-  - alert_type: UNUSUAL_PATH
+  - alert_type: REPEATED_VISIT
     dedup:
       enabled: true
       strategy: field_hash
@@ -53,7 +53,7 @@ subscriptions:
         truncate: 16
     delivery:
       - type: mqtt
-        topic: alerts/unusual_path
+        topic: alerts/repeated_visit
       - type: log
 
   - alert_type: ZONE_VIOLATION

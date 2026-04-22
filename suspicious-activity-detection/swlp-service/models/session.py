@@ -70,8 +70,8 @@ class PersonSession:
     # Loiter alert tracking: {region_id: True} — prevents duplicate alerts
     loiter_alerted: Dict[str, bool] = field(default_factory=dict)
 
-    # Unusual-path alert tracking: {region_id: True} — prevents duplicate alerts
-    unusual_path_alerted: Dict[str, bool] = field(default_factory=dict)
+    # Repeated-visit alert tracking: {region_id: True} — prevents duplicate alerts
+    repeated_visit_alerted: Dict[str, bool] = field(default_factory=dict)
 
     # BA concealment alert tracking: {region_id: True} — prevents duplicate alerts
     ba_alerted: Dict[str, bool] = field(default_factory=dict)
