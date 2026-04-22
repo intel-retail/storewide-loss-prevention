@@ -11,7 +11,7 @@ subscriptions:
         - metadata.scene_id
         - metadata.person_id
         - metadata.zone_id
-      window_seconds: 30
+      window_seconds: 60
       on_missing: skip
       hash:
         algorithm: sha1

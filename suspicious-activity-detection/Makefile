@@ -10,7 +10,10 @@
 SCENESCAPE_DIR := ../scenescape
 COMPOSE_SCENESCAPE := docker compose --project-directory . --env-file docker/.env -f $(SCENESCAPE_DIR)/docker-compose.yaml
 COMPOSE_LP := docker compose --project-directory . --env-file docker/.env -f docker/docker-compose.yaml
-COMPOSE_ALL := docker compose --project-directory . --env-file docker/.env -f $(SCENESCAPE_DIR)/docker-compose.yaml -f docker/docker-compose.cameras.yaml -f docker/docker-compose.yaml
+COMPOSE_ALL := docker compose --project-directory . --env-file docker/.env -f $(SCENESCAPE_DIR)/docker-compose.yaml -f docker/docker-compose.yaml
+# When stream-density override exists, layer it in
+CAMERAS_OVERRIDE := docker/docker-compose.cameras.yaml
+COMPOSE_ALL := $(if $(wildcard $(CAMERAS_OVERRIDE)),$(COMPOSE_ALL) -f $(CAMERAS_OVERRIDE),$(COMPOSE_ALL))
 
 # ---- Initialization ----
 
@@ -85,6 +88,26 @@ download-models:
 	@echo "Downloading models for Suspicious Activity Detection..."
 	bash download_models/model_download.sh
 
+# ---- Stream Density ----
+
+.PHONY: stream-density
+stream-density:
+	@echo "Generating stream-density camera services + pipelines..."
+	python3 stream_density.py generate \
+		configs/pipeline-config.json \
+		$(SCENESCAPE_DIR)/dlstreamer-pipeline-server/$$(basename $(CURDIR))-pipeline-config.json \
+		docker/docker-compose.cameras.yaml \
+		$$(python3 -c "import json; c=json.load(open('configs/zone_config.json')); s=c.get('scenes',[c])[0]; print(s.get('cameras',[''])[0] or s.get('camera_name',''))") \
+		$$(python3 -c "import json; c=json.load(open('configs/zone_config.json')); s=c.get('scenes',[c])[0]; print(s.get('video_file','lp-camera1.mp4'))") \
+		$$(python3 -c "import json; print(json.load(open('configs/zone_config.json')).get('stream_density',1))")
+	@echo "Override created: docker/docker-compose.cameras.yaml"
+	@echo "To revert to single camera: make clean-stream-density"
+
+.PHONY: clean-stream-density
+clean-stream-density:
+	rm -f docker/docker-compose.cameras.yaml
+	@echo "Removed override — using default single camera from scenescape/docker-compose.yaml"
+
 # ---- Build ----
 
 .PHONY: build
@@ -130,6 +153,10 @@ help:
 	@echo ""
 	@echo "  Build:"
 	@echo "    make build           - Build LP container images"
+	@echo ""
+	@echo "  Stream Density:"
+	@echo "    make stream-density       - Generate multi-camera override"
+	@echo "    make clean-stream-density - Revert to single camera"
 	@echo ""
 	@echo "  Cleanup:"
 	@echo "    make clean           - Stop and remove containers + volumes"
