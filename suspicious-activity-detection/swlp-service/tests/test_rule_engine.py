@@ -131,10 +131,10 @@ class FakeSessionManager:
         self._sessions = {}
 
     def add(self, session):
-        self._sessions[session.object_id] = session
+        self._sessions[(session.scene_id, session.object_id)] = session
 
-    def get_session(self, object_id):
-        return self._sessions.get(object_id)
+    def get_session(self, object_id, scene_id=""):
+        return self._sessions.get((scene_id, object_id))
 
 
 @pytest.fixture

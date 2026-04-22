@@ -68,7 +68,7 @@ class RuleEngineAdapter:
             await self._on_person_lost(event)
             return
 
-        session = self.session_mgr.get_session(event.object_id)
+        session = self.session_mgr.get_session(event.object_id, event.scene_id)
         if not session:
             return
 
@@ -169,7 +169,7 @@ class RuleEngineAdapter:
                 await self._execute_alert(action, event, session)
             elif action.type == "escalate":
                 if action.params.get("service") == "behavioral_analysis":
-                    self._publish_ba_request(event.object_id, event.region_id)
+                    self._publish_ba_request(event.object_id, event.region_id, event.scene_id)
 
     async def _execute_alert(
         self, action: Action, event: RegionEvent, session
@@ -288,7 +288,7 @@ class RuleEngineAdapter:
                         if session.ba_alerted.get(zone_id):
                             continue
                         self._publish_ba_request(
-                            session.object_id, zone_id
+                            session.object_id, zone_id, session.scene_id
                         )
             except Exception:
                 logger.exception("Error in BA check loop")
@@ -317,13 +317,13 @@ class RuleEngineAdapter:
     # ---- External service calls ----------------------------------------------
 
     def _publish_ba_request(
-        self, object_id: str, region_id: str
+        self, object_id: str, region_id: str, scene_id: str = ""
     ) -> None:
         """Publish a BA analysis request to the MQTT queue."""
         if not self._ba_publisher:
             return
 
-        session = self.session_mgr.get_session(object_id)
+        session = self.session_mgr.get_session(object_id, scene_id=scene_id)
         if not session:
             return
 
@@ -353,8 +353,9 @@ class RuleEngineAdapter:
         person_id = result.get("person_id", "")
         region_id = result.get("region_id", "")
         status = result.get("status", "")
+        scene_id = result.get("scene_id", "")
 
-        session = self.session_mgr.get_session(person_id)
+        session = self.session_mgr.get_session(person_id, scene_id=scene_id)
         if not session:
             logger.debug("BA result for unknown session", person_id=person_id)
             return
@@ -381,7 +382,7 @@ class RuleEngineAdapter:
                 region_name=zone_name,
                 details={
                     "confidence": result.get("confidence"),
-                    "message": result.get("vlm_response", ""),
+                    "message": result.get("vlm_response") or "",
                     "frames_analyzed": result.get("frames_analyzed", 0),
                 },
             )

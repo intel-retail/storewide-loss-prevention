@@ -223,12 +223,29 @@ class BAQueueConsumer:
                 if result.vlm_result:
                     vlm_response = result.vlm_result.get("reasoning")
 
-                # Only report "suspicious" if VLM confirmed or VLM was not used
+                # Only report "suspicious" if VLM explicitly confirmed
                 if result.vlm_confirmed is False:
                     # VLM explicitly disagreed — not suspicious
                     logger.info(
                         f"Entity {person_id}: VLM overruled pose match "
                         f"(confidence={result.confidence:.3f})"
+                    )
+                    self.publish_result({
+                        "person_id": person_id,
+                        "region_id": region_id,
+                        "entry_timestamp": entry_timestamp,
+                        "scene_id": scene_id,
+                        "status": "no_match",
+                        "confidence": result.confidence,
+                        "vlm_response": vlm_response,
+                        "frames_analyzed": frames_available,
+                    })
+                elif result.vlm_confirmed is None:
+                    # VLM failed (e.g. GPU OOM) — do not treat as confirmed,
+                    # allow retry on next poll cycle
+                    logger.warning(
+                        f"Entity {person_id}: VLM call failed, "
+                        f"will retry on next cycle"
                     )
                     self.publish_result({
                         "person_id": person_id,

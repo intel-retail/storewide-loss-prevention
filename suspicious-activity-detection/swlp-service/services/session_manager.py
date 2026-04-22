@@ -43,7 +43,8 @@ class SessionManager:
         # Build set of configured camera names for filtering
         self._allowed_cameras = {c["name"] for c in config.get_cameras()} if config.get_cameras() else set()
 
-        self._sessions: Dict[str, PersonSession] = {}
+        # Sessions keyed by (scene_id, object_id) to support multi-scene
+        self._sessions: Dict[tuple, PersonSession] = {}
         self._event_handlers: List[Callable] = []
         self._expiry_task: Optional[asyncio.Task] = None
 
@@ -56,10 +57,10 @@ class SessionManager:
         self._event_handlers.append(handler)
 
     # ---- public accessors ---------------------------------------------------
-    def get_session(self, object_id: str) -> Optional[PersonSession]:
-        return self._sessions.get(object_id)
+    def get_session(self, object_id: str, scene_id: str = "") -> Optional[PersonSession]:
+        return self._sessions.get((scene_id, object_id))
 
-    def get_all_sessions(self) -> Dict[str, PersonSession]:
+    def get_all_sessions(self) -> Dict[tuple, PersonSession]:
         return dict(self._sessions)
 
     def get_active_count(self) -> int:
@@ -104,8 +105,9 @@ class SessionManager:
                 if not visible_on_configured:
                     continue
 
-            if oid in self._sessions:
-                session = self._sessions[oid]
+            skey = (scene_id, oid)
+            if skey in self._sessions:
+                session = self._sessions[skey]
                 session.last_seen = now
                 session.current_cameras = list(cameras)
                 session.bbox = bbox
@@ -122,7 +124,7 @@ class SessionManager:
                     current_cameras=list(cameras),
                     bbox=bbox,
                 )
-                self._sessions[oid] = session
+                self._sessions[skey] = session
                 logger.info("Session created", object_id=oid, scene_id=scene_id)
 
             # Real-time loiter check using region entry timestamps from scene data
@@ -199,7 +201,8 @@ class SessionManager:
             if not oid:
                 continue
             # Ensure session exists (region event may arrive before scene-data)
-            if oid not in self._sessions:
+            skey = (scene_id, oid)
+            if skey not in self._sessions:
                 first_seen_str = obj.get("first_seen")
                 first_seen = now
                 if first_seen_str:
@@ -216,10 +219,10 @@ class SessionManager:
                     current_cameras=list(cameras),
                     bbox=obj.get("center_of_mass"),
                 )
-                self._sessions[oid] = session
+                self._sessions[skey] = session
                 logger.info("Session created from region event", object_id=oid, region_id=region_id)
             else:
-                session = self._sessions[oid]
+                session = self._sessions[skey]
                 session.last_seen = now
 
             await self._fire_enter(session, region_id, now)
@@ -232,7 +235,8 @@ class SessionManager:
             if not oid:
                 continue
 
-            session = self._sessions.get(oid)
+            skey = (scene_id, oid)
+            session = self._sessions.get(skey)
             if not session:
                 continue
             session.last_seen = now
@@ -272,7 +276,8 @@ class SessionManager:
             if not oid:
                 continue
 
-            session = self._sessions.get(oid)
+            skey = (scene_id, oid)
+            session = self._sessions.get(skey)
             if not session:
                 logger.info("region_data: no session for object", object_id=oid)
                 continue
@@ -316,10 +321,11 @@ class SessionManager:
                     break  # one alert per object per region_data message
 
     # ---- session expiry ------------------------------------------------------
-    async def _expire_session(self, oid: str) -> None:
-        session = self._sessions.get(oid)
+    async def _expire_session(self, skey: tuple) -> None:
+        session = self._sessions.get(skey)
         if session is None:
             return
+        oid = session.object_id
 
         now = datetime.now(timezone.utc)
         logger.info("Session expired", object_id=oid)
@@ -344,7 +350,7 @@ class SessionManager:
                 await self._emit(event)
 
         # Remove session after EXITED events are processed
-        del self._sessions[oid]
+        del self._sessions[skey]
 
         # Fire PERSON_LOST
         lost_event = RegionEvent(
@@ -453,9 +459,9 @@ class SessionManager:
             await asyncio.sleep(5)
             now = datetime.now(timezone.utc)
             expired = [
-                oid
-                for oid, s in self._sessions.items()
+                skey
+                for skey, s in self._sessions.items()
                 if (now - s.last_seen).total_seconds() > self.session_timeout
             ]
-            for oid in expired:
-                await self._expire_session(oid)
+            for skey in expired:
+                await self._expire_session(skey)

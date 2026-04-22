@@ -40,6 +40,9 @@ class FakeConfig:
     def get_scene_id(self):
         return None
 
+    def get_accepted_scene_ids(self):
+        return set()
+
 
 @pytest.fixture
 def config():
@@ -138,7 +141,7 @@ async def test_session_tracks_current_zones(manager):
     }
     await manager.on_region_event("scene1", "region-electronics", data)
 
-    session = manager.get_session("42")
+    session = manager.get_session("42", scene_id="scene1")
     assert session is not None
     assert "region-electronics" in session.current_zones
     assert session.zone_visit_counts["region-electronics"] == 1

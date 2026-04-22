@@ -65,11 +65,11 @@ async def get_sessions(request: Request) -> List[Dict[str, Any]]:
 
 
 @router.get("/sessions/{object_id}")
-async def get_session_detail(request: Request, object_id: str) -> Dict[str, Any]:
+async def get_session_detail(request: Request, object_id: str, scene_id: str = "") -> Dict[str, Any]:
     """Return full detail for a single person session including zone visit history."""
     sm = _get_session_manager(request)
     config = _get_config(request)
-    session = sm.get_session(object_id)
+    session = sm.get_session(object_id, scene_id=scene_id)
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
     return _serialize_session(session, config, include_visits=True)
