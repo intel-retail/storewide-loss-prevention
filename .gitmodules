@@ -1,0 +1,3 @@
+[submodule "suspicious-activity-detection/performance-tools"]
+	path = suspicious-activity-detection/performance-tools
+	url = https://github.com/intel-retail/performance-tools.git

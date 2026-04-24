@@ -90,23 +90,27 @@ download-models:
 
 # ---- Stream Density ----
 
+PERF_TOOLS_DIR := performance-tools/benchmark-scripts
+SAD_STREAM_DENSITY := $(PERF_TOOLS_DIR)/sad_stream_density.py
+
 .PHONY: stream-density
 stream-density:
-	@echo "Generating stream-density camera services + pipelines..."
-	python3 stream_density.py generate \
-		configs/pipeline-config.json \
-		$(SCENESCAPE_DIR)/dlstreamer-pipeline-server/$$(basename $(CURDIR))-pipeline-config.json \
-		docker/docker-compose.cameras.yaml \
-		$$(python3 -c "import json; c=json.load(open('configs/zone_config.json')); s=c.get('scenes',[c])[0]; print(s.get('cameras',[''])[0] or s.get('camera_name',''))") \
-		$$(python3 -c "import json; c=json.load(open('configs/zone_config.json')); s=c.get('scenes',[c])[0]; print(s.get('video_file','lp-camera1.mp4'))") \
-		$$(python3 -c "import json; print(json.load(open('configs/zone_config.json')).get('stream_density',1))")
-	@echo "Override created: docker/docker-compose.cameras.yaml"
-	@echo "To revert to single camera: make clean-stream-density"
+	@echo "=== Stream Density: iteratively find max scenes within target latency ==="
+	python3 $(SAD_STREAM_DENSITY) run $(CURDIR)
+
+.PHONY: generate-stream-density
+generate-stream-density:
+	@echo "Generating stream-density overrides only..."
+	python3 $(SAD_STREAM_DENSITY) generate $(CURDIR)
+	@echo "To start: make demo"
 
 .PHONY: clean-stream-density
 clean-stream-density:
-	rm -f docker/docker-compose.cameras.yaml
-	@echo "Removed override — using default single camera from scenescape/docker-compose.yaml"
+	python3 $(SAD_STREAM_DENSITY) clean $(CURDIR)
+
+.PHONY: down-stream-density
+down-stream-density:
+	python3 $(SAD_STREAM_DENSITY) down $(CURDIR)
 
 # ---- Build ----
 
@@ -155,8 +159,9 @@ help:
 	@echo "    make build           - Build LP container images"
 	@echo ""
 	@echo "  Stream Density:"
-	@echo "    make stream-density       - Generate multi-camera override"
-	@echo "    make clean-stream-density - Revert to single camera"
+	@echo "    make stream-density          - Generate overrides, init, build, and start"
+	@echo "    make generate-stream-density - Generate overrides only (no start)"
+	@echo "    make clean-stream-density    - Revert to single camera"
 	@echo ""
 	@echo "  Cleanup:"
 	@echo "    make clean           - Stop and remove containers + volumes"
