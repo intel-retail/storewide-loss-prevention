@@ -13,6 +13,7 @@ class EventType(str, Enum):
     EXITED = "EXITED"
     LOITER = "LOITER"
     PERSON_LOST = "PERSON_LOST"
+    CONCEALMENT_DETECTED = "CONCEALMENT_DETECTED"
 
 
 class ZoneType(str, Enum):

@@ -51,6 +51,11 @@ class BAQueuePublisher:
             scene_id=scene_id,
         )
 
+    def publish_raw(self, topic: str, payload: dict) -> None:
+        """Publish an arbitrary dict to any MQTT topic."""
+        self._mqtt.publish(topic, payload)
+        logger.debug("Published raw MQTT message", topic=topic)
+
 
 class BAQueueConsumer:
     """

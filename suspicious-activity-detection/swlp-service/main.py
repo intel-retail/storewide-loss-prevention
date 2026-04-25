@@ -34,6 +34,7 @@ from services.frame_manager import FrameManager
 from services.scenescape_client import SceneScapeClient
 from services.alert_service_client import AlertServiceClient
 from services.ba_queue import BAQueuePublisher, BAQueueConsumer
+from services.frame_capture import FrameCaptureService
 
 # ---- Structured logging setup -----------------------------------------------
 logging.basicConfig(format="%(message)s", stream=__import__("sys").stdout, level=logging.DEBUG)
@@ -151,6 +152,12 @@ async def lifespan(app: FastAPI):
     session_mgr = SessionManager(config)
     app.state.session_manager = session_mgr
 
+    # 5b. Frame capture service (explicit start/stop per person+zone)
+    frame_capture = FrameCaptureService(
+        config, frame_mgr, session_mgr, mqtt_service=mqtt_svc,
+    )
+    app.state.frame_capture = frame_capture
+
     # 6. Rule engine (local, in-process)
     rules_yaml = config.get_rules_yaml_path()
     rule_engine = RuleEngine(rules_path=rules_yaml)
@@ -159,9 +166,14 @@ async def lifespan(app: FastAPI):
         alert_service_client=alert_svc_client,
         frame_manager=frame_mgr,
         ba_publisher=ba_publisher,
+        frame_capture=frame_capture,
     )
     app.state.rule_engine = rule_engine
     app.state.rule_adapter = rule_adapter
+
+    # Wire batch-ready callback: when FrameCaptureService has enough frames,
+    # it calls rule_adapter._on_batch_ready to publish ba/requests
+    frame_capture.set_on_batch_ready(rule_adapter._on_batch_ready)
 
     # Wire BA result consumer → rule adapter (must be after rule_adapter creation)
     async def on_ba_result(result: dict) -> None:
@@ -184,68 +196,12 @@ async def lifespan(app: FastAPI):
     # MQTT region data → session manager (continuous dwell checking via SceneScape feed)
     mqtt_svc.register_region_data_handler(session_mgr.on_region_data)
 
-    # MQTT camera images → frame storage (cropped person frames for HIGH_VALUE zones)
-    async def on_camera_image(camera_name: str, data: dict) -> None:
-        image_b64 = data.get("image", data.get("data", ""))
-        if not image_b64:
-            return
-        image_bytes = base64.b64decode(image_b64)
-        ts = datetime.now(timezone.utc)
-
-        # Store cropped frames only for persons in HIGH_VALUE zones
-        for session in session_mgr.get_all_sessions().values():
-            if camera_name not in session.current_cameras:
-                continue
-
-            # Check if person is currently in any HIGH_VALUE zone
-            in_high_value = False
-            for zone_id in session.current_zones:
-                if config.get_zone_type(zone_id) == "HIGH_VALUE":
-                    in_high_value = True
-                    break
-
-            if in_high_value:
-                # Store full camera frame (gvadetect handles person detection)
-                entry_ts_iso = session.current_zones.get(zone_id, "")
-                key = frame_mgr.store_person_frame(
-                    session.object_id, image_bytes, ts,
-                    region_id=zone_id,
-                    entry_timestamp=entry_ts_iso,
-                    scene_id=session.scene_id,
-                )
-                session.add_frame_key(key)
-
-    mqtt_svc.register_camera_image_handler(on_camera_image)
-
-    # Background task: request frames from cameras that see people in HIGH_VALUE zones
-    async def frame_request_loop() -> None:
-        """Periodically send 'getimage' to cameras with active HIGH_VALUE sessions."""
-        analysis_fps = int(os.environ.get("ANALYSIS_FPS", config.get_rules_config().get("behavioural_analysis_fps", 1)))
-        FRAME_REQUEST_INTERVAL = 1.0 / analysis_fps
-        while True:
-            try:
-                cameras_needed: set[str] = set()
-                for session in session_mgr.get_all_sessions().values():
-                    for zone_id in session.current_zones:
-                        if config.get_zone_type(zone_id) == "HIGH_VALUE":
-                            cameras_needed.update(session.current_cameras)
-                            break
-
-                for cam in cameras_needed:
-                    mqtt_svc.publish_raw(
-                        f"scenescape/cmd/camera/{cam}", "getimage"
-                    )
-
-            except Exception:
-                logger.exception("Error in frame request loop")
-
-            await asyncio.sleep(FRAME_REQUEST_INTERVAL)
+    # MQTT camera images → frame capture service
+    mqtt_svc.register_camera_image_handler(frame_capture.on_camera_image)
 
     # Start background tasks
     mqtt_task = asyncio.create_task(mqtt_svc.start())
     expiry_task = asyncio.create_task(session_mgr.run_expiry_loop())
-    frame_req_task = asyncio.create_task(frame_request_loop())
-    ba_task = asyncio.create_task(rule_adapter.run_ba_check_loop())
 
     logger.info(
         "Store-wide Loss Prevention started",
@@ -258,10 +214,9 @@ async def lifespan(app: FastAPI):
 
     # ---- Shutdown ----
     logger.info("Shutting down Store-wide Loss Prevention")
+    await frame_capture.stop_all()
     await mqtt_svc.stop()
     expiry_task.cancel()
-    frame_req_task.cancel()
-    ba_task.cancel()
     mqtt_task.cancel()
 
 

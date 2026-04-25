@@ -76,6 +76,13 @@ class PersonSession:
     # BA concealment alert tracking: {region_id: True} — prevents duplicate alerts
     ba_alerted: Dict[str, bool] = field(default_factory=dict)
 
+    # Per-zone concealment count: {region_id: int}
+    concealment_count: Dict[str, int] = field(default_factory=dict)
+
+    # Last BA result fields (set on each ba/results message)
+    last_ba_confidence: float = 0.0
+    last_ba_frames_analyzed: int = 0
+
     # Frame references (SeaweedFS keys for rolling buffer — cropped person frames)
     frame_buffer: List[str] = field(default_factory=list)
     max_frame_buffer: int = 20  # ~10s at 2fps per spec

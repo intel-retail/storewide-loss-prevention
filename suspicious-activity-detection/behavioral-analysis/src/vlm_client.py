@@ -127,7 +127,7 @@ class VLMClient:
         url = f"{self.endpoint}/v3/chat/completions"
 
         try:
-            async with httpx.AsyncClient(timeout=self.timeout) as client:
+            async with httpx.AsyncClient(timeout=self.timeout, proxy=None) as client:
                 response = await client.post(url, json=payload)
                 response.raise_for_status()
 

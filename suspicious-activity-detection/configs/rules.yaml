@@ -18,6 +18,20 @@ settings:
 variables:
   repeat_visit_threshold: 4
   loiter_threshold_seconds: 20
+  zone_crowding_threshold: 5
+  objects_time_threshold_seconds: 30
+  objects_time_threshold_count: 3
+
+# Service definitions — MQTT wiring for escalation actions.
+# Rules reference a service by name; the topic + payload template live here.
+services:
+  behavioral_analysis:
+    mqtt_topic: ba/requests
+    payload:
+      person_id: "{object_id}"
+      region_id: "{region_id}"
+      scene_id: "{scene_id}"
+      entry_timestamp: "{entry_timestamp}"
 
 rules:
   - id: restricted_zone
@@ -62,6 +76,44 @@ rules:
         params:
           service: behavioral_analysis
 
+  - id: zone_crowding
+    name: Zone Crowding Alert
+    enabled: true
+    trigger:
+      event_type: zone_entry
+      zone_type: HIGH_VALUE
+    conditions:
+      - field: zone_occupancy
+        op: gte
+        value: ${zone_crowding_threshold:5}
+    actions:
+      - type: alert
+        params:
+          alert_type: ZONE_CROWDING
+          severity: WARNING
+          threshold: ${zone_crowding_threshold:5}
+
+  - id: objects_and_time
+    name: Multiple Persons Lingering in Zone
+    enabled: true
+    trigger:
+      event_type: zone_exit
+      zone_type: HIGH_VALUE
+    conditions:
+      - field: zone_occupancy
+        op: gte
+        value: ${objects_time_threshold_count:3}
+      - field: dwell_seconds
+        op: gt
+        value: ${objects_time_threshold_seconds:30}
+    actions:
+      - type: alert
+        params:
+          alert_type: CROWDING_LOITER
+          severity: WARNING
+          threshold_objects: ${objects_time_threshold_count:3}
+          threshold_seconds: ${objects_time_threshold_seconds:30}
+
   - id: checkout_bypass
     name: Checkout Bypass Detection
     enabled: true
@@ -81,6 +133,18 @@ rules:
           alert_type: CHECKOUT_BYPASS
           severity: WARNING
           severity_if_concealment: CRITICAL
+
+  - id: concealment
+    name: Concealment Detected by Behavioral Analysis
+    enabled: true
+    trigger:
+      event_type: concealment_detected
+    conditions: []
+    actions:
+      - type: alert
+        params:
+          alert_type: CONCEALMENT
+          severity: WARNING
 
   - id: loitering
     name: Loitering in High-Value Zone
