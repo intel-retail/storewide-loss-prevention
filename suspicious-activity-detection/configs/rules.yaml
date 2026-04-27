@@ -62,6 +62,22 @@ rules:
         params:
           service: behavioral_analysis
 
+  - id: concealment_detected
+    name: Concealment Detected by Behavioral Analysis
+    enabled: true
+    trigger:
+      event_type: ba_result
+      zone_type: HIGH_VALUE
+    conditions:
+      - field: ba_status
+        op: eq
+        value: suspicious
+    actions:
+      - type: alert
+        params:
+          alert_type: CONCEALMENT
+          severity: WARNING
+
   - id: checkout_bypass
     name: Checkout Bypass Detection
     enabled: true

@@ -20,6 +20,7 @@ from models.events import EventType, RegionEvent, ZoneType
 from models.alerts import Alert, AlertType, AlertLevel
 from .config import ConfigService
 from .session_manager import SessionManager
+from .ba_orchestrator import BehavioralAnalysisOrchestrator
 from rule_engine import RuleEngine, Action
 from .alert_service_client import AlertServiceClient
 
@@ -36,24 +37,23 @@ class RuleEngineAdapter:
         session_manager: SessionManager,
         alert_service_client: AlertServiceClient | None = None,
         frame_manager=None,
-        ba_publisher=None,
+        ba_orchestrator: BehavioralAnalysisOrchestrator | None = None,
     ) -> None:
         self._engine = engine
         self.config = config
         self.session_mgr = session_manager
         self._alert_client = alert_service_client
         self._frame_mgr = frame_manager
-        self._ba_publisher = ba_publisher
+        self._ba = ba_orchestrator
 
         rules_cfg = config.get_rules_config()
-        self.ba_poll_interval = rules_cfg.get("ba_poll_interval_seconds", 1)
         self._loiter_threshold = float(rules_cfg.get("loiter_threshold_seconds", 20))
-        self._pending_cleanups: set[str] = set()  # track scheduled cleanups by "{object_id}:{region_id}"
+        self._pending_cleanups: set[str] = set()  # "{object_id}:{region_id}"
 
         logger.info(
             "RuleEngineAdapter initialized",
-            ba_poll_interval=self.ba_poll_interval,
             loiter_threshold=self._loiter_threshold,
+            ba_orchestrator=bool(ba_orchestrator),
             rules_loaded=len(engine.rules),
         )
 
@@ -90,6 +90,9 @@ class RuleEngineAdapter:
 
         elif event.event_type == EventType.EXITED:
             if event.zone_type == ZoneType.HIGH_VALUE:
+                # Stop BA pipeline for this visit
+                if self._ba is not None:
+                    self._ba.stop(event.object_id, event.region_id)
                 cleanup_key = f"{event.object_id}:{event.region_id}"
                 if cleanup_key not in self._pending_cleanups:
                     self._pending_cleanups.add(cleanup_key)
@@ -169,7 +172,13 @@ class RuleEngineAdapter:
                 await self._execute_alert(action, event, session)
             elif action.type == "escalate":
                 if action.params.get("service") == "behavioral_analysis":
-                    self._publish_ba_request(event.object_id, event.region_id, event.scene_id)
+                    # Rule-driven start of the BA pipeline for this visit.
+                    if self._ba is not None and self._engine.is_rule_enabled(
+                        "behavioral_analysis"
+                    ):
+                        self._ba.start(
+                            event.object_id, event.region_id, event.scene_id
+                        )
 
     async def _execute_alert(
         self, action: Action, event: RegionEvent, session
@@ -256,42 +265,14 @@ class RuleEngineAdapter:
                 "dwell_seconds": round(event.dwell_seconds, 1) if event.dwell_seconds else 0,
                 "threshold": params.get("threshold", 120),
             }
+        elif alert_type == AlertType.CONCEALMENT:
+            ba = getattr(session, "_pending_ba_result", None) or {}
+            return {
+                "confidence": ba.get("confidence"),
+                "message": ba.get("vlm_response") or "",
+                "frames_analyzed": ba.get("frames_analyzed", 0),
+            }
         return {}
-
-    # ---- active BA polling ---------------------------------------------------
-
-    async def run_ba_check_loop(self) -> None:
-        """
-        Background task: periodically publish BA requests for persons in HIGH_VALUE zones.
-        Publishes to MQTT ba/requests topic; results come back via ba/results.
-        """
-        if not self._ba_publisher:
-            logger.info("No BA publisher configured — skipping BA poll loop")
-            return
-        if not self._engine.is_rule_enabled("behavioral_analysis"):
-            logger.info("Behavioral analysis rule disabled — skipping BA poll loop")
-            return
-
-        logger.info(
-            "BA poll loop started (queue mode)",
-            interval_seconds=self.ba_poll_interval,
-        )
-
-        while True:
-            await asyncio.sleep(self.ba_poll_interval)
-            try:
-                for session in self.session_mgr.get_all_sessions().values():
-                    for zone_id in list(session.current_zones.keys()):
-                        zone_type = self.config.get_zone_type(zone_id)
-                        if zone_type != "HIGH_VALUE":
-                            continue
-                        if session.ba_alerted.get(zone_id):
-                            continue
-                        self._publish_ba_request(
-                            session.object_id, zone_id, session.scene_id
-                        )
-            except Exception:
-                logger.exception("Error in BA check loop")
 
     # ---- Deferred frame cleanup on HIGH_VALUE zone exit ----------------------
 
@@ -311,44 +292,15 @@ class RuleEngineAdapter:
     # ---- PERSON_LOST handler -------------------------------------------------
 
     async def _on_person_lost(self, event: RegionEvent) -> None:
-        """Cleanup disabled for now."""
-        logger.info("Person lost — cleanup DISABLED", object_id=event.object_id)
-
-    # ---- External service calls ----------------------------------------------
-
-    def _publish_ba_request(
-        self, object_id: str, region_id: str, scene_id: str = ""
-    ) -> None:
-        """Publish a BA analysis request to the MQTT queue."""
-        if not self._ba_publisher:
-            return
-
-        session = self.session_mgr.get_session(object_id, scene_id=scene_id)
-        if not session:
-            return
-
-        # Skip if already alerted for this zone
-        if session.ba_alerted.get(region_id):
-            return
-
-        # Get zone entry timestamp for frame path
-        entry_ts_iso = session.current_zones.get(region_id, "")
-        entry_timestamp = ""
-        if entry_ts_iso:
-            entry_timestamp = entry_ts_iso.replace(":", "").replace("-", "").split("+")[0].split(".")[0]
-
-        self._ba_publisher.publish_request(
-            person_id=object_id,
-            region_id=region_id,
-            entry_timestamp=entry_timestamp,
-            scene_id=session.scene_id,
-        )
+        """Cancel any active BA visit tasks for this person."""
+        if self._ba is not None:
+            self._ba.stop_all(event.object_id)
+        logger.info("Person lost — BA tasks cancelled", object_id=event.object_id)
 
     async def on_ba_result(self, result: dict) -> None:
         """
         Handle a BA analysis result received from the MQTT ba/results topic.
-
-        This replaces the old synchronous REST response handling.
+        Routes the result through the rule engine (rule: concealment_detected).
         """
         person_id = result.get("person_id", "")
         region_id = result.get("region_id", "")
@@ -360,59 +312,63 @@ class RuleEngineAdapter:
             logger.debug("BA result for unknown session", person_id=person_id)
             return
 
-        if status == "suspicious":
-            # Dedup: skip if a previous in-flight request already fired
-            if session.ba_alerted.get(region_id):
-                logger.debug(
-                    "BA result: concealment alert already fired for zone",
-                    person_id=person_id,
-                    region_id=region_id,
-                )
-                return
-            session.concealment_suspected = True
-            session.ba_alerted[region_id] = True
-            zone_name = self.config.get_zone_name(region_id)
-            alert = Alert(
-                alert_type=AlertType.CONCEALMENT,
-                alert_level=AlertLevel.WARNING,
-                object_id=person_id,
-                timestamp=session.last_seen,
-                scene_id=session.scene_id,
-                region_id=region_id,
-                region_name=zone_name,
-                details={
-                    "confidence": result.get("confidence"),
-                    "message": result.get("vlm_response") or "",
-                    "frames_analyzed": result.get("frames_analyzed", 0),
-                },
-            )
-            logger.warning(
-                "BA queue: concealment detected",
-                person_id=person_id,
-                region_id=region_id,
-                confidence=result.get("confidence"),
-            )
-            await self._fire_alert(alert)
-        elif status == "no_match":
-            # Do NOT set ba_alerted — allow re-analysis on next poll cycle
-            # so the pipeline can run again with newly accumulated frames.
-            logger.debug(
-                "BA queue: no suspicious pattern — will re-analyze on next cycle",
-                person_id=person_id,
-                region_id=region_id,
-            )
-        elif status == "received":
-            logger.debug(
-                "BA queue: request acknowledged",
-                person_id=person_id,
-                region_id=region_id,
-            )
-        else:
+        # Quick non-actionable statuses — no rule firing needed.
+        if status in ("received", "no_match"):
             logger.debug(
                 "BA queue: status update",
                 person_id=person_id,
+                region_id=region_id,
                 status=status,
             )
+            return
+
+        # Per-zone dedup before invoking the engine.
+        if status == "suspicious" and session.ba_alerted.get(region_id):
+            logger.debug(
+                "BA result: concealment alert already fired for zone",
+                person_id=person_id,
+                region_id=region_id,
+            )
+            return
+
+        # Resolve zone metadata for the synthetic event.
+        zone_name = self.config.get_zone_name(region_id)
+        zone_type_str = self.config.get_zone_type(region_id) or "HIGH_VALUE"
+        try:
+            zone_type = ZoneType[zone_type_str]
+        except KeyError:
+            zone_type = ZoneType.HIGH_VALUE
+
+        synth_event = RegionEvent(
+            event_type=EventType.ENTERED,  # placeholder; engine matches on "ba_result" string
+            object_id=person_id,
+            region_id=region_id,
+            region_name=zone_name,
+            zone_type=zone_type,
+            timestamp=session.last_seen,
+            dwell_seconds=0.0,
+            scene_id=session.scene_id,
+        )
+
+        # Build context the rule conditions can read.
+        context = self._build_context(synth_event, session)
+        context["ba_status"] = status
+        context["ba_confidence"] = result.get("confidence", 0.0)
+        context["ba_frames_analyzed"] = result.get("frames_analyzed", 0)
+
+        # Stash raw BA result so _build_details(CONCEALMENT) can pick it up.
+        session._pending_ba_result = result
+
+        # Mark state BEFORE firing so dedup is consistent.
+        if status == "suspicious":
+            session.concealment_suspected = True
+            session.ba_alerted[region_id] = True
+
+        try:
+            actions = self._engine.evaluate("ba_result", zone_type.value, context)
+            await self._execute_actions(actions, synth_event, session)
+        finally:
+            session._pending_ba_result = None
 
     # ---- alert dispatch ------------------------------------------------------
 
