@@ -21,7 +21,7 @@ Rolling buffer: 20 frames per person.
 import base64
 import io
 from datetime import datetime, timezone
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 import structlog
 
@@ -60,6 +60,8 @@ class FrameManager:
         self.secure = seaweed_cfg.get("secure", False)
         self.retention_hours = seaweed_cfg.get("evidence_retention_hours", 24)
         self.exit_retention_seconds = seaweed_cfg.get("exit_retention_seconds", 60)
+        self._config = config
+        self._session_mgr: Any = None  # set via set_session_manager
 
         # Per-person key tracking for rolling buffer management
         self._person_keys: Dict[str, List[str]] = {}
@@ -106,6 +108,55 @@ class FrameManager:
                     await asyncio.sleep(wait)
                 else:
                     logger.exception("Bucket check/create failed after retries", bucket=self.BUCKET)
+
+    # ---- Session manager wiring ---------------------------------------------
+    def set_session_manager(self, session_mgr: Any) -> None:
+        """Provide the session manager so the MQTT image handler can resolve
+        which session/zone a frame belongs to."""
+        self._session_mgr = session_mgr
+
+    async def on_camera_image(self, camera_name: str, data: dict) -> None:
+        """
+        MQTT camera-image callback.
+
+        Decodes the inbound JPEG (base64 in MQTT payload) and stores it for
+        every active session whose person is currently in a HIGH_VALUE zone
+        seen by this camera. Writes to both:
+          loss-prevention-frames/{scene}/{person}/{ts}.jpg   (rolling buffer)
+          behavioral-frames/{scene}/{person}/{region}/{entry_ts}/frames/{ts_ms}.jpg
+        """
+        if self._session_mgr is None:
+            return
+        image_b64 = data.get("image", data.get("data", ""))
+        if not image_b64:
+            return
+        try:
+            image_bytes = base64.b64decode(image_b64)
+        except Exception:
+            logger.exception("Failed to decode camera image", camera=camera_name)
+            return
+        ts = datetime.now(timezone.utc)
+
+        for session in self._session_mgr.get_all_sessions().values():
+            if camera_name not in session.current_cameras:
+                continue
+            hv_zone_id: Optional[str] = None
+            for zone_id in session.current_zones:
+                if self._config.get_zone_type(zone_id) == "HIGH_VALUE":
+                    hv_zone_id = zone_id
+                    break
+            if hv_zone_id is None:
+                continue
+            entry_ts_iso = session.current_zones.get(hv_zone_id, "")
+            key = self.store_person_frame(
+                session.object_id,
+                image_bytes,
+                ts,
+                region_id=hv_zone_id,
+                entry_timestamp=entry_ts_iso,
+                scene_id=session.scene_id,
+            )
+            session.add_frame_key(key)
 
     # ---- Store person frame --------------------------------------------------
     def store_person_frame(
