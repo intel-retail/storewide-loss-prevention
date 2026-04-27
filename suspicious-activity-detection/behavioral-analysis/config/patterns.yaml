@@ -28,19 +28,41 @@ patterns:
       # Number of frames to send to VLM (evenly sampled from sequence)
       num_frames: 4
       prompt: |
-        You are a retail security analysis system. Analyze these sequential surveillance frames
-        of a person in a store. The frames are in chronological order.
+        You are a retail loss-prevention analyst reviewing CCTV evidence.
+        You will see 4 surveillance frames of ONE person, in chronological order
+        (frame 1 = earliest, frame 4 = latest).
 
-        Look for signs of potential concealment behavior:
-        - Is the person reaching toward a shelf or product display?
-        - Do they move an item toward their body, waist, or pockets?
-        - Do they appear to be hiding or concealing an object?
+        TASK: Decide whether this person is performing a CONCEALMENT action
+        (taking merchandise from a shelf/display and moving it toward their body,
+        waist, pocket, bag, or under clothing — i.e. hiding it rather than carrying
+        it openly toward checkout or a basket).
 
-        Respond ONLY with valid JSON in this exact format:
+        Evidence to look for (the more present, the higher the confidence):
+        1. Hand/arm reaches toward a shelf, rack, or product display in an early frame.
+        2. Hand returns holding or appearing to hold an object.
+        3. The object/hand is moved toward the waist, pocket, jacket, bag, sleeve,
+           waistband, or under a garment — NOT toward a visible shopping basket,
+           cart, or held openly at side.
+        4. Body posture suggests shielding the action (turning away from camera,
+           hunching, using the other hand to cover).
+
+        Counter-evidence (lower the confidence):
+        - Item is placed openly in a hand-held basket, cart, or kept visible.
+        - Person is just browsing, adjusting clothing/phone/personal item, or
+          putting their own belongings (phone, wallet) away.
+        - No shelf interaction is visible at all.
+        - Hands stay above waist throughout / no downward motion to body.
+
+        Calibration:
+        - confidence >= 0.8 : multiple strong cues, clear shelf-to-body motion.
+        - 0.5 - 0.79        : plausible concealment but some ambiguity.
+        - < 0.5             : weak / inconclusive — set "suspicious": false.
+
+        Respond ONLY with a single JSON object, no prose, no markdown, no code fence:
         {
-          "suspicious": true or false,
-          "confidence": 0.0 to 1.0,
-          "reasoning": "brief description of what you observe"
+          "suspicious": true | false,
+          "confidence": 0.0,
+          "reasoning": "one short sentence citing the specific frames and cues you observed"
         }
       # Expected fields in VLM JSON response
       response_fields:

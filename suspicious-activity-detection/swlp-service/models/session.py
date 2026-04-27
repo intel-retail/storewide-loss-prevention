@@ -82,6 +82,12 @@ class PersonSession:
     def concealment_suspected(self) -> bool:
         return self.flags.get("concealment_suspected", False)
 
+    # Re-identification state from SceneScape: "pending_collection" | "matched" | ""
+    # Sessions remain hidden from the UI until reid_state == "matched" so that
+    # provisional flickering tracks (which are merged via previous_ids_chain)
+    # don't appear as ghost rows.
+    reid_state: str = ""
+
     # Loiter alert tracking: {region_id: True} — prevents duplicate alerts
     loiter_alerted: Dict[str, bool] = field(default_factory=dict)
 

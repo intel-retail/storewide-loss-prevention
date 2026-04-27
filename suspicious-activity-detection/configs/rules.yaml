@@ -9,7 +9,7 @@
 # Runtime settings consumed by swlp-service.
 settings:
   session_timeout_seconds: 90
-  loiter_threshold_seconds: 20
+  loiter_threshold_seconds: 4
   behavioural_analysis_fps: 5
   ba_poll_interval_seconds: 1
 

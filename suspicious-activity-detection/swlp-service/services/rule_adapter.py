@@ -150,7 +150,6 @@ class RuleEngineAdapter:
                 details={
                     "dwell_seconds": event.dwell_seconds,
                     "threshold": self._loiter_threshold,
-                    "source": "region_data_feed",
                 },
             )
             logger.warning(
