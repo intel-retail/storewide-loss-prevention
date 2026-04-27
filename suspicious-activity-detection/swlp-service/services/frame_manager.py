@@ -140,6 +140,12 @@ class FrameManager:
         for session in self._session_mgr.get_all_sessions().values():
             if camera_name not in session.current_cameras:
                 continue
+            # Skip provisional tracks: re-id hasn't matched them yet, so they
+            # may be ghosts that will collapse onto an existing canonical
+            # session via previous_ids_chain. Uploading frames for them
+            # creates orphan SeaweedFS folders per flickering UUID.
+            if session.reid_state and session.reid_state != "matched":
+                continue
             hv_zone_id: Optional[str] = None
             for zone_id in session.current_zones:
                 if self._config.get_zone_type(zone_id) == "HIGH_VALUE":

@@ -74,20 +74,35 @@ class BehavioralAnalysisOrchestrator:
     # ---- public API ----------------------------------------------------------
 
     def start(self, object_id: str, region_id: str, scene_id: str) -> None:
-        """Start (or restart) a BA visit task for one HV-zone visit."""
+        """Start a BA visit task for one HV-zone visit.
+
+        If a task is already running for this canonical person+region, leave
+        it alone — repeated ENTERED events from re-id flicker would otherwise
+        cancel it and reset the initial delay, preventing BA from ever firing.
+        """
         key = self._key(object_id, region_id)
         prev = self._tasks.get(key)
         if prev and not prev.done():
-            prev.cancel()
+            logger.debug("BA visit task already active, ignoring re-start",
+                         object_id=object_id, region_id=region_id)
+            return
         self._tasks[key] = asyncio.create_task(
             self._run(object_id, region_id, scene_id)
         )
 
     def stop(self, object_id: str, region_id: str) -> None:
-        """Cancel the BA visit task for a single zone."""
-        task = self._tasks.pop(self._key(object_id, region_id), None)
-        if task and not task.done():
-            task.cancel()
+        """Schedule cancellation of the BA visit task after a short grace period.
+
+        SceneScape can emit spurious EXITED events while a person is still
+        physically in the region (track UUID flicker). Cancelling immediately
+        would abort BA mid-analysis and let the next ENTERED restart its 2 s
+        initial delay, so concealment never gets evaluated. We instead let
+        the running task notice ``region_id not in current_zones`` on its own,
+        which is itself debounced via ``_run``'s grace window.
+        """
+        # Intentionally a no-op: the running task self-terminates after the
+        # absence-grace window in ``_run`` if the person truly left.
+        return
 
     def stop_all(self, object_id: str) -> None:
         """Cancel every BA visit task for a person (used on PERSON_LOST)."""
@@ -108,12 +123,17 @@ class BehavioralAnalysisOrchestrator:
 
     async def _run(self, object_id: str, region_id: str, scene_id: str) -> None:
         next_ba_at = time.monotonic() + self._initial_delay
+        # Grace window for absence: lets us survive SceneScape track-id
+        # flicker (where a person is briefly missing from current_zones).
+        absence_grace = max(self._initial_delay + 1.0, 5.0)
+        absent_since: Optional[float] = None
         logger.info(
             "BA visit task started",
             object_id=object_id,
             region_id=region_id,
             analysis_fps=self._analysis_fps,
             ba_interval=self._ba_poll_interval,
+            absence_grace=absence_grace,
         )
         try:
             while True:
@@ -121,9 +141,23 @@ class BehavioralAnalysisOrchestrator:
                 if not session:
                     return
                 if region_id not in session.current_zones:
-                    return
+                    if absent_since is None:
+                        absent_since = time.monotonic()
+                    elif time.monotonic() - absent_since >= absence_grace:
+                        return
+                    await asyncio.sleep(self._frame_interval)
+                    continue
+                absent_since = None
                 if session.ba_alerted.get(region_id):
                     return
+
+                # Skip while re-id is still provisional: this canonical may be
+                # superseded once previous_ids_chain links it to an existing
+                # session. Avoids generating BA requests + frame uploads for
+                # short-lived ghost canonicals.
+                if session.reid_state and session.reid_state != "matched":
+                    await asyncio.sleep(self._frame_interval)
+                    continue
 
                 # 1. Trigger frame capture (camera reply lands in FrameManager).
                 for cam in list(session.current_cameras):
