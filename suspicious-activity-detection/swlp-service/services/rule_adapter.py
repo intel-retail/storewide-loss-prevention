@@ -12,7 +12,7 @@ Responsibilities:
 
 import asyncio
 from datetime import datetime, timezone
-from typing import Optional
+from typing import Optional, Protocol, runtime_checkable
 
 import structlog
 
@@ -20,11 +20,18 @@ from models.events import EventType, RegionEvent, ZoneType
 from models.alerts import Alert, AlertType, AlertLevel
 from .config import ConfigService
 from .session_manager import SessionManager
-from .ba_orchestrator import BehavioralAnalysisOrchestrator
 from rule_engine import RuleEngine, Action
 from .alert_service_client import AlertServiceClient
 
 logger = structlog.get_logger(__name__)
+
+
+@runtime_checkable
+class EscalationService(Protocol):
+    """Protocol for services that can be invoked by the 'escalate' action type."""
+    def start(self, object_id: str, region_id: str, scene_id: str) -> None: ...
+    def stop(self, object_id: str, region_id: str) -> None: ...
+    def stop_all(self, object_id: str) -> None: ...
 
 
 class RuleEngineAdapter:
@@ -37,28 +44,56 @@ class RuleEngineAdapter:
         session_manager: SessionManager,
         alert_service_client: AlertServiceClient | None = None,
         frame_manager=None,
-        ba_orchestrator: BehavioralAnalysisOrchestrator | None = None,
     ) -> None:
         self._engine = engine
         self.config = config
         self.session_mgr = session_manager
         self._alert_client = alert_service_client
         self._frame_mgr = frame_manager
-        self._ba = ba_orchestrator
 
         rules_cfg = config.get_rules_config()
         self._loiter_threshold = float(rules_cfg.get("loiter_threshold_seconds", 20))
         self._pending_cleanups: set[str] = set()  # "{object_id}:{region_id}"
 
+        # Config-driven session flags: {flag_name: {trigger, zone_type, ...}}
+        self._session_flag_defs = config.get_session_flag_defs()
+
+        # Precompute zone_type → list of flag names for fast lookup on zone entry
+        self._zone_visited_flags: dict[str, list[str]] = {}
+        for flag_name, flag_def in self._session_flag_defs.items():
+            if flag_def.get("trigger") == "zone_visited":
+                zt = flag_def.get("zone_type", "")
+                self._zone_visited_flags.setdefault(zt, []).append(flag_name)
+
+        # External flag definitions: {source_name: [{flag_name, field, match_value}]}
+        self._external_flags: dict[str, list[dict]] = {}
+        for flag_name, flag_def in self._session_flag_defs.items():
+            if flag_def.get("trigger") == "external":
+                source = flag_def.get("source", "")
+                self._external_flags.setdefault(source, []).append({
+                    "flag_name": flag_name,
+                    "field": flag_def.get("field", "status"),
+                    "match_value": flag_def.get("match_value"),
+                })
+
+        # Service registry: {service_name: EscalationService}
+        self._service_registry: dict[str, EscalationService] = {}
+
         logger.info(
             "RuleEngineAdapter initialized",
             loiter_threshold=self._loiter_threshold,
-            ba_orchestrator=bool(ba_orchestrator),
             rules_loaded=len(engine.rules),
+            session_flags=list(self._session_flag_defs.keys()),
+            zone_visited_flags=self._zone_visited_flags,
         )
 
     def set_alert_client(self, client: AlertServiceClient) -> None:
         self._alert_client = client
+
+    def register_service(self, name: str, handler: EscalationService) -> None:
+        """Register a named escalation service (e.g. 'behavioral_analysis')."""
+        self._service_registry[name] = handler
+        logger.info("Escalation service registered", service=name)
 
     # ---- main entry point (same signature as old RuleEngine.on_event) ---------
 
@@ -72,35 +107,33 @@ class RuleEngineAdapter:
         if not session:
             return
 
-        # ---- State transitions (LP-specific, not in the rule engine) ----
+        # ---- Config-driven state transitions (replaces hardcoded if/elif) ----
         if event.event_type == EventType.ENTERED:
-            if event.zone_type == ZoneType.HIGH_VALUE:
-                session.visited_high_value = True
-                logger.info(
-                    "HIGH_VALUE zone entered",
-                    object_id=event.object_id,
-                    region=event.region_name,
-                    visit_count=session.zone_visit_counts.get(event.region_id, 0),
-                )
-            elif event.zone_type == ZoneType.CHECKOUT:
-                session.visited_checkout = True
-                logger.info("Checkout visited", object_id=event.object_id)
-            elif event.zone_type == ZoneType.EXIT:
-                session.visited_exit = True
+            zone_type_str = event.zone_type.value if event.zone_type else ""
+            flag_names = self._zone_visited_flags.get(zone_type_str, [])
+            for flag_name in flag_names:
+                if not session.flags.get(flag_name):
+                    session.flags[flag_name] = True
+                    logger.info(
+                        "Session flag set",
+                        flag=flag_name,
+                        object_id=event.object_id,
+                        region=event.region_name,
+                        zone_type=zone_type_str,
+                    )
 
         elif event.event_type == EventType.EXITED:
-            if event.zone_type == ZoneType.HIGH_VALUE:
-                # Stop BA pipeline for this visit
-                if self._ba is not None:
-                    self._ba.stop(event.object_id, event.region_id)
-                cleanup_key = f"{event.object_id}:{event.region_id}"
-                if cleanup_key not in self._pending_cleanups:
-                    self._pending_cleanups.add(cleanup_key)
-                    asyncio.create_task(
-                        self._deferred_frame_cleanup(
-                            event.object_id, event.region_id, event.region_name, event.dwell_seconds,
-                        )
+            # Stop any escalation services that were started for this zone
+            for svc in self._service_registry.values():
+                svc.stop(event.object_id, event.region_id)
+            cleanup_key = f"{event.object_id}:{event.region_id}"
+            if cleanup_key not in self._pending_cleanups:
+                self._pending_cleanups.add(cleanup_key)
+                asyncio.create_task(
+                    self._deferred_frame_cleanup(
+                        event.object_id, event.region_id, event.region_name, event.dwell_seconds,
                     )
+                )
 
         elif event.event_type == EventType.LOITER:
             # Loiter detected by continuous region-data feed — fire alert directly
@@ -149,18 +182,17 @@ class RuleEngineAdapter:
     @staticmethod
     def _build_context(event: RegionEvent, session) -> dict:
         """Flatten event + session into a generic dict for the rule engine."""
-        return {
+        ctx = {
             # Event fields
             "region_id": event.region_id,
             "region_name": event.region_name,
             "dwell_seconds": event.dwell_seconds,
-            # Session fields
-            "visited_high_value": session.visited_high_value,
-            "visited_checkout": session.visited_checkout,
-            "visited_exit": session.visited_exit,
-            "concealment_suspected": session.concealment_suspected,
+            # Session structural fields
             "zone_visit_counts": dict(session.zone_visit_counts),
         }
+        # Merge all dynamic session flags into context
+        ctx.update(session.flags)
+        return ctx
 
     # ---- action execution (LP-specific) --------------------------------------
 
@@ -171,14 +203,18 @@ class RuleEngineAdapter:
             if action.type == "alert":
                 await self._execute_alert(action, event, session)
             elif action.type == "escalate":
-                if action.params.get("service") == "behavioral_analysis":
-                    # Rule-driven start of the BA pipeline for this visit.
-                    if self._ba is not None and self._engine.is_rule_enabled(
-                        "behavioral_analysis"
-                    ):
-                        self._ba.start(
-                            event.object_id, event.region_id, event.scene_id
-                        )
+                service_name = action.params.get("service", "")
+                handler = self._service_registry.get(service_name)
+                if handler and self._engine.is_rule_enabled(action.rule_id):
+                    handler.start(
+                        event.object_id, event.region_id, event.scene_id
+                    )
+                elif not handler:
+                    logger.warning(
+                        "Escalate action references unknown service",
+                        service=service_name,
+                        rule_id=action.rule_id,
+                    )
 
     async def _execute_alert(
         self, action: Action, event: RegionEvent, session
@@ -256,9 +292,9 @@ class RuleEngineAdapter:
             }
         elif alert_type == AlertType.CHECKOUT_BYPASS:
             return {
-                "visited_high_value": session.visited_high_value,
-                "visited_checkout": session.visited_checkout,
-                "concealment_suspected": session.concealment_suspected,
+                "visited_high_value": session.flags.get("visited_high_value", False),
+                "visited_checkout": session.flags.get("visited_checkout", False),
+                "concealment_suspected": session.flags.get("concealment_suspected", False),
             }
         elif alert_type == AlertType.LOITERING:
             return {
@@ -292,10 +328,10 @@ class RuleEngineAdapter:
     # ---- PERSON_LOST handler -------------------------------------------------
 
     async def _on_person_lost(self, event: RegionEvent) -> None:
-        """Cancel any active BA visit tasks for this person."""
-        if self._ba is not None:
-            self._ba.stop_all(event.object_id)
-        logger.info("Person lost — BA tasks cancelled", object_id=event.object_id)
+        """Cancel any active escalation service tasks for this person."""
+        for svc in self._service_registry.values():
+            svc.stop_all(event.object_id)
+        logger.info("Person lost — escalation tasks cancelled", object_id=event.object_id)
 
     async def on_ba_result(self, result: dict) -> None:
         """
@@ -360,8 +396,13 @@ class RuleEngineAdapter:
         session._pending_ba_result = result
 
         # Mark state BEFORE firing so dedup is consistent.
+        # Apply external flag definitions from config
+        for flag_def in self._external_flags.get("behavioral_analysis", []):
+            field_name = flag_def["field"]
+            match_val = flag_def["match_value"]
+            if result.get(field_name) == match_val:
+                session.flags[flag_def["flag_name"]] = True
         if status == "suspicious":
-            session.concealment_suspected = True
             session.ba_alerted[region_id] = True
 
         try:

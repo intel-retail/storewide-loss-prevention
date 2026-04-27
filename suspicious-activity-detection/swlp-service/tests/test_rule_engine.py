@@ -125,6 +125,20 @@ class FakeConfig:
     def get_zone_name(self, region_id):
         return None
 
+    def get_session_flag_defs(self):
+        return {
+            "visited_high_value": {"trigger": "zone_visited", "zone_type": "HIGH_VALUE"},
+            "visited_checkout": {"trigger": "zone_visited", "zone_type": "CHECKOUT"},
+            "visited_exit": {"trigger": "zone_visited", "zone_type": "EXIT"},
+            "concealment_suspected": {
+                "trigger": "external", "source": "behavioral_analysis",
+                "field": "status", "match_value": "suspicious",
+            },
+        }
+
+    def get_service_defs(self):
+        return {"behavioral_analysis": {"handler": "ba_orchestrator"}}
+
 
 class FakeSessionManager:
     def __init__(self):
@@ -201,8 +215,7 @@ async def test_checkout_bypass(setup):
         object_id="42",
         first_seen=datetime.now(timezone.utc),
         last_seen=datetime.now(timezone.utc),
-        visited_high_value=True,
-        visited_checkout=False,
+        flags={"visited_high_value": True, "visited_checkout": False},
     )
     sm.add(session)
 
@@ -221,9 +234,7 @@ async def test_checkout_bypass_critical_with_concealment(setup):
         object_id="42",
         first_seen=datetime.now(timezone.utc),
         last_seen=datetime.now(timezone.utc),
-        visited_high_value=True,
-        visited_checkout=False,
-        concealment_suspected=True,
+        flags={"visited_high_value": True, "visited_checkout": False, "concealment_suspected": True},
     )
     sm.add(session)
 
