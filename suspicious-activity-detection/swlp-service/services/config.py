@@ -87,9 +87,13 @@ class ConfigService:
         path = self._config_dir / "rules.yaml"
         if not path.exists():
             logger.warning("rules.yaml not found, using empty settings")
+            self._session_flag_defs: Dict[str, dict] = {}
+            self._service_defs: Dict[str, dict] = {}
             return {}
         with open(path, "r") as f:
             data = yaml.safe_load(f) or {}
+        self._session_flag_defs = data.get("session_flags", {})
+        self._service_defs = data.get("services", {})
         return data.get("settings", {})
 
     # ---- store ----
@@ -218,6 +222,14 @@ class ConfigService:
 
     def get_rules_yaml_path(self) -> Path:
         return self._config_dir / "rules.yaml"
+
+    def get_session_flag_defs(self) -> Dict[str, dict]:
+        """Return {flag_name: {trigger, zone_type, ...}} from rules.yaml session_flags."""
+        return dict(self._session_flag_defs)
+
+    def get_service_defs(self) -> Dict[str, dict]:
+        """Return {service_name: {handler, ...}} from rules.yaml services."""
+        return dict(self._service_defs)
 
     # ---- zones (dynamic) ----
     def get_zones(self) -> Dict[str, dict]:

@@ -61,11 +61,26 @@ class PersonSession:
     # Zone visit counts: {region_id: count}
     zone_visit_counts: Dict[str, int] = field(default_factory=dict)
 
-    # Behavioral flags
-    visited_checkout: bool = False
-    visited_exit: bool = False
-    visited_high_value: bool = False
-    concealment_suspected: bool = False
+    # Dynamic session flags — config-driven (see session_flags in rules.yaml).
+    # Keys are flag names (e.g. "visited_checkout"), values are booleans.
+    flags: Dict[str, bool] = field(default_factory=dict)
+
+    # Backward-compatible accessors for well-known flags.
+    @property
+    def visited_checkout(self) -> bool:
+        return self.flags.get("visited_checkout", False)
+
+    @property
+    def visited_exit(self) -> bool:
+        return self.flags.get("visited_exit", False)
+
+    @property
+    def visited_high_value(self) -> bool:
+        return self.flags.get("visited_high_value", False)
+
+    @property
+    def concealment_suspected(self) -> bool:
+        return self.flags.get("concealment_suspected", False)
 
     # Loiter alert tracking: {region_id: True} — prevents duplicate alerts
     loiter_alerted: Dict[str, bool] = field(default_factory=dict)

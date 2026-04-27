@@ -172,8 +172,9 @@ async def lifespan(app: FastAPI):
         rule_engine, config, session_mgr,
         alert_service_client=alert_svc_client,
         frame_manager=frame_mgr,
-        ba_orchestrator=ba_orchestrator,
     )
+    # Register escalation services via the service registry
+    rule_adapter.register_service("behavioral_analysis", ba_orchestrator)
     app.state.rule_engine = rule_engine
     app.state.rule_adapter = rule_adapter
 
