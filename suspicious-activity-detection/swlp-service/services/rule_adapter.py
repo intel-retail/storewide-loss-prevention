@@ -12,7 +12,7 @@ Responsibilities:
 
 import asyncio
 from datetime import datetime, timezone
-from typing import Optional
+from typing import Optional, Protocol, runtime_checkable
 
 import structlog
 
@@ -26,6 +26,14 @@ from .alert_service_client import AlertServiceClient
 logger = structlog.get_logger(__name__)
 
 
+@runtime_checkable
+class EscalationService(Protocol):
+    """Protocol for services that can be invoked by the 'escalate' action type."""
+    def start(self, object_id: str, region_id: str, scene_id: str) -> None: ...
+    def stop(self, object_id: str, region_id: str) -> None: ...
+    def stop_all(self, object_id: str) -> None: ...
+
+
 class RuleEngineAdapter:
     """LP-specific adapter that wires the Rule Engine Service to this service."""
 
@@ -36,29 +44,56 @@ class RuleEngineAdapter:
         session_manager: SessionManager,
         alert_service_client: AlertServiceClient | None = None,
         frame_manager=None,
-        ba_publisher=None,
     ) -> None:
         self._engine = engine
         self.config = config
         self.session_mgr = session_manager
         self._alert_client = alert_service_client
         self._frame_mgr = frame_manager
-        self._ba_publisher = ba_publisher
 
         rules_cfg = config.get_rules_config()
-        self.ba_poll_interval = rules_cfg.get("ba_poll_interval_seconds", 1)
         self._loiter_threshold = float(rules_cfg.get("loiter_threshold_seconds", 20))
-        self._pending_cleanups: set[str] = set()  # track scheduled cleanups by "{object_id}:{region_id}"
+        self._pending_cleanups: set[str] = set()  # "{object_id}:{region_id}"
+
+        # Config-driven session flags: {flag_name: {trigger, zone_type, ...}}
+        self._session_flag_defs = config.get_session_flag_defs()
+
+        # Precompute zone_type → list of flag names for fast lookup on zone entry
+        self._zone_visited_flags: dict[str, list[str]] = {}
+        for flag_name, flag_def in self._session_flag_defs.items():
+            if flag_def.get("trigger") == "zone_visited":
+                zt = flag_def.get("zone_type", "")
+                self._zone_visited_flags.setdefault(zt, []).append(flag_name)
+
+        # External flag definitions: {source_name: [{flag_name, field, match_value}]}
+        self._external_flags: dict[str, list[dict]] = {}
+        for flag_name, flag_def in self._session_flag_defs.items():
+            if flag_def.get("trigger") == "external":
+                source = flag_def.get("source", "")
+                self._external_flags.setdefault(source, []).append({
+                    "flag_name": flag_name,
+                    "field": flag_def.get("field", "status"),
+                    "match_value": flag_def.get("match_value"),
+                })
+
+        # Service registry: {service_name: EscalationService}
+        self._service_registry: dict[str, EscalationService] = {}
 
         logger.info(
             "RuleEngineAdapter initialized",
-            ba_poll_interval=self.ba_poll_interval,
             loiter_threshold=self._loiter_threshold,
             rules_loaded=len(engine.rules),
+            session_flags=list(self._session_flag_defs.keys()),
+            zone_visited_flags=self._zone_visited_flags,
         )
 
     def set_alert_client(self, client: AlertServiceClient) -> None:
         self._alert_client = client
+
+    def register_service(self, name: str, handler: EscalationService) -> None:
+        """Register a named escalation service (e.g. 'behavioral_analysis')."""
+        self._service_registry[name] = handler
+        logger.info("Escalation service registered", service=name)
 
     # ---- main entry point (same signature as old RuleEngine.on_event) ---------
 
@@ -72,32 +107,33 @@ class RuleEngineAdapter:
         if not session:
             return
 
-        # ---- State transitions (LP-specific, not in the rule engine) ----
+        # ---- Config-driven state transitions (replaces hardcoded if/elif) ----
         if event.event_type == EventType.ENTERED:
-            if event.zone_type == ZoneType.HIGH_VALUE:
-                session.visited_high_value = True
-                logger.info(
-                    "HIGH_VALUE zone entered",
-                    object_id=event.object_id,
-                    region=event.region_name,
-                    visit_count=session.zone_visit_counts.get(event.region_id, 0),
-                )
-            elif event.zone_type == ZoneType.CHECKOUT:
-                session.visited_checkout = True
-                logger.info("Checkout visited", object_id=event.object_id)
-            elif event.zone_type == ZoneType.EXIT:
-                session.visited_exit = True
+            zone_type_str = event.zone_type.value if event.zone_type else ""
+            flag_names = self._zone_visited_flags.get(zone_type_str, [])
+            for flag_name in flag_names:
+                if not session.flags.get(flag_name):
+                    session.flags[flag_name] = True
+                    logger.info(
+                        "Session flag set",
+                        flag=flag_name,
+                        object_id=event.object_id,
+                        region=event.region_name,
+                        zone_type=zone_type_str,
+                    )
 
         elif event.event_type == EventType.EXITED:
-            if event.zone_type == ZoneType.HIGH_VALUE:
-                cleanup_key = f"{event.object_id}:{event.region_id}"
-                if cleanup_key not in self._pending_cleanups:
-                    self._pending_cleanups.add(cleanup_key)
-                    asyncio.create_task(
-                        self._deferred_frame_cleanup(
-                            event.object_id, event.region_id, event.region_name, event.dwell_seconds,
-                        )
+            # Stop any escalation services that were started for this zone
+            for svc in self._service_registry.values():
+                svc.stop(event.object_id, event.region_id)
+            cleanup_key = f"{event.object_id}:{event.region_id}"
+            if cleanup_key not in self._pending_cleanups:
+                self._pending_cleanups.add(cleanup_key)
+                asyncio.create_task(
+                    self._deferred_frame_cleanup(
+                        event.object_id, event.region_id, event.region_name, event.dwell_seconds,
                     )
+                )
 
         elif event.event_type == EventType.LOITER:
             # Continuous region-data feed signalled the person has been in
@@ -129,18 +165,17 @@ class RuleEngineAdapter:
     @staticmethod
     def _build_context(event: RegionEvent, session) -> dict:
         """Flatten event + session into a generic dict for the rule engine."""
-        return {
+        ctx = {
             # Event fields
             "region_id": event.region_id,
             "region_name": event.region_name,
             "dwell_seconds": event.dwell_seconds,
-            # Session fields
-            "visited_high_value": session.visited_high_value,
-            "visited_checkout": session.visited_checkout,
-            "visited_exit": session.visited_exit,
-            "concealment_suspected": session.concealment_suspected,
+            # Session structural fields
             "zone_visit_counts": dict(session.zone_visit_counts),
         }
+        # Merge all dynamic session flags into context
+        ctx.update(session.flags)
+        return ctx
 
     # ---- action execution (LP-specific) --------------------------------------
 
@@ -151,8 +186,18 @@ class RuleEngineAdapter:
             if action.type == "alert":
                 await self._execute_alert(action, event, session)
             elif action.type == "escalate":
-                if action.params.get("service") == "behavioral_analysis":
-                    self._publish_ba_request(event.object_id, event.region_id, event.scene_id)
+                service_name = action.params.get("service", "")
+                handler = self._service_registry.get(service_name)
+                if handler and self._engine.is_rule_enabled(action.rule_id):
+                    handler.start(
+                        event.object_id, event.region_id, event.scene_id
+                    )
+                elif not handler:
+                    logger.warning(
+                        "Escalate action references unknown service",
+                        service=service_name,
+                        rule_id=action.rule_id,
+                    )
 
     async def _execute_alert(
         self, action: Action, event: RegionEvent, session
@@ -230,14 +275,21 @@ class RuleEngineAdapter:
             }
         elif alert_type == AlertType.CHECKOUT_BYPASS:
             return {
-                "visited_high_value": session.visited_high_value,
-                "visited_checkout": session.visited_checkout,
-                "concealment_suspected": session.concealment_suspected,
+                "visited_high_value": session.flags.get("visited_high_value", False),
+                "visited_checkout": session.flags.get("visited_checkout", False),
+                "concealment_suspected": session.flags.get("concealment_suspected", False),
             }
         elif alert_type == AlertType.LOITERING:
             return {
                 "dwell_seconds": round(event.dwell_seconds, 1) if event.dwell_seconds else 0,
                 "threshold": params.get("threshold", 120),
+            }
+        elif alert_type == AlertType.CONCEALMENT:
+            ba = getattr(session, "_pending_ba_result", None) or {}
+            return {
+                "confidence": ba.get("confidence"),
+                "message": ba.get("vlm_response") or "",
+                "frames_analyzed": ba.get("frames_analyzed", 0),
             }
         return {}
 
@@ -298,44 +350,15 @@ class RuleEngineAdapter:
     # ---- PERSON_LOST handler -------------------------------------------------
 
     async def _on_person_lost(self, event: RegionEvent) -> None:
-        """Cleanup disabled for now."""
-        logger.info("Person lost — cleanup DISABLED", object_id=event.object_id)
-
-    # ---- External service calls ----------------------------------------------
-
-    def _publish_ba_request(
-        self, object_id: str, region_id: str, scene_id: str = ""
-    ) -> None:
-        """Publish a BA analysis request to the MQTT queue."""
-        if not self._ba_publisher:
-            return
-
-        session = self.session_mgr.get_session(object_id, scene_id=scene_id)
-        if not session:
-            return
-
-        # Skip if already alerted for this zone
-        if session.ba_alerted.get(region_id):
-            return
-
-        # Get zone entry timestamp for frame path
-        entry_ts_iso = session.current_zones.get(region_id, "")
-        entry_timestamp = ""
-        if entry_ts_iso:
-            entry_timestamp = entry_ts_iso.replace(":", "").replace("-", "").split("+")[0].split(".")[0]
-
-        self._ba_publisher.publish_request(
-            person_id=object_id,
-            region_id=region_id,
-            entry_timestamp=entry_timestamp,
-            scene_id=session.scene_id,
-        )
+        """Cancel any active escalation service tasks for this person."""
+        for svc in self._service_registry.values():
+            svc.stop_all(event.object_id)
+        logger.info("Person lost — escalation tasks cancelled", object_id=event.object_id)
 
     async def on_ba_result(self, result: dict) -> None:
         """
         Handle a BA analysis result received from the MQTT ba/results topic.
-
-        This replaces the old synchronous REST response handling.
+        Routes the result through the rule engine (rule: concealment_detected).
         """
         person_id = result.get("person_id", "")
         region_id = result.get("region_id", "")
@@ -347,59 +370,68 @@ class RuleEngineAdapter:
             logger.debug("BA result for unknown session", person_id=person_id)
             return
 
-        if status == "suspicious":
-            # Dedup: skip if a previous in-flight request already fired
-            if session.ba_alerted.get(region_id):
-                logger.debug(
-                    "BA result: concealment alert already fired for zone",
-                    person_id=person_id,
-                    region_id=region_id,
-                )
-                return
-            session.concealment_suspected = True
-            session.ba_alerted[region_id] = True
-            zone_name = self.config.get_zone_name(region_id)
-            alert = Alert(
-                alert_type=AlertType.CONCEALMENT,
-                alert_level=AlertLevel.WARNING,
-                object_id=person_id,
-                timestamp=session.last_seen,
-                scene_id=session.scene_id,
-                region_id=region_id,
-                region_name=zone_name,
-                details={
-                    "confidence": result.get("confidence"),
-                    "message": result.get("vlm_response") or "",
-                    "frames_analyzed": result.get("frames_analyzed", 0),
-                },
-            )
-            logger.warning(
-                "BA queue: concealment detected",
-                person_id=person_id,
-                region_id=region_id,
-                confidence=result.get("confidence"),
-            )
-            await self._fire_alert(alert)
-        elif status == "no_match":
-            # Do NOT set ba_alerted — allow re-analysis on next poll cycle
-            # so the pipeline can run again with newly accumulated frames.
-            logger.debug(
-                "BA queue: no suspicious pattern — will re-analyze on next cycle",
-                person_id=person_id,
-                region_id=region_id,
-            )
-        elif status == "received":
-            logger.debug(
-                "BA queue: request acknowledged",
-                person_id=person_id,
-                region_id=region_id,
-            )
-        else:
+        # Quick non-actionable statuses — no rule firing needed.
+        if status in ("received", "no_match"):
             logger.debug(
                 "BA queue: status update",
                 person_id=person_id,
+                region_id=region_id,
                 status=status,
             )
+            return
+
+        # Per-zone dedup before invoking the engine.
+        if status == "suspicious" and session.ba_alerted.get(region_id):
+            logger.debug(
+                "BA result: concealment alert already fired for zone",
+                person_id=person_id,
+                region_id=region_id,
+            )
+            return
+
+        # Resolve zone metadata for the synthetic event.
+        zone_name = self.config.get_zone_name(region_id)
+        zone_type_str = self.config.get_zone_type(region_id) or "HIGH_VALUE"
+        try:
+            zone_type = ZoneType[zone_type_str]
+        except KeyError:
+            zone_type = ZoneType.HIGH_VALUE
+
+        synth_event = RegionEvent(
+            event_type=EventType.ENTERED,  # placeholder; engine matches on "ba_result" string
+            object_id=person_id,
+            region_id=region_id,
+            region_name=zone_name,
+            zone_type=zone_type,
+            timestamp=session.last_seen,
+            dwell_seconds=0.0,
+            scene_id=session.scene_id,
+        )
+
+        # Build context the rule conditions can read.
+        context = self._build_context(synth_event, session)
+        context["ba_status"] = status
+        context["ba_confidence"] = result.get("confidence", 0.0)
+        context["ba_frames_analyzed"] = result.get("frames_analyzed", 0)
+
+        # Stash raw BA result so _build_details(CONCEALMENT) can pick it up.
+        session._pending_ba_result = result
+
+        # Mark state BEFORE firing so dedup is consistent.
+        # Apply external flag definitions from config
+        for flag_def in self._external_flags.get("behavioral_analysis", []):
+            field_name = flag_def["field"]
+            match_val = flag_def["match_value"]
+            if result.get(field_name) == match_val:
+                session.flags[flag_def["flag_name"]] = True
+        if status == "suspicious":
+            session.ba_alerted[region_id] = True
+
+        try:
+            actions = self._engine.evaluate("ba_result", zone_type.value, context)
+            await self._execute_actions(actions, synth_event, session)
+        finally:
+            session._pending_ba_result = None
 
     # ---- alert dispatch ------------------------------------------------------
 

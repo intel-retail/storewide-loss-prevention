@@ -43,7 +43,9 @@ class SessionManager:
         # Build set of configured camera names for filtering
         self._allowed_cameras = {c["name"] for c in config.get_cameras()} if config.get_cameras() else set()
 
-        # Sessions keyed by (scene_id, object_id) to support multi-scene
+        # Sessions keyed by (scene_id, canonical_object_id) to support
+        # multi-scene. Canonical id is the earliest UUID in a re-id chain;
+        # all later flickering UUIDs are aliased to it via _oid_alias below.
         self._sessions: Dict[tuple, PersonSession] = {}
         # Canonical-id alias: maps any flickering raw oid SceneScape emits
         # back to the first oid we saw for that physical person, so all
@@ -52,6 +54,22 @@ class SessionManager:
         self._event_handlers: List[Callable] = []
         self._expiry_task: Optional[asyncio.Task] = None
 
+        # Wallclock-based per-canonical loiter timer, keyed by
+        # (scene_id, region_id, canonical_oid). Each entry: {
+        #   "first_seen":  float,        # wall-clock when this person entered
+        #   "last_update": float,        # wall-clock last seen in region
+        #   "alerted":     bool,         # one alert per continuous occupancy
+        # }
+        # Each canonical person gets their own timer per region, so one
+        # person's loitering cannot be attributed to a different person who
+        # happens to walk in shortly afterward.
+        self._region_loiter_state: Dict[tuple, dict] = {}
+        # If a person goes unseen in the region for longer than this, their
+        # individual timer resets.
+        self._loiter_coalesce_gap = float(
+            rules.get("loiter_coalesce_gap_seconds", 5.0)
+        )
+
         logger.info("SessionManager initialized", timeout=self.session_timeout,
                     allowed_cameras=sorted(self._allowed_cameras) or "all")
 
@@ -59,6 +77,39 @@ class SessionManager:
     def register_event_handler(self, handler: Callable) -> None:
         """Register an async handler that receives RegionEvent objects."""
         self._event_handlers.append(handler)
+
+    # ---- canonical-id resolution -------------------------------------------
+    def _resolve_canonical(
+        self, scene_id: str, oid: str, prev_chain: Optional[list]
+    ) -> str:
+        """Map a (possibly flickering) raw oid to a stable canonical oid.
+
+        SceneScape often assigns a fresh UUID to the same physical person
+        every couple of seconds; each new track lists older UUIDs in
+        ``previous_ids_chain``. We collapse the lineage onto the first
+        canonical id we have already recorded for any ancestor in the chain.
+        Falls back to ``oid`` itself when no ancestor is known.
+        """
+        skey = (scene_id, oid)
+        if skey in self._oid_alias:
+            return self._oid_alias[skey]
+
+        for prev in prev_chain or []:
+            prev_str = str(prev) if prev is not None else ""
+            if not prev_str:
+                continue
+            prev_key = (scene_id, prev_str)
+            if prev_key in self._oid_alias:
+                canonical = self._oid_alias[prev_key]
+                self._oid_alias[skey] = canonical
+                logger.info("track aliased to canonical",
+                            oid=oid[:8], canonical=canonical[:8],
+                            chain_len=len(prev_chain or []))
+                return canonical
+
+        # First time seeing this lineage — oid is its own root canonical.
+        self._oid_alias[skey] = oid
+        return oid
 
     # ---- public accessors ---------------------------------------------------
     def get_session(self, object_id: str, scene_id: str = "") -> Optional[PersonSession]:
@@ -133,6 +184,14 @@ class SessionManager:
             prev_chain = obj.get("previous_ids_chain") or []
             oid = self._resolve_canonical(scene_id, raw_oid, prev_chain)
 
+            # Collapse re-id flicker: route every track variant onto the
+            # earliest canonical UUID we have already recorded for it.
+            prev_chain = obj.get("previous_ids_chain") or []
+            oid = self._resolve_canonical(scene_id, raw_oid, prev_chain)
+
+            # Note: we do NOT skip on reid_state. Loiter only needs dwell time,
+            # not identity. Provisional tracks may flap (new UUID every ~2s),
+            # but we coalesce dwell across re-entries below in on_region_data.
             cameras = obj.get("visibility", obj.get("camera_ids", obj.get("cameras", [])))
             bbox = obj.get("bounding_box", obj.get("bbox"))
             reid_state = str(obj.get("reid_state", "") or "")
@@ -317,14 +376,44 @@ class SessionManager:
             prev_chain = obj.get("previous_ids_chain") or []
             oid = self._resolve_canonical(scene_id, raw_oid, prev_chain)
 
-            skey = (scene_id, oid)
-            session = self._sessions.get(skey)
-            if not session:
-                logger.info("region_data: no session for object", object_id=oid)
+            # Read instant dwell (best-effort, for logging only)
+            instant_dwell = 0.0
+            for _rname, rinfo in obj["regions"].items():
+                try:
+                    instant_dwell = float(rinfo.get("dwell", 0.0) or 0.0)
+                except (TypeError, ValueError):
+                    instant_dwell = 0.0
+                break
+
+            pkey = (scene_id, region_id, canonical)
+            pstate = self._region_loiter_state.get(pkey)
+            if pstate and (now_epoch - pstate["last_update"]) > self._loiter_coalesce_gap:
+                # This canonical left the region long enough ago that we
+                # consider their previous burst over; restart their timer.
+                logger.info("loiter state reset (person silence gap)",
+                            object_id=canonical, region_id=region_id,
+                            gap=round(now_epoch - pstate["last_update"], 1))
+                pstate = None
+            if pstate is None:
+                pstate = {"first_seen": now_epoch, "last_update": now_epoch,
+                          "alerted": False}
+                self._region_loiter_state[pkey] = pstate
+
+            pstate["last_update"] = now_epoch
+
+            if pstate["alerted"]:
                 continue
 
-            # Already alerted for this zone — skip
-            if session.loiter_alerted.get(region_id):
+            person_dwell = now_epoch - pstate["first_seen"]
+            session = self._sessions.get((scene_id, canonical))
+
+            logger.info("region_data dwell",
+                        object_id=canonical, region_id=region_id,
+                        instant=round(instant_dwell, 1),
+                        total=round(person_dwell, 1),
+                        threshold=self._loiter_threshold)
+
+            if person_dwell <= self._loiter_threshold:
                 continue
 
             # Read SceneScape's reported dwell directly

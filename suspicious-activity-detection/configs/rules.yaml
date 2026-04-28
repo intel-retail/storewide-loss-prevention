@@ -9,7 +9,7 @@
 # Runtime settings consumed by swlp-service.
 settings:
   session_timeout_seconds: 90
-  loiter_threshold_seconds: 20
+  loiter_threshold_seconds: 5
   behavioural_analysis_fps: 10
   ba_poll_interval_seconds: 1
 
@@ -18,6 +18,35 @@ settings:
 variables:
   repeat_visit_threshold: 4
   loiter_threshold_seconds: 20
+
+# Session flags — configurable boolean flags set on PersonSession at runtime.
+# Each flag is auto-set based on its trigger type:
+#   zone_visited : set to true when a person enters any zone of the given zone_type.
+#   external     : set by an external service result (e.g. behavioral_analysis).
+# Rules can reference these flags by name in condition fields.
+# Adding a new flag here requires NO code change — it is picked up automatically.
+session_flags:
+  visited_high_value:
+    trigger: zone_visited
+    zone_type: HIGH_VALUE
+  visited_checkout:
+    trigger: zone_visited
+    zone_type: CHECKOUT
+  visited_exit:
+    trigger: zone_visited
+    zone_type: EXIT
+  concealment_suspected:
+    trigger: external
+    source: behavioral_analysis
+    field: status
+    match_value: suspicious
+
+# Service registry — named escalation services that rules can invoke.
+# Each entry maps a service name (used in rule action params) to its handler type.
+# Adding a new service here requires a matching handler registered in code at startup.
+services:
+  behavioral_analysis:
+    handler: ba_orchestrator
 
 rules:
   - id: restricted_zone
@@ -61,6 +90,22 @@ rules:
       - type: escalate
         params:
           service: behavioral_analysis
+
+  - id: concealment_detected
+    name: Concealment Detected by Behavioral Analysis
+    enabled: true
+    trigger:
+      event_type: ba_result
+      zone_type: HIGH_VALUE
+    conditions:
+      - field: ba_status
+        op: eq
+        value: suspicious
+    actions:
+      - type: alert
+        params:
+          alert_type: CONCEALMENT
+          severity: WARNING
 
   - id: checkout_bypass
     name: Checkout Bypass Detection

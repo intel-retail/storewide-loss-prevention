@@ -34,6 +34,7 @@ from services.frame_manager import FrameManager
 from services.scenescape_client import SceneScapeClient
 from services.alert_service_client import AlertServiceClient
 from services.ba_queue import BAQueuePublisher, BAQueueConsumer
+from services.ba_orchestrator import BehavioralAnalysisOrchestrator
 
 # ---- Structured logging setup -----------------------------------------------
 logging.basicConfig(format="%(message)s", stream=__import__("sys").stdout, level=logging.DEBUG)
@@ -154,12 +155,26 @@ async def lifespan(app: FastAPI):
     # 6. Rule engine (local, in-process)
     rules_yaml = config.get_rules_yaml_path()
     rule_engine = RuleEngine(rules_path=rules_yaml)
+
+    # 6b. BA orchestrator (owns per-visit getimage + ba/requests publishing)
+    rules_cfg = config.get_rules_config()
+    ba_orchestrator = BehavioralAnalysisOrchestrator(
+        ba_publisher=ba_publisher,
+        mqtt_service=mqtt_svc,
+        session_manager=session_mgr,
+        analysis_fps=float(rules_cfg.get("behavioural_analysis_fps", 5)),
+        ba_poll_interval=float(rules_cfg.get("ba_poll_interval_seconds", 1)),
+        ba_initial_delay=float(rules_cfg.get("ba_initial_delay_seconds", 2.0)),
+    )
+    app.state.ba_orchestrator = ba_orchestrator
+
     rule_adapter = RuleEngineAdapter(
         rule_engine, config, session_mgr,
         alert_service_client=alert_svc_client,
         frame_manager=frame_mgr,
-        ba_publisher=ba_publisher,
     )
+    # Register escalation services via the service registry
+    rule_adapter.register_service("behavioral_analysis", ba_orchestrator)
     app.state.rule_engine = rule_engine
     app.state.rule_adapter = rule_adapter
 
@@ -245,13 +260,13 @@ async def lifespan(app: FastAPI):
             except Exception:
                 logger.exception("Error in frame request loop")
 
-            await asyncio.sleep(FRAME_REQUEST_INTERVAL)
+    # Frame production is owned by BehavioralAnalysisOrchestrator (per-visit).
+    # It publishes "getimage" to active cameras and a BA request only while a
+    # person is in a HIGH_VALUE zone. Camera replies land in FrameManager.on_camera_image.
 
     # Start background tasks
     mqtt_task = asyncio.create_task(mqtt_svc.start())
     expiry_task = asyncio.create_task(session_mgr.run_expiry_loop())
-    frame_req_task = asyncio.create_task(frame_request_loop())
-    ba_task = asyncio.create_task(rule_adapter.run_ba_check_loop())
 
     logger.info(
         "Store-wide Loss Prevention started",
@@ -266,8 +281,6 @@ async def lifespan(app: FastAPI):
     logger.info("Shutting down Store-wide Loss Prevention")
     await mqtt_svc.stop()
     expiry_task.cancel()
-    frame_req_task.cancel()
-    ba_task.cancel()
     mqtt_task.cancel()
 
 
