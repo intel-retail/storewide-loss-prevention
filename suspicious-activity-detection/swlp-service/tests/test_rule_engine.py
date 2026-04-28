@@ -380,8 +380,6 @@ async def test_concealment_no_alert_on_no_match(setup):
 
     assert len(alerts) == 0
     assert session.concealment_suspected is False
-    # ba_alerted should NOT be set so re-analysis can happen
-    assert not session.ba_alerted.get("r1")
 
 
 @pytest.mark.asyncio

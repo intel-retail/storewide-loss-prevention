@@ -164,7 +164,6 @@ async def lifespan(app: FastAPI):
         mqtt_service=mqtt_svc,
         session_manager=session_mgr,
         analysis_fps=float(rules_cfg.get("behavioural_analysis_fps", 5)),
-        ba_poll_interval=float(rules_cfg.get("ba_poll_interval_seconds", 1)),
         ba_initial_delay=float(rules_cfg.get("ba_initial_delay_seconds", 2.0)),
     )
     app.state.ba_orchestrator = ba_orchestrator

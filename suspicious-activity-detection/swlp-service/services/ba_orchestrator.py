@@ -57,10 +57,6 @@ class BehavioralAnalysisOrchestrator:
         session_manager: _SessionManager,
         analysis_fps: float = 5.0,
         ba_initial_delay: float = 0.0,
-        # Legacy kwargs kept so existing callers don't break; unused now that
-        # exit is driven directly by SceneScape's EXITED event.
-        absence_grace_seconds: float = 0.0,
-        ba_poll_interval: float = 0.0,
     ) -> None:
         self._ba = ba_publisher
         self._mqtt = mqtt_service
