@@ -47,13 +47,10 @@ class SessionManager:
         # multi-scene. Canonical id is the earliest UUID in a re-id chain;
         # all later flickering UUIDs are aliased to it via _oid_alias below.
         self._sessions: Dict[tuple, PersonSession] = {}
-
-        # Maps (scene_id, raw_oid) -> canonical_oid. Populated lazily as
-        # SceneScape emits ``previous_ids_chain`` linking new tracks to old.
-        # Once an oid has an alias, all handlers route updates to the
-        # canonical session, preventing duplicate "ghost" entries in the UI.
-        self._oid_alias: Dict[tuple, str] = {}
-
+        # Canonical-id alias: maps any flickering raw oid SceneScape emits
+        # back to the first oid we saw for that physical person, so all
+        # downstream state (sessions, frame folders, dedup) stays unified.
+        self._oid_alias: Dict[tuple, str] = {}  # (scene_id, raw_oid) -> canonical_oid
         self._event_handlers: List[Callable] = []
         self._expiry_task: Optional[asyncio.Task] = None
 
@@ -116,13 +113,44 @@ class SessionManager:
 
     # ---- public accessors ---------------------------------------------------
     def get_session(self, object_id: str, scene_id: str = "") -> Optional[PersonSession]:
-        return self._sessions.get((scene_id, object_id))
+        canonical = self._oid_alias.get((scene_id, object_id), object_id)
+        return self._sessions.get((scene_id, canonical))
 
     def get_all_sessions(self) -> Dict[tuple, PersonSession]:
         return dict(self._sessions)
 
     def get_active_count(self) -> int:
         return len(self._sessions)
+
+    # ---- canonical-id resolution --------------------------------------------
+    def _resolve_canonical(
+        self, scene_id: str, raw_oid: str, prev_chain: Optional[list] = None
+    ) -> str:
+        """Return the canonical oid for this raw oid, walking previous_ids_chain.
+
+        SceneScape can flicker a person between multiple track UUIDs.  We
+        keep the first oid we saw for a physical person and alias every
+        subsequent UUID (linked via previous_ids_chain) onto that oid.
+        """
+        akey = (scene_id, raw_oid)
+        existing = self._oid_alias.get(akey)
+        if existing is not None:
+            return existing
+
+        # Walk the chain looking for an oid we already track.
+        for prev in prev_chain or []:
+            prev_str = str(prev)
+            if (scene_id, prev_str) in self._sessions:
+                self._oid_alias[akey] = prev_str
+                return prev_str
+            chained = self._oid_alias.get((scene_id, prev_str))
+            if chained is not None:
+                self._oid_alias[akey] = chained
+                return chained
+
+        # No ancestor found — this raw oid becomes its own canonical.
+        self._oid_alias[akey] = raw_oid
+        return raw_oid
 
     # ---- scene-data handler: keeps sessions alive ----------------------------
     async def on_scene_data(
@@ -153,6 +181,8 @@ class SessionManager:
             raw_oid = str(obj.get("id", obj.get("object_id", "")))
             if not raw_oid:
                 continue
+            prev_chain = obj.get("previous_ids_chain") or []
+            oid = self._resolve_canonical(scene_id, raw_oid, prev_chain)
 
             # Collapse re-id flicker: route every track variant onto the
             # earliest canonical UUID we have already recorded for it.
@@ -164,6 +194,7 @@ class SessionManager:
             # but we coalesce dwell across re-entries below in on_region_data.
             cameras = obj.get("visibility", obj.get("camera_ids", obj.get("cameras", [])))
             bbox = obj.get("bounding_box", obj.get("bbox"))
+            reid_state = str(obj.get("reid_state", "") or "")
 
             # Filter: only track persons visible on configured cameras
             if self._allowed_cameras:
@@ -177,10 +208,9 @@ class SessionManager:
                 session.last_seen = now
                 session.current_cameras = list(cameras)
                 session.bbox = bbox
-                # Promote re-id state if SceneScape has now matched this track.
-                new_reid = str(obj.get("reid_state", "") or "")
-                if new_reid and session.reid_state != new_reid:
-                    session.reid_state = new_reid
+                # Promote reid_state once SceneScape upgrades to "matched".
+                if reid_state and (not session.reid_state or reid_state == "matched"):
+                    session.reid_state = reid_state
                 # Update camera history
                 for cam in cameras:
                     if cam not in session.camera_history:
@@ -193,10 +223,11 @@ class SessionManager:
                     scene_id=scene_id,
                     current_cameras=list(cameras),
                     bbox=bbox,
-                    reid_state=str(obj.get("reid_state", "") or ""),
+                    reid_state=reid_state,
                 )
                 self._sessions[skey] = session
-                logger.info("Session created", object_id=oid, scene_id=scene_id)
+                logger.info("Session created", object_id=oid, scene_id=scene_id,
+                            reid_state=reid_state)
 
             # Real-time loiter check using region entry timestamps from scene data
             regions = obj.get("regions", {})
@@ -209,8 +240,12 @@ class SessionManager:
     async def _check_loiter_from_scene_data(
         self, session: PersonSession, regions: dict, now: datetime
     ) -> None:
-        """Check dwell time for each region in scene data and emit LOITER if threshold exceeded."""
-        now_epoch = time.time()
+        """Emit a LOITER event for each HIGH_VALUE region the person is in.
+
+        No threshold is applied here — the rule engine evaluates
+        rules.yaml's `loitering` rule (condition: dwell_seconds > threshold)
+        and decides whether to alert.
+        """
         for region_id, rinfo in regions.items():
             # Already alerted for this zone — skip
             if session.loiter_alerted.get(region_id):
@@ -220,35 +255,25 @@ class SessionManager:
             if zone_type != "HIGH_VALUE":
                 continue
 
-            entered_str = rinfo.get("entered") if isinstance(rinfo, dict) else None
-            if not entered_str:
+            if not isinstance(rinfo, dict):
                 continue
             try:
-                entered_dt = datetime.fromisoformat(entered_str.replace("Z", "+00:00"))
-                entered_epoch = entered_dt.timestamp()
-            except (ValueError, TypeError):
+                dwell = float(rinfo.get("dwell", 0.0) or 0.0)
+            except (TypeError, ValueError):
                 continue
 
-            dwell = now_epoch - entered_epoch
-            logger.debug("Loiter check", object_id=session.object_id,
-                         region_id=region_id, dwell=round(dwell, 1),
-                         threshold=self._loiter_threshold)
-            if dwell > self._loiter_threshold:
-                zone_name = self.config.get_zone_name(region_id) or region_id
-                logger.info("Loiter threshold exceeded (scene data)",
-                            object_id=session.object_id,
-                            region=zone_name, dwell=round(dwell, 1))
-                event = RegionEvent(
-                    event_type=EventType.LOITER,
-                    object_id=session.object_id,
-                    region_id=region_id,
-                    region_name=zone_name,
-                    zone_type=ZoneType(zone_type),
-                    timestamp=now,
-                    scene_id=session.scene_id,
-                    dwell_seconds=round(dwell, 1),
-                )
-                await self._emit(event)
+            zone_name = self.config.get_zone_name(region_id) or region_id
+            event = RegionEvent(
+                event_type=EventType.LOITER,
+                object_id=session.object_id,
+                region_id=region_id,
+                region_name=zone_name,
+                zone_type=ZoneType(zone_type),
+                timestamp=now,
+                scene_id=session.scene_id,
+                dwell_seconds=round(dwell, 1),
+            )
+            await self._emit(event)
 
     # ---- region-event handler: drives ENTERED / EXITED ----------------------
     async def on_region_event(
@@ -344,23 +369,12 @@ class SessionManager:
             logger.info("region_data: zone not HIGH_VALUE", region_id=region_id, zone_type=zone_type)
             return
 
-        now_epoch = time.time()
-
-        # Region must currently be occupied by at least one person for this
-        # message to count as "continuous occupancy".
-        objs = [o for o in data.get("objects", []) if o.get("regions")]
-        if not objs:
-            return
-
-        # Per-canonical loiter: each unique person in the region maintains
-        # their own wallclock timer. We update every canonical seen in this
-        # message and emit at most one LOITER per (scene, region, canonical).
-        for obj in objs:
+        for obj in data.get("objects", []):
             raw_oid = str(obj.get("id", ""))
             if not raw_oid:
                 continue
             prev_chain = obj.get("previous_ids_chain") or []
-            canonical = self._resolve_canonical(scene_id, raw_oid, prev_chain)
+            oid = self._resolve_canonical(scene_id, raw_oid, prev_chain)
 
             # Read instant dwell (best-effort, for logging only)
             instant_dwell = 0.0
@@ -402,25 +416,36 @@ class SessionManager:
             if person_dwell <= self._loiter_threshold:
                 continue
 
-            # Hold off alerting until re-id matches; the per-canonical timer
-            # keeps counting, so the alert fires as soon as the canonical is
-            # promoted to "matched".
-            if session is not None and session.reid_state and session.reid_state != "matched":
+            # Read SceneScape's reported dwell directly
+            regions = obj.get("regions", {})
+            if not regions:
+                logger.info("region_data: no regions in object", object_id=oid,
+                            keys=list(obj.keys())[:10])
                 continue
+            for rname, rinfo in regions.items():
+                if not isinstance(rinfo, dict):
+                    continue
+                try:
+                    dwell = float(rinfo.get("dwell", 0.0) or 0.0)
+                except (TypeError, ValueError):
+                    continue
 
-            zone_name = self.config.get_zone_name(region_id) or region_id
-            event = RegionEvent(
-                event_type=EventType.LOITER,
-                object_id=canonical,
-                region_id=region_id,
-                region_name=zone_name,
-                zone_type=ZoneType(zone_type),
-                timestamp=datetime.now(timezone.utc),
-                scene_id=session.scene_id if session else scene_id,
-                dwell_seconds=round(person_dwell, 1),
-            )
-            pstate["alerted"] = True
-            await self._emit(event)
+                logger.debug("region_data dwell", object_id=oid, region=rname,
+                             dwell=round(dwell, 1))
+                # Always emit — rules.yaml's loitering rule decides whether to alert.
+                zone_name = self.config.get_zone_name(region_id) or region_id
+                event = RegionEvent(
+                    event_type=EventType.LOITER,
+                    object_id=oid,
+                    region_id=region_id,
+                    region_name=zone_name,
+                    zone_type=ZoneType(zone_type),
+                    timestamp=datetime.now(timezone.utc),
+                    scene_id=session.scene_id,
+                    dwell_seconds=round(dwell, 1),
+                )
+                await self._emit(event)
+                break  # one event per object per region_data message
 
     # ---- session expiry ------------------------------------------------------
     async def _expire_session(self, skey: tuple) -> None:
@@ -463,14 +488,6 @@ class SessionManager:
         ]
         for k in stale_aliases:
             del self._oid_alias[k]
-
-        # Drop this canonical's per-region loiter timers.
-        stale_loiter = [
-            k for k in self._region_loiter_state
-            if k[0] == scene_id_expired and k[2] == canonical_expired
-        ]
-        for k in stale_loiter:
-            del self._region_loiter_state[k]
 
         # Fire PERSON_LOST
         lost_event = RegionEvent(

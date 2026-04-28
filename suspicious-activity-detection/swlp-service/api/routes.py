@@ -57,22 +57,21 @@ async def get_alert_count(request: Request) -> Dict[str, int]:
 
 @router.get("/sessions", response_model=List[Dict[str, Any]])
 async def get_sessions(request: Request, include_pending: bool = False) -> List[Dict[str, Any]]:
-    """Return all active person sessions with per-zone visit summary.
+    """Return active person sessions with per-zone visit summary.
 
-    By default, only sessions whose SceneScape ``reid_state`` is ``"matched"``
-    or empty (legacy) are returned. Provisional ``pending_collection`` tracks
-    are hidden from the UI to avoid ghost rows that get merged via
-    ``previous_ids_chain`` once re-id converges. Pass ``include_pending=true``
-    to see them for debugging.
+    By default, only sessions whose SceneScape re-id state has reached
+    "matched" are returned, so flickering/transient ghost tracks don't
+    show up in the UI.  Pass ?include_pending=true to see everything.
     """
     sm = _get_session_manager(request)
     config = _get_config(request)
     sessions = sm.get_all_sessions()
-    visible = [
-        s for s in sessions.values()
-        if include_pending or s.reid_state in ("", "matched")
-    ]
-    return [_serialize_session(s, config) for s in visible]
+    if not include_pending:
+        sessions = {
+            k: s for k, s in sessions.items()
+            if not s.reid_state or s.reid_state == "matched"
+        }
+    return [_serialize_session(s, config) for s in sessions.values()]
 
 
 @router.get("/sessions/{object_id}")
