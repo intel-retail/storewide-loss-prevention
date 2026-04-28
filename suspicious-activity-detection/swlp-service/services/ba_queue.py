@@ -70,14 +70,6 @@ class BAQueuePublisher:
         """Notify BA service that the visit has ended; it should stop polling."""
         self._publish("exit", person_id, region_id, entry_timestamp, scene_id)
 
-    # Legacy alias kept for backward compatibility with any caller still
-    # publishing one-shot analysis requests.
-    def publish_request(
-        self, person_id: str, region_id: str, entry_timestamp: str,
-        scene_id: str = "",
-    ) -> None:
-        self.publish_start(person_id, region_id, entry_timestamp, scene_id)
-
 
 class BAQueueConsumer:
     """
