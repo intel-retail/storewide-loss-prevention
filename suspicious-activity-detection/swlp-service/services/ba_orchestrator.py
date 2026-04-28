@@ -1,25 +1,27 @@
 # Copyright (C) 2026 Intel Corporation
 # SPDX-License-Identifier: Apache-2.0
 """
-Behavioral Analysis Orchestrator -- owns the per-visit BA pipeline.
+Behavioral Analysis Orchestrator -- owns the per-visit frame-capture pipeline.
 
-For each (person, region) HIGH_VALUE visit, runs a single asyncio task that:
-  1. Periodically requests frames from cameras seeing the person (`getimage`).
-  2. At a slower cadence, publishes a BA analysis request to `ba/requests`.
+For each (person, region) HIGH_VALUE visit we run a single asyncio task that
+publishes ``getimage`` to every camera seeing the person at ``analysis_fps``.
+Camera replies are stored in the ``behavioral-frames`` bucket by FrameManager.
+
+Lifecycle messaging (see ``BAQueuePublisher``):
+  * On visit start: publish ONE ``action="start"`` message to ``ba/requests``.
+    The behavioural-analysis service uses this to spawn a polling worker that
+    watches the bucket prefix and emits multiple ``ba/results`` as new events
+    are detected.
+  * On visit end: publish ONE ``action="exit"`` message so the worker stops
+    polling.
 
 Stops cleanly on:
-  - explicit stop() call (zone exit / person lost / shutdown), OR
-  - person leaves the zone (detected from session state), OR
-  - ba_alerted[region_id] is True (concealment confirmed → no need to keep asking).
-
-Decoupling goals:
-  - rule_adapter does NOT know about MQTT topics, frame fps, BA cadence.
-  - frame_manager continues to own bucket writes (independent MQTT consumer).
+  - explicit stop() call (driven by SceneScape EXITED event), OR
+  - explicit stop_all() call (PERSON_LOST).
 """
 
 import asyncio
-import time
-from typing import Any, Dict, Optional, Protocol
+from typing import Any, Dict, Protocol
 
 import structlog
 
@@ -27,7 +29,11 @@ logger = structlog.get_logger(__name__)
 
 
 class _BAPublisher(Protocol):
-    def publish_request(
+    def publish_start(
+        self, person_id: str, region_id: str, entry_timestamp: str,
+        scene_id: str = "",
+    ) -> None: ...
+    def publish_exit(
         self, person_id: str, region_id: str, entry_timestamp: str,
         scene_id: str = "",
     ) -> None: ...
@@ -42,7 +48,7 @@ class _SessionManager(Protocol):
 
 
 class BehavioralAnalysisOrchestrator:
-    """Owns BA visit tasks and per-visit frame/request cadence."""
+    """Owns BA visit tasks and per-visit frame-capture cadence."""
 
     def __init__(
         self,
@@ -50,15 +56,17 @@ class BehavioralAnalysisOrchestrator:
         mqtt_service: _MQTT,
         session_manager: _SessionManager,
         analysis_fps: float = 5.0,
-        ba_poll_interval: float = 1.0,
-        ba_initial_delay: float = 2.0,
+        ba_initial_delay: float = 0.0,
+        # Legacy kwargs kept so existing callers don't break; unused now that
+        # exit is driven directly by SceneScape's EXITED event.
+        absence_grace_seconds: float = 0.0,
+        ba_poll_interval: float = 0.0,
     ) -> None:
         self._ba = ba_publisher
         self._mqtt = mqtt_service
         self._sessions = session_manager
         self._analysis_fps = max(float(analysis_fps), 0.1)
         self._frame_interval = 1.0 / self._analysis_fps
-        self._ba_poll_interval = float(ba_poll_interval)
         self._initial_delay = float(ba_initial_delay)
 
         # Active per-visit tasks, keyed by "{object_id}:{region_id}"
@@ -67,45 +75,42 @@ class BehavioralAnalysisOrchestrator:
         logger.info(
             "BehavioralAnalysisOrchestrator initialized",
             analysis_fps=self._analysis_fps,
-            ba_poll_interval=self._ba_poll_interval,
-            ba_initial_delay=self._initial_delay,
+            initial_delay=self._initial_delay,
         )
 
     # ---- public API ----------------------------------------------------------
 
     def start(self, object_id: str, region_id: str, scene_id: str) -> None:
-        """Start a BA visit task for one HV-zone visit.
+        """Begin a frame-capture task for one HV-zone visit.
 
-        If a task is already running for this canonical person+region, leave
-        it alone — repeated ENTERED events from re-id flicker would otherwise
-        cancel it and reset the initial delay, preventing BA from ever firing.
+        Idempotent: re-entry events from re-id flicker are ignored if the
+        existing task is still alive.
         """
         key = self._key(object_id, region_id)
         prev = self._tasks.get(key)
         if prev and not prev.done():
-            logger.debug("BA visit task already active, ignoring re-start",
-                         object_id=object_id, region_id=region_id)
+            logger.debug(
+                "BA visit task already active, ignoring re-start",
+                object_id=object_id, region_id=region_id,
+            )
             return
         self._tasks[key] = asyncio.create_task(
             self._run(object_id, region_id, scene_id)
         )
 
     def stop(self, object_id: str, region_id: str) -> None:
-        """Schedule cancellation of the BA visit task after a short grace period.
+        """Cancel the visit task for one (person, region) pair.
 
-        SceneScape can emit spurious EXITED events while a person is still
-        physically in the region (track UUID flicker). Cancelling immediately
-        would abort BA mid-analysis and let the next ENTERED restart its 2 s
-        initial delay, so concealment never gets evaluated. We instead let
-        the running task notice ``region_id not in current_zones`` on its own,
-        which is itself debounced via ``_run``'s grace window.
+        Called from RuleEngineAdapter on SceneScape EXITED. The cancelled
+        task's ``finally`` block publishes the ``ba/requests`` exit message.
         """
-        # Intentionally a no-op: the running task self-terminates after the
-        # absence-grace window in ``_run`` if the person truly left.
-        return
+        key = self._key(object_id, region_id)
+        task = self._tasks.pop(key, None)
+        if task and not task.done():
+            task.cancel()
 
     def stop_all(self, object_id: str) -> None:
-        """Cancel every BA visit task for a person (used on PERSON_LOST)."""
+        """Cancel every visit task for a person (used on PERSON_LOST)."""
         prefix = f"{object_id}:"
         for key in [k for k in self._tasks if k.startswith(prefix)]:
             task = self._tasks.pop(key, None)
@@ -121,42 +126,58 @@ class BehavioralAnalysisOrchestrator:
     def _key(object_id: str, region_id: str) -> str:
         return f"{object_id}:{region_id}"
 
+    @staticmethod
+    def _format_entry_ts(entry_iso: str) -> str:
+        if not entry_iso:
+            return ""
+        return (
+            entry_iso.replace(":", "")
+            .replace("-", "")
+            .split("+")[0]
+            .split(".")[0]
+        )
+
     async def _run(self, object_id: str, region_id: str, scene_id: str) -> None:
-        next_ba_at = time.monotonic() + self._initial_delay
-        # Grace window for absence: lets us survive SceneScape track-id
-        # flicker (where a person is briefly missing from current_zones).
-        absence_grace = max(self._initial_delay + 1.0, 5.0)
-        absent_since: Optional[float] = None
+        start_published = False
+        entry_timestamp = ""
+
         logger.info(
             "BA visit task started",
             object_id=object_id,
             region_id=region_id,
             analysis_fps=self._analysis_fps,
-            ba_interval=self._ba_poll_interval,
-            absence_grace=absence_grace,
         )
+
         try:
+            if self._initial_delay > 0:
+                await asyncio.sleep(self._initial_delay)
+
             while True:
                 session = self._sessions.get_session(object_id, scene_id=scene_id)
                 if not session:
                     return
-                if region_id not in session.current_zones:
-                    if absent_since is None:
-                        absent_since = time.monotonic()
-                    elif time.monotonic() - absent_since >= absence_grace:
-                        return
-                    await asyncio.sleep(self._frame_interval)
-                    continue
-                absent_since = None
-                if session.ba_alerted.get(region_id):
-                    return
 
-                # No reid_state gate: frame capture starts at session creation
-                # so BA gets the early frames (person entering / first standing
-                # pose). Canonical-alias collapses flicker into one session, so
-                # frames file under the right object_id either way.
+                # Publish the visit-start lifecycle message exactly once,
+                # the first tick we see the person actually inside the zone.
+                if not start_published and region_id in session.current_zones:
+                    entry_timestamp = self._format_entry_ts(
+                        session.current_zones.get(region_id, "")
+                    )
+                    try:
+                        self._ba.publish_start(
+                            person_id=object_id,
+                            region_id=region_id,
+                            entry_timestamp=entry_timestamp,
+                            scene_id=session.scene_id,
+                        )
+                    except Exception:
+                        logger.exception(
+                            "Failed to publish BA start",
+                            object_id=object_id, region_id=region_id,
+                        )
+                    start_published = True
 
-                # 1. Trigger frame capture (camera reply lands in FrameManager).
+                # Trigger frame capture (camera reply lands in FrameManager).
                 for cam in list(session.current_cameras):
                     try:
                         self._mqtt.publish_raw(
@@ -165,49 +186,35 @@ class BehavioralAnalysisOrchestrator:
                     except Exception:
                         logger.exception(
                             "getimage publish failed",
-                            object_id=object_id,
-                            camera=cam,
+                            object_id=object_id, camera=cam,
                         )
 
-                # 2. Publish BA request at the slower cadence.
-                now = time.monotonic()
-                if now >= next_ba_at:
-                    self._publish_request(session, object_id, region_id)
-                    next_ba_at = now + self._ba_poll_interval
-
                 await asyncio.sleep(self._frame_interval)
+
         except asyncio.CancelledError:
             logger.debug(
                 "BA visit task cancelled",
-                object_id=object_id,
-                region_id=region_id,
+                object_id=object_id, region_id=region_id,
             )
             raise
         except Exception:
             logger.exception(
                 "BA visit task crashed",
-                object_id=object_id,
-                region_id=region_id,
+                object_id=object_id, region_id=region_id,
             )
         finally:
+            # Publish the visit-exit lifecycle message so the BA worker stops.
+            if start_published:
+                try:
+                    self._ba.publish_exit(
+                        person_id=object_id,
+                        region_id=region_id,
+                        entry_timestamp=entry_timestamp,
+                        scene_id=scene_id,
+                    )
+                except Exception:
+                    logger.exception(
+                        "Failed to publish BA exit",
+                        object_id=object_id, region_id=region_id,
+                    )
             self._tasks.pop(self._key(object_id, region_id), None)
-
-    def _publish_request(self, session: Any, object_id: str, region_id: str) -> None:
-        # Skip if already alerted (also re-checked by the loop, but cheap).
-        if session.ba_alerted.get(region_id):
-            return
-        entry_ts_iso = session.current_zones.get(region_id, "")
-        entry_timestamp = ""
-        if entry_ts_iso:
-            entry_timestamp = (
-                entry_ts_iso.replace(":", "")
-                .replace("-", "")
-                .split("+")[0]
-                .split(".")[0]
-            )
-        self._ba.publish_request(
-            person_id=object_id,
-            region_id=region_id,
-            entry_timestamp=entry_timestamp,
-            scene_id=session.scene_id,
-        )

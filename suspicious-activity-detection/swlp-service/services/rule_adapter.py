@@ -341,14 +341,10 @@ class RuleEngineAdapter:
             )
             return
 
-        # Per-zone dedup before invoking the engine.
-        if status == "suspicious" and session.ba_alerted.get(region_id):
-            logger.debug(
-                "BA result: concealment alert already fired for zone",
-                person_id=person_id,
-                region_id=region_id,
-            )
-            return
+        # No per-zone dedup here — the BA service emits one ba/results per
+        # discrete concealment event it observes, and a single visit may
+        # legitimately produce multiple suspicious verdicts (e.g. two thefts
+        # at adjacent shelves in the same HV zone).
 
         # Resolve zone metadata for the synthetic event.
         zone_name = self.config.get_zone_name(region_id)
@@ -378,15 +374,12 @@ class RuleEngineAdapter:
         # Stash raw BA result so _build_details(CONCEALMENT) can pick it up.
         session._pending_ba_result = result
 
-        # Mark state BEFORE firing so dedup is consistent.
         # Apply external flag definitions from config
         for flag_def in self._external_flags.get("behavioral_analysis", []):
             field_name = flag_def["field"]
             match_val = flag_def["match_value"]
             if result.get(field_name) == match_val:
                 session.flags[flag_def["flag_name"]] = True
-        if status == "suspicious":
-            session.ba_alerted[region_id] = True
 
         try:
             actions = self._engine.evaluate("ba_result", zone_type.value, context)
