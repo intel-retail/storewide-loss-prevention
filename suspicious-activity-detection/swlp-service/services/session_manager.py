@@ -52,6 +52,7 @@ class SessionManager:
         # downstream state (sessions, frame folders, dedup) stays unified.
         self._oid_alias: Dict[tuple, str] = {}  # (scene_id, raw_oid) -> canonical_oid
         self._event_handlers: List[Callable] = []
+        self._match_handlers: List[Callable] = []
         self._expiry_task: Optional[asyncio.Task] = None
 
         # Wallclock-based per-canonical loiter timer, keyed by
@@ -77,6 +78,22 @@ class SessionManager:
     def register_event_handler(self, handler: Callable) -> None:
         """Register an async handler that receives RegionEvent objects."""
         self._event_handlers.append(handler)
+
+    def register_match_handler(self, handler: Callable) -> None:
+        """Register a handler invoked when a session's reid_state flips to 'matched'.
+
+        Receives the PersonSession; may be sync or async.
+        """
+        self._match_handlers.append(handler)
+
+    async def _notify_match(self, session: PersonSession) -> None:
+        for h in self._match_handlers:
+            try:
+                result = h(session)
+                if asyncio.iscoroutine(result):
+                    await result
+            except Exception:
+                logger.exception("Match handler error", object_id=session.object_id)
 
     # ---- canonical-id resolution -------------------------------------------
     def _resolve_canonical(
@@ -210,7 +227,10 @@ class SessionManager:
                 session.bbox = bbox
                 # Promote reid_state once SceneScape upgrades to "matched".
                 if reid_state and (not session.reid_state or reid_state == "matched"):
+                    prev_state = session.reid_state
                     session.reid_state = reid_state
+                    if reid_state == "matched" and prev_state != "matched":
+                        await self._notify_match(session)
                 # Update camera history
                 for cam in cameras:
                     if cam not in session.camera_history:

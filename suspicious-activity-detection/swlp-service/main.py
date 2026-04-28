@@ -20,6 +20,7 @@ import logging
 import os
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
+from typing import Optional
 
 import structlog
 import uvicorn
@@ -212,31 +213,26 @@ async def lifespan(app: FastAPI):
             if camera_name not in session.current_cameras:
                 continue
 
-            # Skip until SceneScape has confirmed the identity. Frames for
-            # transient/flickering tracks would otherwise pollute the
-            # behavioral-frames bucket with ghost folders.
-            if session.reid_state and session.reid_state != "matched":
+            # Find the HIGH_VALUE zone the person is in (if any)
+            zone_id: Optional[str] = None
+            for zid in session.current_zones:
+                if config.get_zone_type(zid) == "HIGH_VALUE":
+                    zone_id = zid
+                    break
+            if zone_id is None:
                 continue
 
-            # Check if person is currently in any HIGH_VALUE zone
-            in_high_value = False
-            for zone_id in session.current_zones:
-                if config.get_zone_type(zone_id) == "HIGH_VALUE":
-                    in_high_value = True
-                    break
-
-            if in_high_value:
-                # Store full camera frame (gvadetect handles person detection)
-                entry_ts_iso = session.current_zones.get(zone_id, "")
-                key = frame_mgr.store_person_frame(
-                    session.object_id, image_bytes, ts,
-                    region_id=zone_id,
-                    entry_timestamp=entry_ts_iso,
-                    scene_id=session.scene_id,
-                )
-                session.add_frame_key(key)
+            entry_ts_iso = session.current_zones.get(zone_id, "")
+            key = frame_mgr.store_person_frame(
+                session.object_id, image_bytes, ts,
+                region_id=zone_id,
+                entry_timestamp=entry_ts_iso,
+                scene_id=session.scene_id,
+            )
+            session.add_frame_key(key)
 
     mqtt_svc.register_camera_image_handler(on_camera_image)
+
 
     # Background task: request frames from cameras that see people in HIGH_VALUE zones
     async def frame_request_loop() -> None:

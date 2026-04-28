@@ -151,13 +151,10 @@ class BehavioralAnalysisOrchestrator:
                 if session.ba_alerted.get(region_id):
                     return
 
-                # Skip while re-id is still provisional: this canonical may be
-                # superseded once previous_ids_chain links it to an existing
-                # session. Avoids generating BA requests + frame uploads for
-                # short-lived ghost canonicals.
-                if session.reid_state and session.reid_state != "matched":
-                    await asyncio.sleep(self._frame_interval)
-                    continue
+                # No reid_state gate: frame capture starts at session creation
+                # so BA gets the early frames (person entering / first standing
+                # pose). Canonical-alias collapses flicker into one session, so
+                # frames file under the right object_id either way.
 
                 # 1. Trigger frame capture (camera reply lands in FrameManager).
                 for cam in list(session.current_cameras):

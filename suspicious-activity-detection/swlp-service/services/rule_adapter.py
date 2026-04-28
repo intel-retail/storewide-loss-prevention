@@ -293,45 +293,6 @@ class RuleEngineAdapter:
             }
         return {}
 
-    # ---- active BA polling ---------------------------------------------------
-
-    async def run_ba_check_loop(self) -> None:
-        """
-        Background task: periodically publish BA requests for persons in HIGH_VALUE zones.
-        Publishes to MQTT ba/requests topic; results come back via ba/results.
-        """
-        if not self._ba_publisher:
-            logger.info("No BA publisher configured — skipping BA poll loop")
-            return
-        if not self._engine.is_rule_enabled("behavioral_analysis"):
-            logger.info("Behavioral analysis rule disabled — skipping BA poll loop")
-            return
-
-        logger.info(
-            "BA poll loop started (queue mode)",
-            interval_seconds=self.ba_poll_interval,
-        )
-
-        while True:
-            await asyncio.sleep(self.ba_poll_interval)
-            try:
-                for session in self.session_mgr.get_all_sessions().values():
-                    # Skip until SceneScape has confirmed the identity, to
-                    # avoid analysing frames for flickering ghost tracks.
-                    if session.reid_state and session.reid_state != "matched":
-                        continue
-                    for zone_id in list(session.current_zones.keys()):
-                        zone_type = self.config.get_zone_type(zone_id)
-                        if zone_type != "HIGH_VALUE":
-                            continue
-                        if session.ba_alerted.get(zone_id):
-                            continue
-                        self._publish_ba_request(
-                            session.object_id, zone_id, session.scene_id
-                        )
-            except Exception:
-                logger.exception("Error in BA check loop")
-
     # ---- Deferred frame cleanup on HIGH_VALUE zone exit ----------------------
 
     async def _deferred_frame_cleanup(
