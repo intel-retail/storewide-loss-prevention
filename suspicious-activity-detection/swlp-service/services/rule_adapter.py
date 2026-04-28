@@ -100,37 +100,20 @@ class RuleEngineAdapter:
                     )
 
         elif event.event_type == EventType.LOITER:
-            # Loiter detected by continuous region-data feed — fire alert directly
+            # Continuous region-data feed signalled the person has been in
+            # the zone long enough. Dedup here so the rule engine doesn't
+            # re-fire on every subsequent region-data tick.
             if session.loiter_alerted.get(event.region_id):
                 return
-            alert = Alert(
-                alert_type=AlertType.LOITERING,
-                alert_level=AlertLevel.WARNING,
-                object_id=event.object_id,
-                timestamp=event.timestamp,
-                scene_id=event.scene_id,
-                region_id=event.region_id,
-                region_name=event.region_name,
-                details={
-                    "dwell_seconds": event.dwell_seconds,
-                    "threshold": self._loiter_threshold,
-                    "source": "region_data_feed",
-                },
-            )
-            logger.warning(
-                "Loitering detected (region data feed)",
-                object_id=event.object_id,
-                zone=event.region_name,
-                dwell=event.dwell_seconds,
-            )
             session.loiter_alerted[event.region_id] = True
-            await self._fire_alert(alert)
-            return
 
         # ---- Map event_type to rule trigger string ----
-        trigger_event = (
-            "zone_entry" if event.event_type == EventType.ENTERED else "zone_exit"
-        )
+        trigger_map = {
+            EventType.ENTERED: "zone_entry",
+            EventType.EXITED: "zone_exit",
+            EventType.LOITER: "zone_loiter",
+        }
+        trigger_event = trigger_map.get(event.event_type, "zone_exit")
 
         # ---- Build flat context dict (no LP dataclasses leak into engine) ----
         context = self._build_context(event, session)
@@ -281,6 +264,10 @@ class RuleEngineAdapter:
             await asyncio.sleep(self.ba_poll_interval)
             try:
                 for session in self.session_mgr.get_all_sessions().values():
+                    # Skip until SceneScape has confirmed the identity, to
+                    # avoid analysing frames for flickering ghost tracks.
+                    if session.reid_state and session.reid_state != "matched":
+                        continue
                     for zone_id in list(session.current_zones.keys()):
                         zone_type = self.config.get_zone_type(zone_id)
                         if zone_type != "HIGH_VALUE":

@@ -133,11 +133,10 @@ def get_sessions():
                             "Zone": z.get("zone_name", "?"),
                             "Type": z.get("zone_type", "?"),
                             "Visits": z.get("visit_count", 0),
-                            "Dwell (s)": round(z.get("total_dwell_seconds", 0.0), 1),
                         })
             if rows:
                 return pd.DataFrame(rows)
-            return pd.DataFrame(columns=["Person", "Scene", "Zone", "Type", "Visits", "Dwell (s)"])
+            return pd.DataFrame(columns=["Person", "Scene", "Zone", "Type", "Visits"])
         return pd.DataFrame([{"Error": f"API returned {resp.status_code}"}])
     except Exception as e:
         return pd.DataFrame([{"Error": str(e)}])

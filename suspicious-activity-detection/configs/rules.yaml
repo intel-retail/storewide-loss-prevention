@@ -10,7 +10,7 @@
 settings:
   session_timeout_seconds: 90
   loiter_threshold_seconds: 20
-  behavioural_analysis_fps: 5
+  behavioural_analysis_fps: 10
   ba_poll_interval_seconds: 1
 
 # Default variable values — used in condition ${var:default} placeholders.
@@ -84,9 +84,10 @@ rules:
 
   - id: loitering
     name: Loitering in High-Value Zone
+    description: Person remains in a HIGH_VALUE zone longer than the threshold.
     enabled: true
     trigger:
-      event_type: zone_exit
+      event_type: zone_loiter
       zone_type: HIGH_VALUE
     conditions:
       - field: dwell_seconds

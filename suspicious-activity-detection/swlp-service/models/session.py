@@ -80,6 +80,10 @@ class PersonSession:
     frame_buffer: List[str] = field(default_factory=list)
     max_frame_buffer: int = 20  # ~10s at 2fps per spec
 
+    # SceneScape re-identification state ("pending_collection" or "matched");
+    # only sessions with reid_state == "matched" are exposed downstream.
+    reid_state: str = ""
+
     def get_open_visits(self) -> List[RegionVisit]:
         """Return region visits that have not been closed."""
         return [v for v in self.region_visits if v.exit_time is None]

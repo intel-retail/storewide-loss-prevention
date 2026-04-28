@@ -197,6 +197,12 @@ async def lifespan(app: FastAPI):
             if camera_name not in session.current_cameras:
                 continue
 
+            # Skip until SceneScape has confirmed the identity. Frames for
+            # transient/flickering tracks would otherwise pollute the
+            # behavioral-frames bucket with ghost folders.
+            if session.reid_state and session.reid_state != "matched":
+                continue
+
             # Check if person is currently in any HIGH_VALUE zone
             in_high_value = False
             for zone_id in session.current_zones:
