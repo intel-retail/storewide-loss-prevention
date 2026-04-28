@@ -6,17 +6,19 @@
 # Variable substitution: ${var_name:default} resolves from the "variables"
 # section below, with environment overrides (RULES_VARIABLES) taking priority.
 
-# Runtime settings consumed by swlp-service.
+# Runtime settings consumed by swlp-service (non-rule knobs).
 settings:
   session_timeout_seconds: 90
-  loiter_threshold_seconds: 5
   behavioural_analysis_fps: 5
 
-# Default variable values — used in condition ${var:default} placeholders.
-# Can be overridden at runtime via RULES_VARIABLES env var (JSON).
+# Default variable values used by the rule engine for ${var:default}
+# placeholders in the rules below. Can be overridden at runtime via the
+# RULES_VARIABLES env var (JSON). This is also the single source of truth
+# for the loiter threshold — swlp-service reads it from here so the
+# pre-filter and the loitering rule always agree.
 variables:
   repeat_visit_threshold: 4
-  loiter_threshold_seconds: 20
+  loiter_threshold_seconds: 10
 
 # Session flags — configurable boolean flags set on PersonSession at runtime.
 # Each flag is auto-set based on its trigger type:

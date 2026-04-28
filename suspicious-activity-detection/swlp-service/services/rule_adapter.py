@@ -53,6 +53,15 @@ class RuleEngineAdapter:
 
         rules_cfg = config.get_rules_config()
         self._loiter_threshold = float(rules_cfg.get("loiter_threshold_seconds", 20))
+        # Per-zone cooldown across sessions — guards against alert flooding
+        # when SceneScape track IDs churn (each new track creates a fresh
+        # PersonSession with empty `loiter_alerted`, so per-session dedup
+        # alone isn't enough).
+        self._loiter_cooldown_seconds = float(
+            rules_cfg.get("loiter_cooldown_seconds", 60)
+        )
+        # (scene_id, region_id) -> last alert epoch seconds
+        self._last_loiter_alert_at: dict[tuple[str, str], float] = {}
         self._pending_cleanups: set[str] = set()  # "{object_id}:{region_id}"
 
         # Config-driven session flags: {flag_name: {trigger, zone_type, ...}}
@@ -136,12 +145,24 @@ class RuleEngineAdapter:
                 )
 
         elif event.event_type == EventType.LOITER:
-            # Continuous region-data feed signalled the person has been in
-            # the zone long enough. Dedup here so the rule engine doesn't
-            # re-fire on every subsequent region-data tick.
+            # Continuous region-data feed signalled the person is in
+            # the zone. Skip if we've already alerted for this visit;
+            # the post-fire set in `_execute_alert` is the authoritative
+            # dedup point — DO NOT set the flag here, otherwise we gate
+            # ourselves out before the rule engine evaluates the
+            # threshold (early ticks have dwell < threshold and would
+            # mark the zone as alerted without firing).
             if session.loiter_alerted.get(event.region_id):
                 return
-            session.loiter_alerted[event.region_id] = True
+            # Cross-session per-zone cooldown — defends against track-id
+            # churn creating multiple sessions for the same physical
+            # person and re-firing the alert on each one.
+            now_epoch = event.timestamp.timestamp()
+            last = self._last_loiter_alert_at.get(
+                (event.scene_id, event.region_id)
+            )
+            if last is not None and (now_epoch - last) < self._loiter_cooldown_seconds:
+                return
 
         # ---- Map event_type to rule trigger string ----
         trigger_map = {
@@ -253,13 +274,20 @@ class RuleEngineAdapter:
             object_id=event.object_id,
             region=event.region_name,
         )
-        await self._fire_alert(alert)
 
-        # Mark as fired for dedup
+        # Mark as fired for dedup BEFORE the await on _fire_alert.
+        # Otherwise concurrent LOITER events (the scene_data stream emits
+        # one per frame, ~5/s) all pass the dedup gate while the first
+        # alert HTTP POST is in flight and a flood of duplicates fires.
         if alert_type == AlertType.LOITERING:
             session.loiter_alerted[event.region_id] = True
+            self._last_loiter_alert_at[(event.scene_id, event.region_id)] = (
+                event.timestamp.timestamp()
+            )
         if alert_type == AlertType.REPEATED_VISIT:
             session.repeated_visit_alerted[event.region_id] = True
+
+        await self._fire_alert(alert)
 
     @staticmethod
     def _build_details(
