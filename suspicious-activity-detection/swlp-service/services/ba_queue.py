@@ -24,32 +24,59 @@ BA_RESULT_TOPIC = "ba/results"
 
 class BAQueuePublisher:
     """
-    Publishes BA analysis requests to MQTT topic ba/requests.
+    Publishes BA visit lifecycle events to MQTT topic ba/requests.
 
-    Uses the existing MQTTService instance (already connected to the broker).
+    A visit is bracketed by two messages:
+      - ``action="start"`` published once when the person enters a HV zone
+      - ``action="exit"``  published once when the visit ends
+
+    Between those messages, frames stream into the SeaweedFS bucket; the
+    behavioral-analysis service polls that bucket and emits as many
+    ``ba/results`` messages as concealment events it observes.
     """
 
     def __init__(self, mqtt_service) -> None:
         self._mqtt = mqtt_service
 
-    def publish_request(
-        self, person_id: str, region_id: str, entry_timestamp: str,
-        scene_id: str = "",
-    ) -> None:
-        """Publish an analysis request for a person in a HIGH_VALUE zone."""
+    def _publish(self, action: str, person_id: str, region_id: str,
+                 entry_timestamp: str, scene_id: str) -> None:
         payload = {
+            "action": action,
             "person_id": person_id,
             "region_id": region_id,
             "entry_timestamp": entry_timestamp,
             "scene_id": scene_id,
         }
         self._mqtt.publish(BA_REQUEST_TOPIC, payload)
-        logger.debug(
-            "Published BA request",
+        logger.info(
+            "Published BA lifecycle event",
+            action=action,
             person_id=person_id,
             region_id=region_id,
             scene_id=scene_id,
         )
+
+    def publish_start(
+        self, person_id: str, region_id: str, entry_timestamp: str,
+        scene_id: str = "",
+    ) -> None:
+        """Notify BA service that a visit has begun; it should start polling."""
+        self._publish("start", person_id, region_id, entry_timestamp, scene_id)
+
+    def publish_exit(
+        self, person_id: str, region_id: str, entry_timestamp: str,
+        scene_id: str = "",
+    ) -> None:
+        """Notify BA service that the visit has ended; it should stop polling."""
+        self._publish("exit", person_id, region_id, entry_timestamp, scene_id)
+
+    # Legacy alias kept for backward compatibility with any caller still
+    # publishing one-shot analysis requests.
+    def publish_request(
+        self, person_id: str, region_id: str, entry_timestamp: str,
+        scene_id: str = "",
+    ) -> None:
+        self.publish_start(person_id, region_id, entry_timestamp, scene_id)
 
 
 class BAQueueConsumer:

@@ -10,8 +10,9 @@
 settings:
   session_timeout_seconds: 90
   loiter_threshold_seconds: 5
-  behavioural_analysis_fps: 10
-  ba_poll_interval_seconds: 1
+  behavioural_analysis_fps: 5
+  # ba_poll_interval_seconds removed: BA service now drives its own
+  # bucket-poll cadence (see behavioral-analysis visit_poll_interval).
 
 # Default variable values — used in condition ${var:default} placeholders.
 # Can be overridden at runtime via RULES_VARIABLES env var (JSON).

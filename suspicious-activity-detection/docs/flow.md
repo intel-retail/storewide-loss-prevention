@@ -1,153 +1,133 @@
 # End-to-End Flow: HIGH_VALUE Zone Visit
 
 This document traces a single person's visit to a HIGH_VALUE zone through every
-MQTT topic, handler, and service in `swlp-service`.
+MQTT topic, handler, and service.
 
-## MQTT Subscriptions (set up at startup)
+## MQTT Subscriptions
 
-| Topic | Handler | Defined in |
+| Topic | Subscriber | Handler |
 |---|---|---|
-| `scenescape/data/scene/+/+` | `SessionManager.on_scene_data` | `services/mqtt_service.py` |
-| `scenescape/event/region/+/+/+` | `SessionManager.on_region_event` | |
-| `scenescape/data/region/+/+` | `SessionManager.on_region_data` | |
-| `scenescape/data/camera/+` | `on_camera_image` (closure in `main.py`) | |
-| `ba/results` | `BAQueueConsumer._handle_ba_result` | `services/ba_queue.py` |
+| `scenescape/data/scene/+/+` | swlp-service | `SessionManager.on_scene_data` |
+| `scenescape/event/region/+/+/+` | swlp-service | `SessionManager.on_region_event` |
+| `scenescape/data/region/+/+` | swlp-service | `SessionManager.on_region_data` |
+| `scenescape/data/camera/+` | swlp-service | `on_camera_image` (in `main.py`) |
+| `ba/requests` | behavioral-analysis | `BAQueueConsumer._on_message` |
+| `ba/results` | swlp-service | `RuleEngineAdapter._handle_ba_result` |
 
 ## MQTT Publications
 
-| Topic | Direction | Publisher |
-|---|---|---|
-| `scenescape/cmd/camera/{cam}` | swlp → camera | `BehavioralAnalysisOrchestrator` |
-| `ba/requests` | swlp → BA service | `BAQueuePublisher` |
-| `alerts/{type}` | swlp → UI | `AlertServiceClient` |
+| Topic | Direction | Publisher | Cardinality |
+|---|---|---|---|
+| `scenescape/cmd/camera/{cam}` | swlp → camera | `BAOrchestrator` | every tick (5–10 Hz) |
+| `ba/requests` action="start" | swlp → BA | `BAQueuePublisher.publish_start` | once per visit |
+| `ba/requests` action="exit"  | swlp → BA | `BAQueuePublisher.publish_exit`  | once per visit |
+| `ba/results` | BA → swlp | per-visit polling worker | one per detected event |
+| `alerts/{type}` | swlp → UI | `AlertServiceClient` | per alert |
 
 ---
 
-## Timeline of One Visit
+## Lifecycle of a Visit
 
-### T=0.0s — Person enters store (not yet in HV zone)
+```
+T=0.0s   Person enters store
+         IN  scenescape/data/scene/{scene}/person
+         → SessionManager creates PersonSession
+           reid_state = "pending_collection"
 
-- **IN** `scenescape/data/scene/{scene}/person` (every frame, ~10 Hz)
-  - `SessionManager.on_scene_data`
-    - Creates `PersonSession`, `reid_state="pending_collection"`
-    - Resolves canonical UUID via `previous_ids_chain` (collapses re-id flicker)
+T=1–3s   Re-id settles; reid_state -> "matched"
 
-### T≈1–3s — Re-id settles
+T=5.0s   Person crosses HV zone boundary
+         IN  scenescape/event/region/{scene}/{region}/count
+         → SessionManager._fire_enter
+              session.current_zones[region] = entry_iso
+              emits ENTERED event
+         → RuleEngineAdapter.on_event
+              evaluates rule "behavioral_analysis"
+              executes "escalate" → ba_orchestrator.start()
 
-- **IN** `scenescape/data/scene/{scene}/person`
-  - `reid_state` flips to `"matched"`
-  - Session is now real; visible in `/sessions` API
+T≥5.0s   BA orchestrator task runs (one per visit)
+         OUT scenescape/cmd/camera/{cam}  payload="getimage"   (every 1/fps s)
+         IN  scenescape/data/camera/{cam}                       (camera reply)
+         → on_camera_image
+         → frame_mgr.store_person_frame()
+              writes to behavioral-frames bucket
+              key: {scene}/{oid}/{region}/{entry_ts}/frames/{ts_ms}.jpg
+         OUT ba/requests action="start"                         (ONCE)
+              {person_id, region_id, entry_timestamp, scene_id}
+         → behavioral-analysis spawns a per-visit polling worker
 
-### T=5s — Person crosses HV zone boundary
+T≥6.0s   BA polling worker (in behavioral-analysis service)
+         every visit_poll_interval (1 s):
+            list bucket prefix {scene}/{oid}/{region}/{entry_ts}/frames/
+            collect frames newer than internal watermark
+            if new_count >= min_frames_for_detection:
+              extract poses (YOLO-Pose / RTMPose)
+              run pattern detection
+              if matched: call VLM
+              OUT ba/results
+                  {status: "suspicious"|"no_match", confidence,
+                   vlm_response, frames_analyzed}
+              advance watermark to newest analysed frame
 
-- **IN** `scenescape/event/region/{scene}/{region}/count` (one-shot)
-  - `SessionManager.on_region_event` with `entered: [...]`
-  - `SessionManager._fire_enter`
-    - Records `RegionVisit(entry_time)`
-    - `session.current_zones[region] = entry_iso`
-    - Emits `ENTERED` event
-  - `RuleEngineAdapter.on_event`
-    - Sets flag `visited_high_value = True`
-    - Rule `behavioral_analysis` fires → `escalate` action
-    - `ba_orchestrator.start(person, region, scene)`
+T≥6.0s   Concealment alert (when ba/results status="suspicious")
+         IN  ba/results
+         → RuleEngineAdapter._handle_ba_result
+              evaluates rule "concealment_detected"
+              executes "alert" CONCEALMENT
+         OUT alerts/concealment
 
-### T≥5s — Orchestrator loop runs (1 task per visit, 5 Hz)
+         (Multiple suspicious verdicts per visit are allowed -- the worker
+          keeps polling; new concealment events fire additional alerts.)
 
-- **OUT** `scenescape/cmd/camera/{cam}` payload `getimage`
-  - Skipped during first 2 s (`ba_initial_delay`)
-  - Skipped while `reid_state != "matched"`
+T≥5.0s   Continuous loiter detection (separate from BA)
+         IN  scenescape/data/region/{scene}/{region}
+         → SessionManager.on_region_data emits LOITER events with dwell
+         → rule "loitering" fires LOITERING alert when dwell > threshold
 
-### T≥5s — Per-frame camera reply
+T=40s    Person leaves HV zone
+         IN  scenescape/event/region/{scene}/{region}/count  (exited list)
+         → SessionManager._fire_exit
+         → RuleEngineAdapter.on_event handles EXITED
+              calls ba_orchestrator.stop(object_id, region_id)
+              → cancels the visit task; finally-block publishes
+         OUT ba/requests action="exit"                          (ONCE)
+              {person_id, region_id, entry_timestamp, scene_id}
+         → behavioral-analysis cancels the per-visit polling worker
 
-- **IN** `scenescape/data/camera/{cam}` (JPEG base64)
-  - `on_camera_image` (in `main.py`)
-    - Guard: `session.reid_state == "matched"` and person in HV zone
-    - `frame_mgr.store_person_frame()` writes to:
-      - `loss-prevention-frames/{scene}/{oid}/{ts}.jpg` (rolling buffer)
-      - `behavioral-frames/{scene}/{oid}/{region}/{entry_ts}/frames/{ts_ms}.jpg`
+T=130s   Session timeout (last_seen > session_timeout_seconds)
+         → SessionManager._expire_session
+              emits PERSON_LOST
+         → ba_orchestrator.stop_all()
+              cancels any remaining tasks; each emits its exit message
+```
 
-### T≥5s — Continuous region data (every frame)
-
-- **IN** `scenescape/data/region/{scene}/{region}`
-  - `SessionManager.on_region_data`
-    - Reads SceneScape's `dwell` for this person
-    - Emits `LOITER` event with `dwell_seconds`
-  - `RuleEngineAdapter` evaluates `loitering` rule
-    - Condition: `dwell_seconds > 20`
-    - Once true: `LOITERING` alert fires (deduped per region)
-
-### T=7s — BA request (after `ba_initial_delay`)
-
-- **OUT** `ba/requests`
-  ```json
-  {"person_id": "...", "region_id": "...",
-   "entry_timestamp": "...", "scene_id": "..."}
-  ```
-  - BA service consumes, reads `behavioral-frames` bucket, runs VLM,
-    publishes result.
-
-### T=8s — BA result
-
-- **IN** `ba/results`
-  - `BAQueueConsumer._handle_ba_result`
-  - If `status == "suspicious"`: fires `CONCEALMENT` alert
-  - `session.ba_alerted[region] = True` → orchestrator self-terminates
-
-### T=25s — Loiter threshold crossed
-
-- Triggered by ongoing `region_data` ticks
-- **OUT** `alerts/loitering` via `AlertServiceClient`
-
-### T=40s — Person leaves HV zone
-
-- **IN** `scenescape/event/region/{scene}/{region}/count`
-  - `SessionManager.on_region_event` with `exited: [...]`
-  - `SessionManager._fire_exit`
-    - Closes `RegionVisit(exit_time, dwell)`
-    - `session.current_zones.pop(region)`
-    - Emits `EXITED` event
-  - `RuleEngineAdapter.on_event`
-    - Iterates `_service_registry` → `ba_orchestrator.stop()` (no-op,
-      task self-terminates after `absence_grace`)
-    - `_deferred_frame_cleanup` scheduled (currently disabled)
-
-### T≈40–45s — Orchestrator task self-terminates
-
-- `_run()` sees `region_id not in current_zones`
-- Waits `absence_grace` (5 s) — survives flicker
-- Returns; task removed from `_tasks` dict
-
-### T=130s — Person exits store / absent
-
-- `SessionManager.run_expiry_loop` notices `last_seen > 90 s` ago
-- `_expire_session`
-  - Closes any open visits → emits `EXITED` defensively
-  - Emits `PERSON_LOST` → `ba_orchestrator.stop_all()`
-  - Deletes `_sessions[skey]`
-  - Prunes `_oid_alias` entries
-
----
-
-## Key Handlers Per File
+## Key Files
 
 | File | Function | Responsibility |
 |---|---|---|
-| `main.py` | `on_camera_image` | Writes JPEGs to S3 (gated on `reid_state == "matched"`) |
-| `services/session_manager.py` | `on_scene_data` | Session lifecycle, `reid_state` promotion |
-| `services/session_manager.py` | `on_region_event` | `ENTERED` / `EXITED` |
-| `services/session_manager.py` | `on_region_data` | `LOITER` (continuous) |
-| `services/rule_adapter.py` | `on_event` | Rule evaluation + escalation |
-| `services/ba_orchestrator.py` | `_run` | Per-visit `getimage` + `ba/requests` loop |
-| `services/ba_queue.py` | `BAQueueConsumer` | Consumes `ba/results`, fires alerts |
+| swlp-service `main.py` | `on_camera_image` | Writes JPEGs to bucket (gated on `reid_state == "matched"`) |
+| swlp-service `services/session_manager.py` | `on_scene_data` / `on_region_event` / `on_region_data` | Session lifecycle, ENTERED/EXITED, LOITER |
+| swlp-service `services/rule_adapter.py` | `on_event`, `_handle_ba_result` | Rule evaluation + escalation; multiple BA verdicts per visit allowed |
+| swlp-service `services/ba_orchestrator.py` | `_run` | Per-visit `getimage` capture loop; publishes `start`/`exit` lifecycle events |
+| swlp-service `services/ba_queue.py` | `BAQueuePublisher` | `publish_start` / `publish_exit` |
+| behavioral-analysis `src/ba_queue.py` | `BAQueueConsumer._run_worker` | Per-visit bucket polling + analysis loop |
 
----
+## Why Polling Lives on the BA Side
 
-## reid_state Gates (Why They Exist)
+The behavioural-analysis service is the only party that knows when "enough new
+frames" have arrived to make analysis meaningful. Inverting the cadence to live
+there:
 
-Frame writes and BA requests are gated on `session.reid_state == "matched"`
-to avoid creating ghost folders in the `behavioral-frames` bucket and
-spurious VLM calls for short-lived flickering tracks.
+* swlp-service publishes only two MQTT messages per visit (start/exit) instead
+  of one per second.
+* BA decides when to run pose+VLM based on data readiness, not on a timer set
+  by an upstream service.
+* Multiple discrete concealment events in the same visit each produce their
+  own alert without needing time-cooldown logic.
 
-Trade-off: the first 1–3 s of footage after zone entry are dropped
-(person walking in). Concealment behaviour is observed afterward, so
-this is acceptable.
+## reid_state Gate
+
+Frame writes are gated on `session.reid_state == "matched"` to avoid creating
+ghost folders in the bucket for short-lived flickering tracks. Trade-off:
+the first 1–3 s of footage after zone entry are dropped (person walking in).
+Concealment is observed afterward, so this is acceptable.
