@@ -190,8 +190,9 @@ class FrameManager:
     # ---- Cleanup -------------------------------------------------------------
     def cleanup_person(self, object_id: str, scene_id: Optional[str] = None) -> None:
         """
-        Remove all frames for a person (called after exit_retention_seconds
-        or session expiry).  Cleans both evidence and behavioral-frames buckets.
+        Remove ALL frames for a person across every visit (called on session
+        expiry / PERSON_LOST). Use ``cleanup_visit`` for per-visit cleanup
+        on zone EXIT.
         """
         keys = self._person_keys.pop(object_id, [])
         ba_keys = self._person_ba_keys.pop(object_id, [])
@@ -202,6 +203,68 @@ class FrameManager:
         self._delete_prefix(prefix, bucket=self.BA_BUCKET)
         if keys:
             logger.info("Cleaned up person frames", object_id=object_id, count=len(keys))
+
+    def cleanup_visit(
+        self,
+        object_id: str,
+        region_id: str,
+        entry_timestamp: str,
+        scene_id: Optional[str] = None,
+    ) -> None:
+        """
+        Remove ONLY this visit's behavioral-frames prefix:
+            {scene_id}/{object_id}/{region_id}/{entry_folder}/
+
+        Other visits (different entry_timestamp) for the same person and
+        region remain intact, so the BA service can still process them.
+        Rolling-buffer keys in the LP bucket are person-wide and not
+        touched here — they age out naturally via the ROLLING_BUFFER_SIZE
+        eviction in ``store_person_frame``.
+        """
+        if not entry_timestamp:
+            logger.warning(
+                "cleanup_visit called without entry_timestamp — skipping",
+                object_id=object_id,
+                region_id=region_id,
+            )
+            return
+        # Mirror the entry_folder transform used by store_person_frame so
+        # the prefix matches what was actually written.
+        entry_folder = (
+            entry_timestamp.replace(":", "").replace("-", "").split("+")[0].split(".")[0]
+        )
+        person_prefix = f"{scene_id}/{object_id}" if scene_id else object_id
+        prefix = f"{person_prefix}/{region_id}/{entry_folder}/"
+        logger.info(
+            "cleanup_visit start",
+            object_id=object_id,
+            region_id=region_id,
+            entry_timestamp=entry_timestamp,
+            scene_id=scene_id,
+            bucket=self.BA_BUCKET,
+            prefix=prefix,
+        )
+        deleted = self._delete_prefix(prefix, bucket=self.BA_BUCKET)
+        # Forget any tracked BA keys that fell under this prefix so the
+        # in-memory list doesn't grow unbounded across visits.
+        ba_keys = self._person_ba_keys.get(object_id, [])
+        if ba_keys:
+            kept = [k for k in ba_keys if not k.startswith(prefix)]
+            self._person_ba_keys[object_id] = kept
+            logger.info(
+                "cleanup_visit pruned in-memory key list",
+                object_id=object_id,
+                before=len(ba_keys),
+                after=len(kept),
+            )
+        logger.info(
+            "cleanup_visit done",
+            object_id=object_id,
+            region_id=region_id,
+            entry_timestamp=entry_timestamp,
+            prefix=prefix,
+            deleted=deleted,
+        )
 
     def cleanup_person_frames_deferred(self, object_id: str) -> List[str]:
         """
@@ -250,14 +313,43 @@ class FrameManager:
         except S3Error:
             logger.debug("SeaweedFS delete miss", key=key)
 
-    def _delete_prefix(self, prefix: str, bucket: Optional[str] = None) -> None:
-        """Delete all objects under a prefix in the given bucket."""
+    def _delete_prefix(self, prefix: str, bucket: Optional[str] = None) -> int:
+        """Delete all objects under a prefix in the given bucket.
+
+        Returns the number of objects successfully removed.
+        """
         if not self.client:
-            return
+            return 0
         bucket = bucket or self.BUCKET
+        deleted = 0
+        failed = 0
         try:
-            objects = self.client.list_objects(bucket, prefix=prefix, recursive=True)
+            objects = list(
+                self.client.list_objects(bucket, prefix=prefix, recursive=True)
+            )
             for obj in objects:
-                self.client.remove_object(bucket, obj.object_name)
+                try:
+                    self.client.remove_object(bucket, obj.object_name)
+                    deleted += 1
+                except S3Error:
+                    failed += 1
+                    logger.warning(
+                        "SeaweedFS object delete failed",
+                        bucket=bucket,
+                        key=obj.object_name,
+                    )
+            logger.info(
+                "_delete_prefix complete",
+                bucket=bucket,
+                prefix=prefix,
+                listed=len(objects),
+                deleted=deleted,
+                failed=failed,
+            )
         except S3Error:
-            logger.debug("SeaweedFS prefix delete miss", prefix=prefix, bucket=bucket)
+            logger.exception(
+                "SeaweedFS list_objects failed during prefix delete",
+                bucket=bucket,
+                prefix=prefix,
+            )
+        return deleted

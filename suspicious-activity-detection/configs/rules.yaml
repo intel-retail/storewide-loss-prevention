@@ -18,7 +18,7 @@ settings:
 # pre-filter and the loitering rule always agree.
 variables:
   repeat_visit_threshold: 4
-  loiter_threshold_seconds: 10
+  loiter_threshold_seconds: 5
 
 # Session flags — configurable boolean flags set on PersonSession at runtime.
 # Each flag is auto-set based on its trigger type:

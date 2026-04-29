@@ -408,6 +408,9 @@ class SessionManager:
                     timestamp=now,
                     scene_id=session.scene_id,
                     dwell_seconds=visit.duration_seconds,
+                    entry_timestamp=(
+                        visit.entry_time.isoformat() if visit.entry_time else ""
+                    ),
                 )
                 await self._emit(event)
 
@@ -502,6 +505,10 @@ class SessionManager:
         # Use SceneScape's dwell time if provided, otherwise fall back to local calc
         dwell = dwell_override if dwell_override is not None else (visit.duration_seconds if visit else 0.0)
 
+        # Capture entry timestamp BEFORE exit_zone() drops it from current_zones,
+        # so downstream consumers (frame cleanup) can scope work to this visit.
+        entry_ts_iso = session.current_zones.get(region_id, "")
+
         # Update current_zones
         session.exit_zone(region_id)
 
@@ -514,6 +521,7 @@ class SessionManager:
             timestamp=now,
             scene_id=session.scene_id,
             dwell_seconds=dwell,
+            entry_timestamp=entry_ts_iso,
         )
         await self._emit(event)
 

@@ -53,15 +53,6 @@ class RuleEngineAdapter:
 
         rules_cfg = config.get_rules_config()
         self._loiter_threshold = float(rules_cfg.get("loiter_threshold_seconds", 20))
-        # Per-zone cooldown across sessions — guards against alert flooding
-        # when SceneScape track IDs churn (each new track creates a fresh
-        # PersonSession with empty `loiter_alerted`, so per-session dedup
-        # alone isn't enough).
-        self._loiter_cooldown_seconds = float(
-            rules_cfg.get("loiter_cooldown_seconds", 60)
-        )
-        # (scene_id, region_id) -> last alert epoch seconds
-        self._last_loiter_alert_at: dict[tuple[str, str], float] = {}
         self._pending_cleanups: set[str] = set()  # "{object_id}:{region_id}"
 
         # Config-driven session flags: {flag_name: {trigger, zone_type, ...}}
@@ -135,12 +126,17 @@ class RuleEngineAdapter:
             # Stop any escalation services that were started for this zone
             for svc in self._service_registry.values():
                 svc.stop(event.object_id, event.region_id)
-            cleanup_key = f"{event.object_id}:{event.region_id}"
+            cleanup_key = f"{event.object_id}:{event.region_id}:{event.entry_timestamp or ''}"
             if cleanup_key not in self._pending_cleanups:
                 self._pending_cleanups.add(cleanup_key)
                 asyncio.create_task(
                     self._deferred_frame_cleanup(
-                        event.object_id, event.region_id, event.region_name, event.dwell_seconds,
+                        event.object_id,
+                        event.region_id,
+                        event.region_name,
+                        event.dwell_seconds,
+                        event.scene_id,
+                        event.entry_timestamp,
                     )
                 )
 
@@ -153,15 +149,6 @@ class RuleEngineAdapter:
             # threshold (early ticks have dwell < threshold and would
             # mark the zone as alerted without firing).
             if session.loiter_alerted.get(event.region_id):
-                return
-            # Cross-session per-zone cooldown — defends against track-id
-            # churn creating multiple sessions for the same physical
-            # person and re-firing the alert on each one.
-            now_epoch = event.timestamp.timestamp()
-            last = self._last_loiter_alert_at.get(
-                (event.scene_id, event.region_id)
-            )
-            if last is not None and (now_epoch - last) < self._loiter_cooldown_seconds:
                 return
 
         # ---- Map event_type to rule trigger string ----
@@ -281,9 +268,6 @@ class RuleEngineAdapter:
         # alert HTTP POST is in flight and a flood of duplicates fires.
         if alert_type == AlertType.LOITERING:
             session.loiter_alerted[event.region_id] = True
-            self._last_loiter_alert_at[(event.scene_id, event.region_id)] = (
-                event.timestamp.timestamp()
-            )
         if alert_type == AlertType.REPEATED_VISIT:
             session.repeated_visit_alerted[event.region_id] = True
 
@@ -324,17 +308,83 @@ class RuleEngineAdapter:
     # ---- Deferred frame cleanup on HIGH_VALUE zone exit ----------------------
 
     async def _deferred_frame_cleanup(
-        self, object_id: str, region_id: str, region_name: str, dwell: float,
+        self,
+        object_id: str,
+        region_id: str,
+        region_name: str,
+        dwell: float,
+        scene_id: str | None = None,
+        entry_timestamp: str | None = None,
     ) -> None:
-        """Cleanup disabled for now."""
-        logger.info(
-            "HIGH_VALUE zone exited — cleanup DISABLED",
-            object_id=object_id,
-            region=region_name,
-            dwell=dwell,
-        )
-        cleanup_key = f"{object_id}:{region_id}"
-        self._pending_cleanups.discard(cleanup_key)
+        """Wait `exit_retention_seconds`, then drop this visit's frames
+        from the behavioral-frames bucket.
+
+        Per-visit scope: only the prefix for this specific
+        ``(scene_id, object_id, region_id, entry_timestamp)`` is removed.
+        Other concurrent / later visits by the same person are untouched
+        so the BA service can keep processing them.
+
+        The retention delay gives any in-flight alert path time to grab
+        evidence keys via `frame_mgr.get_person_frame_keys`.
+        """
+        cleanup_key = f"{object_id}:{region_id}:{entry_timestamp or ''}"
+        try:
+            if not self._frame_mgr:
+                logger.info(
+                    "HIGH_VALUE zone exited — no frame_mgr, skip cleanup",
+                    object_id=object_id,
+                    region=region_name,
+                    dwell=dwell,
+                )
+                return
+            if not entry_timestamp:
+                logger.info(
+                    "HIGH_VALUE zone exited — no entry_timestamp, skip cleanup",
+                    object_id=object_id,
+                    region=region_name,
+                )
+                return
+
+            retention = float(
+                getattr(self._frame_mgr, "exit_retention_seconds", 60)
+            )
+            logger.info(
+                "HIGH_VALUE zone exited — cleanup scheduled",
+                object_id=object_id,
+                scene_id=scene_id,
+                region_id=region_id,
+                region=region_name,
+                dwell=dwell,
+                entry_timestamp=entry_timestamp,
+                retention_seconds=retention,
+            )
+            await asyncio.sleep(retention)
+
+            # MinIO/S3 calls are blocking; push them off the event loop.
+            await asyncio.to_thread(
+                self._frame_mgr.cleanup_visit,
+                object_id,
+                region_id,
+                entry_timestamp,
+                scene_id,
+            )
+            logger.info(
+                "HIGH_VALUE zone exit cleanup complete",
+                object_id=object_id,
+                scene_id=scene_id,
+                region_id=region_id,
+                region=region_name,
+                entry_timestamp=entry_timestamp,
+            )
+        except Exception:
+            logger.exception(
+                "Frame cleanup failed",
+                object_id=object_id,
+                region_id=region_id,
+                entry_timestamp=entry_timestamp,
+            )
+        finally:
+            self._pending_cleanups.discard(cleanup_key)
 
     # ---- PERSON_LOST handler -------------------------------------------------
 

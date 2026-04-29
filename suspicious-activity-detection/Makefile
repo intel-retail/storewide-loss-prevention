@@ -49,6 +49,7 @@ demo:
 .PHONY: down
 down:
 	-$(COMPOSE_ALL) down
+	-docker volume rm storewide-lp_seaweedfs-data 2>/dev/null || true
 	@rm -f application.log
 
 # SceneScape only (without LP services)

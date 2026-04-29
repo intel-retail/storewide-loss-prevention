@@ -34,3 +34,7 @@ class RegionEvent:
     scene_id: str = ""  # SceneScape scene UUID
     dwell_seconds: Optional[float] = None   # populated on EXIT
     minio_thumbnail_key: Optional[str] = None
+    # ISO timestamp of when the person entered this region; populated on
+    # EXITED so consumers can scope per-visit work (e.g. frame cleanup
+    # only for this visit's bucket prefix, not all of the person's visits).
+    entry_timestamp: Optional[str] = None
