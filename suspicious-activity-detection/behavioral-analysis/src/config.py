@@ -23,15 +23,8 @@ class Settings(BaseSettings):
     pose_confidence_threshold: float = 0.5
 
     # Pose model settings
-    yolo_pose_model: str = "/models/yolo_models/yolo11n-pose/yolo11n-pose.xml"
+    yolo_pose_model: str = "/models/yolo_models/yolo26n-pose/yolo26n-pose.xml"
     gst_inference_device: str = "CPU"
-
-    # Legacy GStreamer settings (kept for backwards compatibility)
-    person_detector_model: str = "/omz_models/intel/person-detection-retail-0013/FP32/person-detection-retail-0013.xml"
-    rtmpose_model: str = "/models/rtmpose_models/rtmpose/rtmpose.xml"
-    gvapython_module: str = "/app/src/pose_logger_rtmpose.py"
-    gst_detect_threshold: float = 0.15
-    gst_pipeline_timeout: int = 120
 
     # Frame analysis settings
     min_frames_for_detection: int = 3
@@ -49,7 +42,7 @@ class Settings(BaseSettings):
     vlm_endpoint: str = "http://ovms-vlm:8001"
     vlm_model_name: str = "Qwen/Qwen2.5-VL-7B-Instruct"
     vlm_enabled: bool = True
-    vlm_timeout: float = 60.0
+    vlm_timeout: float = 120.0
     vlm_max_tokens: int = 500
     vlm_temperature: float = 0.1
     vlm_max_image_size: int = 512
