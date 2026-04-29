@@ -38,7 +38,7 @@ The initial feature set of the application is now available:
   - Loitering (per-zone dedup)
   - Repeated Visits (per-session dedup)
   - Restricted Zone Violation
-- **Behavioral Analysis Service** with RTMPose pre-filter and Qwen2.5-VL
+- **Behavioral Analysis Service** with YOLO pose pre-filter and Qwen2.5-VL
   inference; CPU, GPU, and NPU device targets supported via `VLM_DEVICE`.
 - **Per-visit BA frame lifecycle** with explicit request/result accounting:
   - Frames live under

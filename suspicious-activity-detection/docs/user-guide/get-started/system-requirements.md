@@ -85,8 +85,8 @@ inputs or outputs:
   - **Target devices:** Intel CPU or GPU via OpenVINO (`REID_DEVICE`).
 
 - **Pose Estimation (Behavioral Analysis pre-filter):**
-  - **Model:** RTMPose, converted to OpenVINO IR
-    (`/models/rtmpose_models/`).
+  - **Model:** YOLO pose model, converted to OpenVINO IR
+    (`/models/yolo_models/`).
   - **Input:** Cropped person frames from a HIGH_VALUE-zone visit.
   - **Output:** 2D keypoints used to detect hand-near-body or pocket-region
     interactions; non-suspicious frames short-circuit and emit a `no_match`
