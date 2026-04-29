@@ -4,8 +4,7 @@
 Pose Analyzer
 
 Detects suspicious activity patterns from pose sequences.
-Pose extraction is handled by the GStreamer DL Streamer pipeline
-(gvadetect + gvainference + gvapython with pose_logger_rtmpose.py).
+Pose extraction is handled by the YOLO pose pipeline.
 When a pose pattern matches, optionally sends frames to VLM for confirmation.
 The service is generic — patterns and prompts are loaded from config.
 """

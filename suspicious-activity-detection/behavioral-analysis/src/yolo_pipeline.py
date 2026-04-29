@@ -4,7 +4,7 @@
 YOLO-Pose pipeline runner for pose extraction.
 
 Pure-Python replacement for the GStreamer DL Streamer pipeline.
-Uses YOLOv11n-pose via OpenVINO for single-stage person detection + keypoint
+Uses YOLO26n-pose via OpenVINO for single-stage person detection + keypoint
 estimation.  Returns extracted poses — pattern detection and VLM confirmation
 are handled by the caller via a single PoseAnalyzer instance.
 """
