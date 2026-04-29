@@ -7,7 +7,7 @@ Consumes three SceneScape MQTT feeds:
   1. scene-data    (scenescape/data/scene/+/+)    — position updates, camera visibility
   2. region-events (scenescape/event/region/+/+/+) — native ENTERED / EXITED with dwell
   3. region-data   (scenescape/data/region/+/+)    — continuous per-frame object presence
-     for real-time loiter detection (dwell computed from SceneScape's entry timestamps)
+     for real-time loiter detection (drives the LOITER event used by rules.yaml).
 """
 
 import asyncio
@@ -198,52 +198,6 @@ class SessionManager:
                 self._sessions[skey] = session
                 logger.info("Session created", object_id=oid, scene_id=scene_id,
                             reid_state=reid_state)
-
-            # Real-time loiter check using region entry timestamps from scene data
-            regions = obj.get("regions", {})
-            if regions:
-                await self._check_loiter_from_scene_data(session, regions, now)
-            else:
-                logger.debug("No regions in scene data object",
-                             object_id=oid, keys=list(obj.keys())[:10])
-
-    async def _check_loiter_from_scene_data(
-        self, session: PersonSession, regions: dict, now: datetime
-    ) -> None:
-        """Emit a LOITER event for each HIGH_VALUE region the person is in.
-
-        No threshold is applied here — the rule engine evaluates
-        rules.yaml's `loitering` rule (condition: dwell_seconds > threshold)
-        and decides whether to alert.
-        """
-        for region_id, rinfo in regions.items():
-            # Already alerted for this zone — skip
-            if session.loiter_alerted.get(region_id):
-                continue
-
-            zone_type = self.config.get_zone_type(region_id)
-            if zone_type != "HIGH_VALUE":
-                continue
-
-            if not isinstance(rinfo, dict):
-                continue
-            try:
-                dwell = float(rinfo.get("dwell", 0.0) or 0.0)
-            except (TypeError, ValueError):
-                continue
-
-            zone_name = self.config.get_zone_name(region_id) or region_id
-            event = RegionEvent(
-                event_type=EventType.LOITER,
-                object_id=session.object_id,
-                region_id=region_id,
-                region_name=zone_name,
-                zone_type=ZoneType(zone_type),
-                timestamp=now,
-                scene_id=session.scene_id,
-                dwell_seconds=round(dwell, 1),
-            )
-            await self._emit(event)
 
     # ---- region-event handler: drives ENTERED / EXITED ----------------------
     async def on_region_event(

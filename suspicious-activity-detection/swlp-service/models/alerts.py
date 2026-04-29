@@ -39,8 +39,8 @@ class Alert:
     def to_dict(self) -> Dict[str, Any]:
         return {
             "alert_id": self.alert_id,
-            "alert_type": self.alert_type.value,
-            "alert_level": self.alert_level.value,
+            "alert_type": getattr(self.alert_type, "value", self.alert_type),
+            "alert_level": getattr(self.alert_level, "value", self.alert_level),
             "object_id": self.object_id,
             "scene_id": self.scene_id,
             "timestamp": self.timestamp.isoformat(),

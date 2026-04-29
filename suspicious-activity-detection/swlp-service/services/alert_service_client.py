@@ -78,18 +78,18 @@ class AlertServiceClient:
             return None
 
         payload = {
-            "alert_type": alert.alert_type.value,
+            "alert_type": getattr(alert.alert_type, "value", alert.alert_type),
             "timestamp": alert.timestamp.isoformat(),
             "metadata": {
                 "alert_id": alert.alert_id,
                 "person_id": alert.object_id,
                 "zone_id": alert.region_id or "",
                 "zone_name": alert.region_name or "",
-                "severity": alert.alert_level.value,
+                "severity": getattr(alert.alert_level, "value", alert.alert_level),
                 **alert.details,
             },
             "payload": {
-                "severity": alert.alert_level.value,
+                "severity": getattr(alert.alert_level, "value", alert.alert_level),
                 "evidence": alert.evidence_keys,
                 **alert.details,
             },

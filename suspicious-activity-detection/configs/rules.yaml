@@ -108,6 +108,20 @@ rules:
           alert_type: CONCEALMENT
           severity: WARNING
 
+  - id: checkout_visited
+    name: Checkout Zone Visited
+    description: Person entered a CHECKOUT zone.
+    enabled: false
+    trigger:
+      event_type: zone_entry
+      zone_type: CHECKOUT
+    conditions: []
+    actions:
+      - type: alert
+        params:
+          alert_type: CHECKOUT_VISITED
+          severity: INFO
+
   - id: checkout_bypass
     name: Checkout Bypass Detection
     enabled: true
