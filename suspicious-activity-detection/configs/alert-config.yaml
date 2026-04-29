@@ -81,3 +81,21 @@ subscriptions:
       - type: mqtt
         topic: alerts/checkout_bypass
       - type: log
+
+  - alert_type: CHECKOUT_VISITED
+    dedup:
+      enabled: true
+      strategy: field_hash
+      fields:
+        - metadata.scene_id
+        - metadata.person_id
+        - metadata.zone_id
+      window_seconds: 60
+      on_missing: skip
+      hash:
+        algorithm: sha1
+        truncate: 16
+    delivery:
+      - type: mqtt
+        topic: alerts/checkout_visited
+      - type: log

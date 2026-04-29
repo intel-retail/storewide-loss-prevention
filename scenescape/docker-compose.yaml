@@ -94,7 +94,7 @@ services:
 
   # ---- SceneScape Web / Manager ----
   web:
-    image: scenescape-manager:latest
+    image:  ${SCENESCAPE_REGISTRY:-}intel/scenescape-manager:${SCENESCAPE_VERSION:-v2026.0.0}
     init: true
     networks:
       storewide-lp:
@@ -180,7 +180,7 @@ services:
 
   # ---- SceneScape Controller (tracking + analytics) ----
   scene:
-    image: scenescape-controller:latest
+    image:  ${SCENESCAPE_REGISTRY:-}intel/scenescape-controller:${SCENESCAPE_VERSION:-v2026.0.0}
     init: true
     user: "${UID:-1000}:${GID:-1000}"
     networks:

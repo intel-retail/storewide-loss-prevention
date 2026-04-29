@@ -210,8 +210,13 @@ class RuleEngineAdapter:
     async def _execute_alert(
         self, action: Action, event: RegionEvent, session
     ) -> None:
-        """Build and fire an LP Alert from a generic Action."""
-        alert_type = AlertType[action.params["alert_type"]]
+        """Build and fire an LP Alert from a generic Action.
+
+        ``alert_type`` and ``severity`` are taken verbatim from rules.yaml,
+        so adding a new rule with a new alert_type / severity does NOT
+        require editing any Python source — just YAML.
+        """
+        alert_type = action.params["alert_type"]
         severity = action.params.get("severity", "WARNING")
 
         # Concealment upgrades severity (e.g. checkout bypass → CRITICAL)
@@ -221,7 +226,7 @@ class RuleEngineAdapter:
         ):
             severity = action.params["severity_if_concealment"]
 
-        alert_level = AlertLevel[severity]
+        alert_level = severity
 
         # Dedup: one alert per zone per session for loitering and repeated-visit
         if alert_type == AlertType.LOITERING:
@@ -256,8 +261,8 @@ class RuleEngineAdapter:
         logger.warning(
             "Rule fired",
             rule_id=action.rule_id,
-            alert_type=alert_type.value,
-            level=alert_level.value,
+            alert_type=alert_type,
+            level=alert_level,
             object_id=event.object_id,
             region=event.region_name,
         )
@@ -275,7 +280,7 @@ class RuleEngineAdapter:
 
     @staticmethod
     def _build_details(
-        alert_type: AlertType, params: dict, event: RegionEvent, session
+        alert_type, params: dict, event: RegionEvent, session
     ) -> dict:
         """Build contextual details dict for the alert."""
         if alert_type == AlertType.ZONE_VIOLATION:
@@ -498,8 +503,8 @@ class RuleEngineAdapter:
         logger.warning(
             "ALERT",
             alert_id=alert.alert_id,
-            type=alert.alert_type.value,
-            level=alert.alert_level.value,
+            type=getattr(alert.alert_type, "value", alert.alert_type),
+            level=getattr(alert.alert_level, "value", alert.alert_level),
             object_id=alert.object_id,
             region=alert.region_name,
             details=alert.details,
