@@ -126,22 +126,30 @@ class RuleEngineAdapter:
             # Stop any escalation services that were started for this zone
             for svc in self._service_registry.values():
                 svc.stop(event.object_id, event.region_id)
-            cleanup_key = f"{event.object_id}:{event.region_id}"
+            cleanup_key = f"{event.object_id}:{event.region_id}:{event.entry_timestamp or ''}"
             if cleanup_key not in self._pending_cleanups:
                 self._pending_cleanups.add(cleanup_key)
                 asyncio.create_task(
                     self._deferred_frame_cleanup(
-                        event.object_id, event.region_id, event.region_name, event.dwell_seconds,
+                        event.object_id,
+                        event.region_id,
+                        event.region_name,
+                        event.dwell_seconds,
+                        event.scene_id,
+                        event.entry_timestamp,
                     )
                 )
 
         elif event.event_type == EventType.LOITER:
-            # Continuous region-data feed signalled the person has been in
-            # the zone long enough. Dedup here so the rule engine doesn't
-            # re-fire on every subsequent region-data tick.
+            # Continuous region-data feed signalled the person is in
+            # the zone. Skip if we've already alerted for this visit;
+            # the post-fire set in `_execute_alert` is the authoritative
+            # dedup point — DO NOT set the flag here, otherwise we gate
+            # ourselves out before the rule engine evaluates the
+            # threshold (early ticks have dwell < threshold and would
+            # mark the zone as alerted without firing).
             if session.loiter_alerted.get(event.region_id):
                 return
-            session.loiter_alerted[event.region_id] = True
 
         # ---- Map event_type to rule trigger string ----
         trigger_map = {
@@ -253,13 +261,17 @@ class RuleEngineAdapter:
             object_id=event.object_id,
             region=event.region_name,
         )
-        await self._fire_alert(alert)
 
-        # Mark as fired for dedup
+        # Mark as fired for dedup BEFORE the await on _fire_alert.
+        # Otherwise concurrent LOITER events (the scene_data stream emits
+        # one per frame, ~5/s) all pass the dedup gate while the first
+        # alert HTTP POST is in flight and a flood of duplicates fires.
         if alert_type == AlertType.LOITERING:
             session.loiter_alerted[event.region_id] = True
         if alert_type == AlertType.REPEATED_VISIT:
             session.repeated_visit_alerted[event.region_id] = True
+
+        await self._fire_alert(alert)
 
     @staticmethod
     def _build_details(
@@ -296,17 +308,83 @@ class RuleEngineAdapter:
     # ---- Deferred frame cleanup on HIGH_VALUE zone exit ----------------------
 
     async def _deferred_frame_cleanup(
-        self, object_id: str, region_id: str, region_name: str, dwell: float,
+        self,
+        object_id: str,
+        region_id: str,
+        region_name: str,
+        dwell: float,
+        scene_id: str | None = None,
+        entry_timestamp: str | None = None,
     ) -> None:
-        """Cleanup disabled for now."""
-        logger.info(
-            "HIGH_VALUE zone exited — cleanup DISABLED",
-            object_id=object_id,
-            region=region_name,
-            dwell=dwell,
-        )
-        cleanup_key = f"{object_id}:{region_id}"
-        self._pending_cleanups.discard(cleanup_key)
+        """Wait `exit_retention_seconds`, then drop this visit's frames
+        from the behavioral-frames bucket.
+
+        Per-visit scope: only the prefix for this specific
+        ``(scene_id, object_id, region_id, entry_timestamp)`` is removed.
+        Other concurrent / later visits by the same person are untouched
+        so the BA service can keep processing them.
+
+        The retention delay gives any in-flight alert path time to grab
+        evidence keys via `frame_mgr.get_person_frame_keys`.
+        """
+        cleanup_key = f"{object_id}:{region_id}:{entry_timestamp or ''}"
+        try:
+            if not self._frame_mgr:
+                logger.info(
+                    "HIGH_VALUE zone exited — no frame_mgr, skip cleanup",
+                    object_id=object_id,
+                    region=region_name,
+                    dwell=dwell,
+                )
+                return
+            if not entry_timestamp:
+                logger.info(
+                    "HIGH_VALUE zone exited — no entry_timestamp, skip cleanup",
+                    object_id=object_id,
+                    region=region_name,
+                )
+                return
+
+            retention = float(
+                getattr(self._frame_mgr, "exit_retention_seconds", 60)
+            )
+            logger.info(
+                "HIGH_VALUE zone exited — cleanup scheduled",
+                object_id=object_id,
+                scene_id=scene_id,
+                region_id=region_id,
+                region=region_name,
+                dwell=dwell,
+                entry_timestamp=entry_timestamp,
+                retention_seconds=retention,
+            )
+            await asyncio.sleep(retention)
+
+            # MinIO/S3 calls are blocking; push them off the event loop.
+            await asyncio.to_thread(
+                self._frame_mgr.cleanup_visit,
+                object_id,
+                region_id,
+                entry_timestamp,
+                scene_id,
+            )
+            logger.info(
+                "HIGH_VALUE zone exit cleanup complete",
+                object_id=object_id,
+                scene_id=scene_id,
+                region_id=region_id,
+                region=region_name,
+                entry_timestamp=entry_timestamp,
+            )
+        except Exception:
+            logger.exception(
+                "Frame cleanup failed",
+                object_id=object_id,
+                region_id=region_id,
+                entry_timestamp=entry_timestamp,
+            )
+        finally:
+            self._pending_cleanups.discard(cleanup_key)
 
     # ---- PERSON_LOST handler -------------------------------------------------
 

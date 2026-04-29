@@ -22,7 +22,7 @@
     "secret_key": "",
     "secure": false,
     "evidence_retention_hours": 24,
-    "exit_retention_seconds": 60
+    "exit_retention_seconds": 100
   },
   "behavioral_analysis": {
     "base_url": "http://behavioral-analysis:8080",

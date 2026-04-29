@@ -27,6 +27,7 @@ subscriptions:
       strategy: field_hash
       fields:
         - metadata.scene_id
+        - metadata.person_id
         - metadata.zone_id
       window_seconds: 120
       on_missing: skip

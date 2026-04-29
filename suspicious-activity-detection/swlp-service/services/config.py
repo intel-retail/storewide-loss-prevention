@@ -89,12 +89,19 @@ class ConfigService:
             logger.warning("rules.yaml not found, using empty settings")
             self._session_flag_defs: Dict[str, dict] = {}
             self._service_defs: Dict[str, dict] = {}
+            self._rules_variables: Dict[str, object] = {}
             return {}
         with open(path, "r") as f:
             data = yaml.safe_load(f) or {}
         self._session_flag_defs = data.get("session_flags", {})
         self._service_defs = data.get("services", {})
-        return data.get("settings", {})
+        self._rules_variables = data.get("variables", {}) or {}
+        # Merge `variables` into the runtime settings dict so existing
+        # callers that look up rule thresholds via get_rules_config()
+        # transparently see the same values the rule engine uses.
+        # Explicit `settings:` entries still take precedence.
+        merged = {**self._rules_variables, **(data.get("settings", {}) or {})}
+        return merged
 
     # ---- store ----
     def get_store_id(self) -> str:
