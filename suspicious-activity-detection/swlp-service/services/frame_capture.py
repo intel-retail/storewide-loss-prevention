@@ -4,12 +4,12 @@
 Frame capture service.
 
 Receives camera-image MQTT messages, decides which active HIGH_VALUE-zone
-sessions the frame belongs to, stores a cropped frame to SeaweedFS via
-``FrameManager``, and publishes one ``ba/requests`` event per stored
-frame so the behavioural-analysis service can run a single-shot analysis.
+sessions the frame belongs to, and stores the cropped frame to SeaweedFS
+via ``FrameManager``.
 
-Pure orchestration -- no MQTT or storage logic of its own; it just wires
-``MQTTService -> FrameManager -> BAQueuePublisher``.
+This service does NOT publish ba/requests -- the
+``BehavioralAnalysisOrchestrator`` owns the BA cadence and emits one
+ba/requests per batch of stored frames.
 """
 
 from __future__ import annotations
@@ -23,39 +23,24 @@ import structlog
 logger = structlog.get_logger(__name__)
 
 
-def _format_entry_ts(entry_iso: str) -> str:
-    """Compact ISO timestamp for SeaweedFS bucket-prefix consistency."""
-    if not entry_iso:
-        return ""
-    return (
-        entry_iso.replace(":", "")
-        .replace("-", "")
-        .split("+")[0]
-        .split(".")[0]
-    )
-
-
 class FrameCaptureService:
-    """Glue between camera image events, frame storage, and BA requests."""
+    """Glue between camera image events and frame storage."""
 
     def __init__(
         self,
         config,
         session_manager,
         frame_manager,
-        ba_publisher,
     ) -> None:
         self._config = config
         self._sessions = session_manager
         self._frame_mgr = frame_manager
-        self._ba = ba_publisher
 
     async def on_camera_image(self, camera_name: str, data: dict) -> None:
         """Handle a fresh image from one camera.
 
         For each active session whose person is currently in a HIGH_VALUE
-        zone visible to ``camera_name``, crop and store the frame, then
-        publish one ba/requests event.
+        zone visible to ``camera_name``, store the frame.
         """
         image_b64 = data.get("image", data.get("data", ""))
         if not image_b64:
@@ -97,20 +82,3 @@ class FrameCaptureService:
                 )
                 continue
             session.add_frame_key(key)
-
-            # Trigger one BA analysis for this freshly stored frame.
-            # BA is stateless: each request causes it to fetch the latest
-            # K frames from the bucket, run pose+VLM once, and publish
-            # ba/results.
-            try:
-                self._ba.publish_request(
-                    person_id=session.object_id,
-                    region_id=zone_id,
-                    entry_timestamp=_format_entry_ts(entry_ts_iso),
-                    scene_id=session.scene_id,
-                )
-            except Exception:
-                logger.exception(
-                    "Failed to publish BA request",
-                    person_id=session.object_id, region_id=zone_id,
-                )

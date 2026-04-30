@@ -156,12 +156,15 @@ async def lifespan(app: FastAPI):
     rules_yaml = config.get_rules_yaml_path()
     rule_engine = RuleEngine(rules_path=rules_yaml)
 
-    # 6b. BA orchestrator (owns per-visit getimage cadence)
+    # 6b. BA orchestrator (owns per-visit getimage + ba/requests cadence)
     rules_cfg = config.get_rules_config()
     ba_orchestrator = BehavioralAnalysisOrchestrator(
         mqtt_service=mqtt_svc,
         session_manager=session_mgr,
-        analysis_fps=float(rules_cfg.get("behavioural_analysis_fps", 5)),
+        ba_publisher=ba_publisher,
+        config=config,
+        frames_per_request=int(rules_cfg.get("frame_capture_count", 5)),
+        request_interval=float(rules_cfg.get("frame_capture_interval_seconds", 1.0)),
         ba_initial_delay=float(rules_cfg.get("ba_initial_delay_seconds", 2.0)),
     )
     app.state.ba_orchestrator = ba_orchestrator
@@ -193,12 +196,12 @@ async def lifespan(app: FastAPI):
     # MQTT region data → session manager (continuous dwell checking via SceneScape feed)
     mqtt_svc.register_region_data_handler(session_mgr.on_region_data)
 
-    # MQTT camera images → FrameCaptureService (store + publish ba/requests).
+    # MQTT camera images → FrameCaptureService (store only). The
+    # orchestrator owns the ba/requests cadence.
     frame_capture = FrameCaptureService(
         config=config,
         session_manager=session_mgr,
         frame_manager=frame_mgr,
-        ba_publisher=ba_publisher,
     )
     mqtt_svc.register_camera_image_handler(frame_capture.on_camera_image)
 

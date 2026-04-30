@@ -1,16 +1,22 @@
 # Copyright (C) 2026 Intel Corporation
 # SPDX-License-Identifier: Apache-2.0
 """
-Behavioral Analysis Orchestrator -- owns the per-visit getimage cadence.
+Behavioral Analysis Orchestrator -- owns the per-visit BA cadence.
 
-For each (person, region) HIGH_VALUE visit we run a single asyncio task that
-publishes ``getimage`` to every camera seeing the person at ``analysis_fps``.
-Camera replies are stored in the ``behavioral-frames`` bucket by FrameManager;
-on each successful frame store, swlp-service publishes one ``ba/requests``
-message so the behavioural-analysis service can run a single-shot analysis.
+For each (person, region) HIGH_VALUE visit we run a single asyncio task
+that repeats the following "BA cycle":
 
-There is no visit-lifecycle ``start``/``exit`` payload anymore: BA is
-stateless and reacts to every published request independently.
+    1. emit ``frames_per_request`` getimage commands evenly spread across
+       ``request_interval`` seconds. Camera replies are stored in the
+       behavioral-frames bucket by FrameCaptureService.
+    2. publish one ``ba/requests`` message so the behavioural-analysis
+       service can run a single-shot analysis on the accumulated frames.
+
+With ``frames_per_request=5`` and ``request_interval=1.0`` this means
+5 frames captured per second and one BA request fired every second.
+
+BA itself is stateless: each request causes BA to fetch the latest K
+frames from the bucket and run pose+VLM once.
 
 Stops cleanly on:
   - explicit stop() call (driven by SceneScape EXITED event), OR
@@ -25,6 +31,18 @@ import structlog
 logger = structlog.get_logger(__name__)
 
 
+def _compact_ts(entry_iso: str) -> str:
+    """Compact ISO timestamp for SeaweedFS bucket-prefix consistency."""
+    if not entry_iso:
+        return ""
+    return (
+        entry_iso.replace(":", "")
+        .replace("-", "")
+        .split("+")[0]
+        .split(".")[0]
+    )
+
+
 class _MQTT(Protocol):
     def publish_raw(self, topic: str, payload: str) -> None: ...
 
@@ -33,20 +51,33 @@ class _SessionManager(Protocol):
     def get_session(self, object_id: str, scene_id: str = "") -> Any: ...
 
 
+class _BAPublisher(Protocol):
+    def publish_request(
+        self, *, person_id: str, region_id: str,
+        entry_timestamp: str, scene_id: str,
+    ) -> None: ...
+
+
 class BehavioralAnalysisOrchestrator:
-    """Owns BA visit tasks and per-visit frame-capture cadence."""
+    """Owns BA visit tasks and per-visit frame-capture + request cadence."""
 
     def __init__(
         self,
         mqtt_service: _MQTT,
         session_manager: _SessionManager,
-        analysis_fps: float = 5.0,
+        ba_publisher: _BAPublisher,
+        config,
+        frames_per_request: int = 5,
+        request_interval: float = 1.0,
         ba_initial_delay: float = 0.0,
     ) -> None:
         self._mqtt = mqtt_service
         self._sessions = session_manager
-        self._analysis_fps = max(float(analysis_fps), 0.1)
-        self._frame_interval = 1.0 / self._analysis_fps
+        self._ba = ba_publisher
+        self._config = config
+        self._frames_per_request = max(int(frames_per_request), 1)
+        self._request_interval = max(float(request_interval), 0.05)
+        self._frame_interval = self._request_interval / self._frames_per_request
         self._initial_delay = float(ba_initial_delay)
 
         # Active per-visit tasks, keyed by "{object_id}:{region_id}"
@@ -54,7 +85,9 @@ class BehavioralAnalysisOrchestrator:
 
         logger.info(
             "BehavioralAnalysisOrchestrator initialized",
-            analysis_fps=self._analysis_fps,
+            frames_per_request=self._frames_per_request,
+            request_interval=self._request_interval,
+            frame_interval=self._frame_interval,
             initial_delay=self._initial_delay,
         )
 
@@ -107,7 +140,8 @@ class BehavioralAnalysisOrchestrator:
             "BA visit task started",
             object_id=object_id,
             region_id=region_id,
-            analysis_fps=self._analysis_fps,
+            frames_per_request=self._frames_per_request,
+            request_interval=self._request_interval,
         )
 
         try:
@@ -119,20 +153,38 @@ class BehavioralAnalysisOrchestrator:
                 if not session:
                     return
 
-                # Trigger frame capture (camera reply lands in FrameManager,
-                # which stores the frame and triggers ba/requests publish).
-                for cam in list(session.current_cameras):
-                    try:
-                        self._mqtt.publish_raw(
-                            f"scenescape/cmd/camera/{cam}", "getimage"
-                        )
-                    except Exception:
-                        logger.exception(
-                            "getimage publish failed",
-                            object_id=object_id, camera=cam,
-                        )
+                # 1) Emit N getimage commands across the interval. Camera
+                #    replies land in FrameCaptureService and are stored in
+                #    the behavioral-frames bucket.
+                for _ in range(self._frames_per_request):
+                    cams = list(session.current_cameras)
+                    for cam in cams:
+                        try:
+                            self._mqtt.publish_raw(
+                                f"scenescape/cmd/camera/{cam}", "getimage"
+                            )
+                        except Exception:
+                            logger.exception(
+                                "getimage publish failed",
+                                object_id=object_id, camera=cam,
+                            )
+                    await asyncio.sleep(self._frame_interval)
 
-                await asyncio.sleep(self._frame_interval)
+                # 2) After the batch of frames, publish exactly one BA
+                #    request so BA processes the latest window once.
+                entry_ts_iso = session.current_zones.get(region_id, "")
+                try:
+                    self._ba.publish_request(
+                        person_id=object_id,
+                        region_id=region_id,
+                        entry_timestamp=_compact_ts(entry_ts_iso),
+                        scene_id=scene_id,
+                    )
+                except Exception:
+                    logger.exception(
+                        "ba/requests publish failed",
+                        object_id=object_id, region_id=region_id,
+                    )
 
         except asyncio.CancelledError:
             logger.debug(

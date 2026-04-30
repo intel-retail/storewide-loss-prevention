@@ -9,7 +9,13 @@
 # Runtime settings consumed by swlp-service (non-rule knobs).
 settings:
   session_timeout_seconds: 90
-  behavioural_analysis_fps: 3
+  # SceneScape frame-capture cadence (per HV-zone visit).
+  # Each cycle: emit `frame_capture_count` getimage commands evenly
+  # spread across `frame_capture_interval_seconds`, then publish one
+  # ba/requests message. e.g. count=5, interval=1.0 -> 5 frames/s and
+  # one BA request every second.
+  frame_capture_count: 5
+  frame_capture_interval_seconds: 1.0
 
 # Default variable values used by the rule engine for ${var:default}
 # placeholders in the rules below. Can be overridden at runtime via the
