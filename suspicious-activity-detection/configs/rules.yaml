@@ -68,6 +68,8 @@ rules:
         params:
           alert_type: ZONE_VIOLATION
           severity: CRITICAL
+          details:
+            zone_type: $ctx.zone_type
 
   - id: repeated_visits
     name: Repeated High-Value Zone Visits
@@ -85,6 +87,10 @@ rules:
           alert_type: REPEATED_VISIT
           severity: WARNING
           threshold: ${repeat_visit_threshold:4}
+          dedup_scope: session
+          details:
+            visit_count: $ctx.visit_count
+            threshold: $param.threshold
 
   - id: behavioral_analysis
     name: Trigger Behavioral Analysis on High-Value Entry
@@ -113,6 +119,10 @@ rules:
         params:
           alert_type: CONCEALMENT
           severity: WARNING
+          details:
+            confidence: $ctx.ba_confidence
+            message: $ctx.ba_message
+            frames_analyzed: $ctx.ba_frames_analyzed
 
   - id: checkout_visited
     name: Checkout Zone Visited
@@ -146,7 +156,12 @@ rules:
         params:
           alert_type: CHECKOUT_BYPASS
           severity: WARNING
-          severity_if_concealment: CRITICAL
+          severity_if: concealment_suspected
+          severity_when_true: CRITICAL
+          details:
+            visited_high_value: $ctx.visited_high_value
+            visited_checkout: $ctx.visited_checkout
+            concealment_suspected: $ctx.concealment_suspected
 
   - id: loitering
     name: Loitering in High-Value Zone
@@ -165,3 +180,7 @@ rules:
           alert_type: LOITERING
           severity: WARNING
           threshold: ${loiter_threshold_seconds:20}
+          dedup_scope: zone
+          details:
+            dwell_seconds: $ctx.dwell_seconds
+            threshold: $param.threshold
