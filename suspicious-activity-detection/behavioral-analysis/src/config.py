@@ -49,7 +49,12 @@ class Settings(BaseSettings):
     vlm_endpoint: str = "http://ovms-vlm:8001"
     vlm_model_name: str = "Qwen/Qwen2.5-VL-7B-Instruct"
     vlm_enabled: bool = True
-    vlm_timeout: float = 60.0
+    vlm_timeout: float = 300.0
+    # Max concurrent VLM requests in flight against ovms-vlm. Continuous
+    # batching is fine but unbounded fan-in lets the cache and per-request
+    # latency grow without bound. 1–2 keeps OVMS responsive on a single
+    # GPU.
+    vlm_max_concurrency: int = 1
     vlm_max_tokens: int = 500
     vlm_temperature: float = 0.1
     vlm_max_image_size: int = 512

@@ -35,6 +35,7 @@ from services.alert_service_client import AlertServiceClient
 from services.ba_queue import BAQueuePublisher, BAQueueConsumer
 from services.ba_orchestrator import BehavioralAnalysisOrchestrator
 from services.frame_capture import FrameCaptureService, CapturedFrameTracker
+from services.ba_visit_tracker import BAVisitTracker
 
 # ---- Structured logging setup -----------------------------------------------
 logging.basicConfig(format="%(message)s", stream=__import__("sys").stdout, level=logging.DEBUG)
@@ -160,6 +161,8 @@ async def lifespan(app: FastAPI):
     rules_cfg = config.get_rules_config()
     frame_tracker = CapturedFrameTracker()
     app.state.frame_tracker = frame_tracker
+    visit_tracker = BAVisitTracker()
+    app.state.visit_tracker = visit_tracker
     ba_orchestrator = BehavioralAnalysisOrchestrator(
         mqtt_service=mqtt_svc,
         session_manager=session_mgr,
@@ -170,6 +173,7 @@ async def lifespan(app: FastAPI):
             rules_cfg.get("frame_capture_interval_seconds", 1.0)
         ),
         frame_tracker=frame_tracker,
+        visit_tracker=visit_tracker,
     )
     app.state.ba_orchestrator = ba_orchestrator
 
@@ -177,6 +181,7 @@ async def lifespan(app: FastAPI):
         rule_engine, config, session_mgr,
         alert_service_client=alert_svc_client,
         frame_manager=frame_mgr,
+        visit_tracker=visit_tracker,
     )
     # Register escalation services via the service registry
     rule_adapter.register_service("behavioral_analysis", ba_orchestrator)

@@ -1,25 +1,17 @@
 # Copyright (C) 2026 Intel Corporation
 # SPDX-License-Identifier: Apache-2.0
 """
-MQTT-based queue consumer for Behavioral Analysis requests.
+MQTT-based queue consumer for Behavioral Analysis.
 
-Topic ``ba/requests`` carries one message per fresh frame stored by
-swlp-service. Each message is fully self-describing:
+The BA service is fully event-driven and single-shot:
 
-    {
-      "scene_id":        "...",
-      "person_id":       "...",
-      "region_id":       "...",
-      "entry_timestamp": "20260429T113629"
-    }
-
-The consumer is **stateless and single-shot**: for each message it fetches
-the latest K frames from SeaweedFS for that visit, runs pose extraction +
-VLM, and publishes exactly one ``ba/results`` message in response.
-
-Requests are processed serially via an internal ``asyncio.Queue`` so that
-multiple messages do not pile up concurrent VLM calls. There is no
-per-person worker, no polling loop, and no ``action`` (start/exit) field.
+* swlp-service publishes one ``ba/requests`` message after each capture
+  cycle (5 frames stored in the ``behavioral-frames`` bucket).
+* For every request we fetch the frames for that visit ONCE, run pose +
+  VLM, and publish exactly one ``ba/results`` message.
+* There is no ``start``/``exit`` lifecycle, no polling worker, and no
+  watermark state on the BA side. Visit lifecycle is owned entirely by
+  the swlp-service ``BAVisitTracker``.
 """
 
 import asyncio
@@ -37,7 +29,7 @@ logger = logging.getLogger(__name__)
 
 
 class BAQueueConsumer:
-    """Stateless single-shot consumer of ``ba/requests`` events."""
+    """Consumes ``ba/requests`` messages and runs one analysis per message."""
 
     def __init__(
         self,
@@ -52,19 +44,20 @@ class BAQueueConsumer:
         self.pose_analyzer = pose_analyzer
         self.min_frames = settings.min_frames_for_detection
 
+        # Bound concurrent VLM calls so ovms-vlm doesn’t pile up requests.
+        self._vlm_sem = asyncio.Semaphore(
+            max(1, int(getattr(settings, "vlm_max_concurrency", 1)))
+        )
+
         self.client: Optional[mqtt.Client] = None
         self.loop: Optional[asyncio.AbstractEventLoop] = None
         self.connected = False
         self._shutdown = asyncio.Event()
-        # Bounded internal queue so we apply natural backpressure when BA is
-        # slower than the publisher. Old requests are dropped if the queue
-        # is full -- the latest frame is always more interesting than stale ones.
-        self._queue: Optional[asyncio.Queue] = None
-        self._worker_task: Optional[asyncio.Task] = None
+        # In-flight analysis tasks; tracked only so shutdown can await them.
+        self._inflight: set[asyncio.Task] = set()
 
     def initialize(self, loop: asyncio.AbstractEventLoop) -> None:
         self.loop = loop
-        self._queue = asyncio.Queue(maxsize=64)
         self.client = mqtt.Client(client_id="ba-queue-consumer")
         self.client.on_connect = self._on_connect
         self.client.on_disconnect = self._on_disconnect
@@ -72,31 +65,39 @@ class BAQueueConsumer:
 
     async def start(self) -> None:
         logger.info(
-            "BA queue consumer connecting to MQTT host=%s port=%s",
-            self.settings.mqtt_host, self.settings.mqtt_port,
+            "BA queue consumer connecting to MQTT",
+            extra={"host": self.settings.mqtt_host, "port": self.settings.mqtt_port},
         )
         self.client.connect_async(
             self.settings.mqtt_host, self.settings.mqtt_port, keepalive=60
         )
         self.client.loop_start()
-        self._worker_task = asyncio.create_task(self._worker())
         await self._shutdown.wait()
 
     async def stop(self) -> None:
         self._shutdown.set()
-        if self._worker_task:
-            self._worker_task.cancel()
         if self.client:
             self.client.loop_stop()
             self.client.disconnect()
+        # Let any in-flight analyses finish so their results are published.
+        if self._inflight:
+            logger.info(
+                f"Awaiting {len(self._inflight)} in-flight BA analyses"
+            )
+            await asyncio.gather(*self._inflight, return_exceptions=True)
         logger.info("BA queue consumer stopped")
 
     def publish_result(self, result: dict) -> None:
         if self.client and self.connected:
-            self.client.publish(self.result_topic, json.dumps(result), qos=1)
+            self.client.publish(
+                self.result_topic, json.dumps(result), qos=1
+            )
             logger.info(
-                "Published BA result person_id=%s status=%s",
-                result.get("person_id"), result.get("status"),
+                "Published BA result",
+                extra={
+                    "person_id": result.get("person_id"),
+                    "status": result.get("status"),
+                },
             )
 
     # ---- paho callbacks ------------------------------------------------------
@@ -106,15 +107,14 @@ class BAQueueConsumer:
             self.connected = True
             client.subscribe(self.request_topic, qos=1)
             logger.info(
-                "BA queue consumer connected, subscribed to %s",
-                self.request_topic,
+                f"BA queue consumer connected, subscribed to {self.request_topic}"
             )
         else:
-            logger.error("BA queue consumer MQTT connect failed, rc=%s", rc)
+            logger.error(f"BA queue consumer MQTT connect failed, rc={rc}")
 
     def _on_disconnect(self, client, userdata, rc) -> None:
         self.connected = False
-        logger.warning("BA queue consumer MQTT disconnected, rc=%s", rc)
+        logger.warning(f"BA queue consumer MQTT disconnected, rc={rc}")
 
     def _on_message(self, client, userdata, msg: mqtt.MQTTMessage) -> None:
         if msg.topic != self.request_topic:
@@ -129,59 +129,45 @@ class BAQueueConsumer:
         region_id = payload.get("region_id", "")
         entry_timestamp = payload.get("entry_timestamp", "")
         scene_id = payload.get("scene_id", "")
+        last_frame_ts = payload.get("last_frame_ts", "")
         if not person_id:
             logger.warning("BA message missing person_id, skipping")
             return
 
-        if not self.loop or not self._queue:
+        if not self.loop:
             return
+        # Schedule the single-shot analysis on the asyncio loop.
+        self.loop.call_soon_threadsafe(
+            self._spawn_analysis,
+            person_id, region_id, entry_timestamp, scene_id, last_frame_ts,
+        )
 
-        request = (person_id, region_id, entry_timestamp, scene_id)
-        # Threadsafe enqueue from the paho thread onto the asyncio queue.
-        self.loop.call_soon_threadsafe(self._enqueue, request)
+    # ---- analysis dispatch ---------------------------------------------------
 
-    def _enqueue(self, request: tuple) -> None:
-        if self._queue is None:
-            return
-        try:
-            self._queue.put_nowait(request)
-        except asyncio.QueueFull:
-            # Drop oldest, keep newest -- the latest frame is always more
-            # relevant for the analysis than a stale one.
-            try:
-                self._queue.get_nowait()
-                self._queue.put_nowait(request)
-            except (asyncio.QueueEmpty, asyncio.QueueFull):
-                pass
-
-    # ---- worker --------------------------------------------------------------
-
-    async def _worker(self) -> None:
-        """Single serial worker: process one BA request to completion at a time."""
-        assert self._queue is not None
-        while not self._shutdown.is_set():
-            try:
-                request = await self._queue.get()
-            except asyncio.CancelledError:
-                return
-            person_id, region_id, entry_timestamp, scene_id = request
-            try:
-                await self._handle_request(
-                    person_id, region_id, entry_timestamp, scene_id
-                )
-            except Exception:
-                logger.exception(
-                    "Unhandled error processing BA request person_id=%s",
-                    person_id,
-                )
-
-    # ---- single request analysis --------------------------------------------
-
-    async def _handle_request(
-        self, person_id: str, region_id: str,
-        entry_timestamp: str, scene_id: str,
+    def _spawn_analysis(
+        self, person_id: str, region_id: str, entry_timestamp: str,
+        scene_id: str, last_frame_ts: str,
     ) -> None:
-        """Fetch latest K frames, run pose+VLM, publish one ba/results."""
+        # Each ba/requests message gets its own independent task. We wrap
+        # the analysis in asyncio.shield so an outer cancel (e.g. service
+        # shutdown, MQTT disconnect) cannot interrupt a request that is
+        # already pose-analyzing or talking to the VLM.
+        async def _runner() -> None:
+            await asyncio.shield(
+                self._analyze_visit(
+                    person_id, region_id, entry_timestamp,
+                    scene_id, last_frame_ts,
+                )
+            )
+        task = asyncio.create_task(_runner())
+        self._inflight.add(task)
+        task.add_done_callback(self._inflight.discard)
+
+    async def _analyze_visit(
+        self, person_id: str, region_id: str, entry_timestamp: str,
+        scene_id: str, last_frame_ts: str,
+    ) -> None:
+        """Fetch frames for this visit ONCE, analyse, publish one result."""
         try:
             frames = await self.frame_store.get_frames(
                 entity_id=person_id,
@@ -192,91 +178,116 @@ class BAQueueConsumer:
                 scene_id=scene_id,
             )
         except Exception:
-            logger.exception(
-                "Frame fetch failed person_id=%s region_id=%s",
-                person_id, region_id,
-            )
-            return
-
-        # frame_store.get_frames returns [(ndarray_bgr, timestamp_ms), ...].
-        # extract_poses() consumes the same tuple shape directly.
-        frames_available = len(frames)
-        if frames_available < self.min_frames:
-            logger.debug(
-                "Skipping BA request: %d/%d frames",
-                frames_available, self.min_frames,
-            )
-            return
-
-        pose_frames = frames[-self.settings.pose_frames_count:]
-        poses = await extract_poses(pose_frames, person_id, self.settings)
-
-        if not poses:
+            logger.exception(f"Frame fetch failed for {person_id}")
             self.publish_result({
                 "person_id": person_id, "region_id": region_id,
                 "entry_timestamp": entry_timestamp, "scene_id": scene_id,
-                "status": "no_match", "confidence": 0.0,
+                "last_frame_ts": last_frame_ts,
+                "status": "no_enough_data", "confidence": 0.0,
+                "vlm_response": None, "frames_analyzed": 0,
+            })
+            return
+
+        frames_available = len(frames)
+        if frames_available < self.min_frames:
+            self.publish_result({
+                "person_id": person_id, "region_id": region_id,
+                "entry_timestamp": entry_timestamp, "scene_id": scene_id,
+                "last_frame_ts": last_frame_ts,
+                "status": "no_enough_data", "confidence": 0.0,
                 "vlm_response": None, "frames_analyzed": frames_available,
             })
             return
 
-        results = self.pose_analyzer.detect_all_patterns(poses)
-        matched = [r for r in results if r.matched]
-        result = (
-            max(matched, key=lambda r: r.confidence)
-            if matched
-            else results[0] if results
-            else PatternResult(
-                matched=False, confidence=0.0,
-                pattern_id="shelf_to_waist",
-                description="No patterns evaluated",
-            )
+        await self._analyze_batch(
+            person_id, region_id, entry_timestamp, scene_id,
+            frames, last_frame_ts=last_frame_ts,
         )
 
-        if not result.matched:
+    # ---- single-batch analysis -----------------------------------------------
+
+    async def _analyze_batch(
+        self, person_id: str, region_id: str, entry_timestamp: str,
+        scene_id: str, frames: list, last_frame_ts: str = "",
+    ) -> None:
+        """Run pose + VLM on a batch of frames and publish exactly one result."""
+        frames_available = len(frames)
+        try:
+            pose_frames = frames[-self.settings.pose_frames_count:]
+            poses = await extract_poses(pose_frames, person_id, self.settings)
+
+            if not poses:
+                self.publish_result({
+                    "person_id": person_id, "region_id": region_id,
+                    "entry_timestamp": entry_timestamp, "scene_id": scene_id,
+                    "last_frame_ts": last_frame_ts,
+                    "status": "no_match", "confidence": 0.0,
+                    "vlm_response": None, "frames_analyzed": frames_available,
+                })
+                return
+
+            results = self.pose_analyzer.detect_all_patterns(poses)
+            matched = [r for r in results if r.matched]
+            result = (
+                max(matched, key=lambda r: r.confidence)
+                if matched
+                else results[0] if results
+                else PatternResult(
+                    matched=False, confidence=0.0,
+                    pattern_id="shelf_to_waist",
+                    description="No patterns evaluated",
+                )
+            )
+
+            if result.matched:
+                logger.warning(
+                    f"Entity {person_id}: pose pattern matched "
+                    f"(confidence={result.confidence:.3f}), calling VLM"
+                )
+                if self.settings.vlm_enabled and self.pose_analyzer.vlm_client:
+                    async with self._vlm_sem:
+                        result = await self.pose_analyzer.analyze_with_vlm(
+                            frames=frames,
+                            pose_result=result,
+                        )
+                vlm_response = None
+                if result.vlm_result:
+                    vlm_response = result.vlm_result.get("reasoning")
+
+                if result.vlm_confirmed is True:
+                    self.publish_result({
+                        "person_id": person_id, "region_id": region_id,
+                        "entry_timestamp": entry_timestamp, "scene_id": scene_id,
+                        "last_frame_ts": last_frame_ts,
+                        "status": "suspicious",
+                        "confidence": result.confidence,
+                        "vlm_response": vlm_response,
+                        "frames_analyzed": frames_available,
+                    })
+                    return
+                logger.info(
+                    f"Entity {person_id}: VLM did not confirm "
+                    f"(vlm_confirmed={result.vlm_confirmed})"
+                )
+                self.publish_result({
+                    "person_id": person_id, "region_id": region_id,
+                    "entry_timestamp": entry_timestamp, "scene_id": scene_id,
+                    "last_frame_ts": last_frame_ts,
+                    "status": "no_match",
+                    "confidence": result.confidence,
+                    "vlm_response": vlm_response,
+                    "frames_analyzed": frames_available,
+                })
+                return
+
             self.publish_result({
                 "person_id": person_id, "region_id": region_id,
                 "entry_timestamp": entry_timestamp, "scene_id": scene_id,
+                "last_frame_ts": last_frame_ts,
                 "status": "no_match",
                 "confidence": result.confidence,
                 "vlm_response": None,
                 "frames_analyzed": frames_available,
             })
-            return
-
-        logger.warning(
-            "Entity %s: pose pattern matched (confidence=%.3f), calling VLM",
-            person_id, result.confidence,
-        )
-        if self.settings.vlm_enabled and self.pose_analyzer.vlm_client:
-            # Reconstruct the SeaweedFS prefix used by frame_store.get_frames
-            # so analyze_with_vlm can log the full bucket key per frame.
-            bucket = getattr(self.frame_store, "bucket", "behavioral-frames")
-            prefix = (
-                f"{bucket}/{scene_id}/{person_id}/{region_id}/"
-                f"{entry_timestamp}/frames/"
-            )
-            result = await self.pose_analyzer.analyze_with_vlm(
-                frames=frames,
-                pose_result=result,
-                frame_key_prefix=prefix,
-            )
-        vlm_response = None
-        if result.vlm_result:
-            vlm_response = result.vlm_result.get("reasoning")
-
-        status = "suspicious" if result.vlm_confirmed is True else "no_match"
-        if result.vlm_confirmed is not True:
-            logger.info(
-                "Entity %s: VLM did not confirm (vlm_confirmed=%s)",
-                person_id, result.vlm_confirmed,
-            )
-
-        self.publish_result({
-            "person_id": person_id, "region_id": region_id,
-            "entry_timestamp": entry_timestamp, "scene_id": scene_id,
-            "status": status,
-            "confidence": result.confidence,
-            "vlm_response": vlm_response,
-            "frames_analyzed": frames_available,
-        })
+        except Exception:
+            logger.exception(f"Error analysing batch for {person_id}")

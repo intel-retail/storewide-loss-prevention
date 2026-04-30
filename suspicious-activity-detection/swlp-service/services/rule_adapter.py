@@ -44,12 +44,14 @@ class RuleEngineAdapter:
         session_manager: SessionManager,
         alert_service_client: AlertServiceClient | None = None,
         frame_manager=None,
+        visit_tracker=None,
     ) -> None:
         self._engine = engine
         self.config = config
         self.session_mgr = session_manager
         self._alert_client = alert_service_client
         self._frame_mgr = frame_manager
+        self._visit_tracker = visit_tracker
 
         rules_cfg = config.get_rules_config()
         self._loiter_threshold = float(rules_cfg.get("loiter_threshold_seconds", 20))
@@ -126,22 +128,10 @@ class RuleEngineAdapter:
             # Stop any escalation services that were started for this zone
             for svc in self._service_registry.values():
                 svc.stop(event.object_id, event.region_id)
-            # NOTE: behavioral-frames bucket cleanup on HIGH_VALUE zone exit
-            # is currently disabled — frames accumulate until manual purge.
-            # Re-enable by uncommenting the block below.
-            # cleanup_key = f"{event.object_id}:{event.region_id}:{event.entry_timestamp or ''}"
-            # if cleanup_key not in self._pending_cleanups:
-            #     self._pending_cleanups.add(cleanup_key)
-            #     asyncio.create_task(
-            #         self._deferred_frame_cleanup(
-            #             event.object_id,
-            #             event.region_id,
-            #             event.region_name,
-            #             event.dwell_seconds,
-            #             event.scene_id,
-            #             event.entry_timestamp,
-            #         )
-            #     )
+
+            # Mark visit as exited; drain check will fire cleanup once all
+            # in-flight ba/results have been accounted for.
+            self._maybe_cleanup_on_exit(event)
 
         elif event.event_type == EventType.LOITER:
             # Continuous region-data feed signalled the person is in
@@ -402,6 +392,70 @@ class RuleEngineAdapter:
             svc.stop_all(event.object_id)
         logger.info("Person lost — escalation tasks cancelled", object_id=event.object_id)
 
+    # ---- visit-tracker driven cleanup ---------------------------------------
+
+    @staticmethod
+    def _compact_entry_ts(entry_ts_iso: str) -> str:
+        """Mirror BehavioralAnalysisOrchestrator._compact_ts so visit keys
+        line up between the publish side and the result side.
+        """
+        if not entry_ts_iso:
+            return ""
+        return (
+            entry_ts_iso.replace(":", "")
+            .replace("-", "")
+            .split("+")[0]
+            .split(".")[0]
+        )
+
+    def _maybe_cleanup_on_exit(self, event: RegionEvent) -> None:
+        """Mark visit as exited and run cleanup if request/result counts match."""
+        if self._visit_tracker is None or self._frame_mgr is None:
+            return
+        entry_ts_iso = getattr(event, "entry_timestamp", "") or ""
+        compact = self._compact_entry_ts(entry_ts_iso)
+        if not compact:
+            return
+        visit_key = self._visit_tracker.make_key(
+            event.scene_id, event.object_id, event.region_id, compact,
+        )
+        self._visit_tracker.mark_exited(visit_key)
+        self._maybe_drain_visit(
+            visit_key, event.scene_id, event.object_id, event.region_id, compact,
+        )
+
+    def _maybe_drain_visit(
+        self, visit_key, scene_id: str, person_id: str,
+        region_id: str, entry_timestamp: str,
+    ) -> None:
+        """If the visit is fully drained (exited, counts match, not alerted)
+        clean its frames from the BA bucket and forget the counters.
+        """
+        if (
+            self._visit_tracker is None
+            or self._frame_mgr is None
+            or visit_key is None
+        ):
+            return
+        if not self._visit_tracker.is_drained(visit_key):
+            return
+        try:
+            self._frame_mgr.cleanup_visit(
+                object_id=person_id,
+                region_id=region_id,
+                entry_timestamp=entry_timestamp,
+                scene_id=scene_id,
+            )
+        except Exception:
+            logger.exception(
+                "cleanup_visit failed",
+                person_id=person_id,
+                region_id=region_id,
+                entry_timestamp=entry_timestamp,
+            )
+        finally:
+            self._visit_tracker.forget(visit_key)
+
     async def on_ba_result(self, result: dict) -> None:
         """
         Handle a BA analysis result received from the MQTT ba/results topic.
@@ -411,20 +465,34 @@ class RuleEngineAdapter:
         region_id = result.get("region_id", "")
         status = result.get("status", "")
         scene_id = result.get("scene_id", "")
+        entry_timestamp = result.get("entry_timestamp", "")
+
+        # Per-visit accounting: every ba/results bumps results_received.
+        if self._visit_tracker is not None and entry_timestamp:
+            visit_key = self._visit_tracker.make_key(
+                scene_id, person_id, region_id, entry_timestamp,
+            )
+            self._visit_tracker.note_result(visit_key)
+        else:
+            visit_key = None
 
         session = self.session_mgr.get_session(person_id, scene_id=scene_id)
         if not session:
             logger.debug("BA result for unknown session", person_id=person_id)
+            # Still attempt drain so we don't leak counters for an exited
+            # session that we've already cleaned up elsewhere.
+            self._maybe_drain_visit(visit_key, scene_id, person_id, region_id, entry_timestamp)
             return
 
         # Quick non-actionable statuses — no rule firing needed.
-        if status in ("received", "no_match"):
+        if status in ("received", "no_match", "no_enough_data"):
             logger.debug(
                 "BA queue: status update",
                 person_id=person_id,
                 region_id=region_id,
                 status=status,
             )
+            self._maybe_drain_visit(visit_key, scene_id, person_id, region_id, entry_timestamp)
             return
 
         # No per-zone dedup here — the BA service emits one ba/results per
@@ -477,24 +545,53 @@ class RuleEngineAdapter:
 
     async def _fire_alert(self, alert: Alert) -> None:
         """Persist evidence frames and send to alert-service."""
-        if self._frame_mgr and not alert.evidence_keys:
-            frame_keys = self._frame_mgr.get_person_frame_keys(alert.object_id)
-            if frame_keys:
-                stored = []
-                for idx, key in enumerate(frame_keys):
-                    raw = self._frame_mgr.get_frame(key)
-                    if raw:
-                        ev_key = self._frame_mgr.store_evidence_frame(
-                            alert.alert_id, idx, raw
-                        )
-                        stored.append(ev_key)
-                if stored:
-                    alert.evidence_keys = stored
-                    logger.info(
-                        "Evidence frames stored",
-                        alert_id=alert.alert_id,
-                        count=len(stored),
-                    )
+        # Copy BA-bucket frames (up to last_frame_ts) under
+        # alerts/{person_id}/{alert_id}/frames/. Driven by the BA result
+        # that triggered this alert (stashed on the session).
+        ba_result = getattr(
+            self.session_mgr.get_session(
+                alert.object_id, scene_id=alert.scene_id,
+            ),
+            "_pending_ba_result",
+            None,
+        ) if alert.object_id else None
+        if (
+            self._frame_mgr
+            and ba_result
+            and ba_result.get("last_frame_ts")
+            and ba_result.get("entry_timestamp")
+        ):
+            # Mark the visit as alerted so the drain logic keeps the BA
+            # frames around as evidence. We do NOT gate the copy on the
+            # first alert: every alert in the visit gets its own frames
+            # folder under alerts/{person_id}/{alert_id}/frames/.
+            if self._visit_tracker is not None:
+                visit_key = self._visit_tracker.make_key(
+                    ba_result.get("scene_id", alert.scene_id),
+                    ba_result.get("person_id", alert.object_id),
+                    ba_result.get("region_id", alert.region_id),
+                    ba_result["entry_timestamp"],
+                )
+                self._visit_tracker.mark_alerted(visit_key)
+            try:
+                copied = self._frame_mgr.copy_frames_to_alert(
+                    scene_id=ba_result.get("scene_id", alert.scene_id),
+                    person_id=ba_result.get("person_id", alert.object_id),
+                    region_id=ba_result.get("region_id", alert.region_id),
+                    entry_timestamp=ba_result["entry_timestamp"],
+                    last_frame_ts=ba_result["last_frame_ts"],
+                    alert_id=alert.alert_id,
+                )
+                logger.info(
+                    "BA frames copied to alert prefix",
+                    alert_id=alert.alert_id,
+                    copied=copied,
+                )
+            except Exception:
+                logger.exception(
+                    "copy_frames_to_alert failed",
+                    alert_id=alert.alert_id,
+                )
 
         # Send to alert-service (handles MQTT delivery with dedup)
         if self._alert_client:
