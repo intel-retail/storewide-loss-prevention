@@ -72,12 +72,14 @@ class BehavioralAnalysisOrchestrator:
         frame_capture_count: int = 5,
         frame_capture_interval_seconds: float = 1.0,
         frame_tracker=None,
+        visit_tracker=None,
     ) -> None:
         self._mqtt = mqtt_service
         self._sessions = session_manager
         self._ba = ba_publisher
         self._config = config
         self._tracker = frame_tracker
+        self._visit_tracker = visit_tracker
         self._frame_capture_count = max(int(frame_capture_count), 1)
         self._frame_capture_interval_seconds = max(
             float(frame_capture_interval_seconds), 0.05
@@ -191,6 +193,13 @@ class BehavioralAnalysisOrchestrator:
                     )
                     self._tracker.clear(scene_id, object_id, region_id)
                 try:
+                    if self._visit_tracker is not None:
+                        self._visit_tracker.note_request(
+                            self._visit_tracker.make_key(
+                                scene_id, object_id, region_id,
+                                _compact_ts(entry_ts_iso),
+                            )
+                        )
                     self._ba.publish_request(
                         person_id=object_id,
                         region_id=region_id,

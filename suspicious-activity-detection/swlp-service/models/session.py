@@ -88,14 +88,13 @@ class PersonSession:
     # don't appear as ghost rows.
     reid_state: str = ""
 
-    # Loiter alert tracking: {region_id: True} — prevents duplicate alerts
-    loiter_alerted: Dict[str, bool] = field(default_factory=dict)
-
-    # Repeated-visit alert tracking: {region_id: True} — prevents duplicate alerts
-    repeated_visit_alerted: Dict[str, bool] = field(default_factory=dict)
-
-    # BA concealment alert tracking: {region_id: True} — prevents duplicate alerts
-    ba_alerted: Dict[str, bool] = field(default_factory=dict)
+    # Generic per-(alert_type, scope_key) dedup map. Driven entirely by the
+    # ``dedup_scope`` field on each alert action in rules.yaml — adding a new
+    # alert type does not require any code change here.
+    #
+    #   alert_dedup["LOITERING"][region_id]   -> True   (scope=zone)
+    #   alert_dedup["CHECKOUT_BYPASS"]["*"]   -> True   (scope=session)
+    alert_dedup: Dict[str, Dict[str, bool]] = field(default_factory=dict)
 
     # Frame references (SeaweedFS keys for rolling buffer — cropped person frames)
     frame_buffer: List[str] = field(default_factory=list)
@@ -129,9 +128,38 @@ class PersonSession:
         self.zone_visit_counts[region_id] = self.zone_visit_counts.get(region_id, 0) + 1
         # Reset per-visit alert flags so the pipeline can re-analyze and
         # re-alert on re-entry (each visit is independently eligible).
-        self.ba_alerted.pop(region_id, None)
-        self.loiter_alerted.pop(region_id, None)
+        self.clear_alerts_for_scope(region_id)
 
     def exit_zone(self, region_id: str) -> Optional[str]:
         """Record zone exit. Returns the entry timestamp if was present."""
         return self.current_zones.pop(region_id, None)
+
+    # ---- generic per-alert-type dedup helpers --------------------------------
+
+    def is_alerted(self, alert_type: str, scope_key: str) -> bool:
+        """Return True if an alert of this type has already fired for the scope."""
+        return bool(self.alert_dedup.get(alert_type, {}).get(scope_key))
+
+    def mark_alerted(self, alert_type: str, scope_key: str) -> None:
+        """Mark an alert of this type as fired for the given scope."""
+        self.alert_dedup.setdefault(alert_type, {})[scope_key] = True
+
+    def clear_alerts_for_scope(self, scope_key: str) -> None:
+        """Clear all per-type dedup flags for a single scope (e.g. on re-entry)."""
+        for type_map in self.alert_dedup.values():
+            type_map.pop(scope_key, None)
+
+    # Backward-compatible accessors so legacy call sites that read
+    # ``session.loiter_alerted.get(region_id)`` continue to work without
+    # caring that the storage moved into ``alert_dedup``.
+    @property
+    def loiter_alerted(self) -> Dict[str, bool]:
+        return self.alert_dedup.setdefault("LOITERING", {})
+
+    @property
+    def repeated_visit_alerted(self) -> Dict[str, bool]:
+        return self.alert_dedup.setdefault("REPEATED_VISIT", {})
+
+    @property
+    def ba_alerted(self) -> Dict[str, bool]:
+        return self.alert_dedup.setdefault("CONCEALMENT", {})

@@ -17,7 +17,7 @@ from typing import Optional, Protocol, runtime_checkable
 import structlog
 
 from models.events import EventType, RegionEvent, ZoneType
-from models.alerts import Alert, AlertType, AlertLevel
+from models.alerts import Alert
 from .config import ConfigService
 from .session_manager import SessionManager
 from rule_engine import RuleEngine, Action
@@ -44,12 +44,14 @@ class RuleEngineAdapter:
         session_manager: SessionManager,
         alert_service_client: AlertServiceClient | None = None,
         frame_manager=None,
+        visit_tracker=None,
     ) -> None:
         self._engine = engine
         self.config = config
         self.session_mgr = session_manager
         self._alert_client = alert_service_client
         self._frame_mgr = frame_manager
+        self._visit_tracker = visit_tracker
 
         rules_cfg = config.get_rules_config()
         self._loiter_threshold = float(rules_cfg.get("loiter_threshold_seconds", 20))
@@ -126,22 +128,10 @@ class RuleEngineAdapter:
             # Stop any escalation services that were started for this zone
             for svc in self._service_registry.values():
                 svc.stop(event.object_id, event.region_id)
-            # NOTE: behavioral-frames bucket cleanup on HIGH_VALUE zone exit
-            # is currently disabled — frames accumulate until manual purge.
-            # Re-enable by uncommenting the block below.
-            # cleanup_key = f"{event.object_id}:{event.region_id}:{event.entry_timestamp or ''}"
-            # if cleanup_key not in self._pending_cleanups:
-            #     self._pending_cleanups.add(cleanup_key)
-            #     asyncio.create_task(
-            #         self._deferred_frame_cleanup(
-            #             event.object_id,
-            #             event.region_id,
-            #             event.region_name,
-            #             event.dwell_seconds,
-            #             event.scene_id,
-            #             event.entry_timestamp,
-            #         )
-            #     )
+
+            # Mark visit as exited; drain check will fire cleanup once all
+            # in-flight ba/results have been accounted for.
+            self._maybe_cleanup_on_exit(event)
 
         elif event.event_type == EventType.LOITER:
             # Continuous region-data feed signalled the person is in
@@ -169,33 +159,78 @@ class RuleEngineAdapter:
         actions = self._engine.evaluate(trigger_event, event.zone_type.value, context)
 
         # ---- Execute actions (LP-specific side effects) ----
-        await self._execute_actions(actions, event, session)
+        await self._execute_actions(actions, event, session, context)
 
     # ---- context builder -----------------------------------------------------
 
     @staticmethod
     def _build_context(event: RegionEvent, session) -> dict:
-        """Flatten event + session into a generic dict for the rule engine."""
-        ctx = {
-            # Event fields
-            "region_id": event.region_id,
-            "region_name": event.region_name,
-            "dwell_seconds": event.dwell_seconds,
-            # Session structural fields
-            "zone_visit_counts": dict(session.zone_visit_counts),
-        }
-        # Merge all dynamic session flags into context
+        """Flatten event + session into a generic dict for the rule engine.
+
+        The same dict is later consumed by the YAML-driven ``details:``
+        block on each alert action. To keep YAML authors from having to
+        edit Python every time they want to expose a new field, every
+        public attribute on the ``RegionEvent`` and ``PersonSession``
+        dataclasses is auto-merged into the context, on top of a few
+        explicitly derived helpers (rounded dwell, BA result fields,
+        per-region visit_count). Session ``flags`` are spread at the top
+        level so YAML can write ``$ctx.visited_high_value`` directly.
+
+        Naming collisions are resolved in this order (later wins):
+          1. session attrs   2. event attrs   3. derived helpers
+          4. session.flags
+        """
+        ctx: dict = {}
+
+        def _spread(obj, skip: set[str]) -> None:
+            for name in dir(obj):
+                if name.startswith("_") or name in skip:
+                    continue
+                try:
+                    value = getattr(obj, name)
+                except Exception:
+                    continue
+                if callable(value):
+                    continue
+                ctx[name] = value
+
+        # Hide internal / heavy / ambiguous fields. ``object_id`` and
+        # ``scene_id`` are intentionally exposed via the event so YAML
+        # can read them with familiar names.
+        _spread(session, skip={
+            "alert_dedup", "region_visits", "camera_history",
+            "frame_buffer", "current_zones",
+        })
+        _spread(event, skip={"event_type"})
+
+        # Coerce enum-typed fields to strings (YAML compares as strings).
+        zt = ctx.get("zone_type")
+        ctx["zone_type"] = zt.value if hasattr(zt, "value") else (zt or "")
+
+        # Derived helpers / overrides.
+        ctx["dwell_seconds"] = (
+            round(event.dwell_seconds, 1) if event.dwell_seconds else 0
+        )
+        ctx["visit_count"] = session.zone_visit_counts.get(event.region_id, 0)
+
+        ba = getattr(session, "_pending_ba_result", None) or {}
+        ctx["ba_confidence"] = ba.get("confidence")
+        ctx["ba_message"] = ba.get("vlm_response") or ""
+        ctx["ba_frames_analyzed"] = ba.get("frames_analyzed", 0)
+
+        # Spread dynamic session flags last so they’re reachable as
+        # bare names (e.g. ``$ctx.visited_high_value``).
         ctx.update(session.flags)
         return ctx
 
     # ---- action execution (LP-specific) --------------------------------------
 
     async def _execute_actions(
-        self, actions: list[Action], event: RegionEvent, session
+        self, actions: list[Action], event: RegionEvent, session, context: dict
     ) -> None:
         for action in actions:
             if action.type == "alert":
-                await self._execute_alert(action, event, session)
+                await self._execute_alert(action, event, session, context)
             elif action.type == "escalate":
                 service_name = action.params.get("service", "")
                 handler = self._service_registry.get(service_name)
@@ -211,7 +246,7 @@ class RuleEngineAdapter:
                     )
 
     async def _execute_alert(
-        self, action: Action, event: RegionEvent, session
+        self, action: Action, event: RegionEvent, session, context: dict
     ) -> None:
         """Build and fire an LP Alert from a generic Action.
 
@@ -222,8 +257,16 @@ class RuleEngineAdapter:
         alert_type = action.params["alert_type"]
         severity = action.params.get("severity", "WARNING")
 
-        # Concealment upgrades severity (e.g. checkout bypass → CRITICAL)
-        if (
+        # Generic severity escalation, driven by rules.yaml. Two forms:
+        #   severity_if: <flag_name>
+        #     severity_when_true: CRITICAL
+        # or the legacy shorthand kept for back-compat:
+        #   severity_if_concealment: CRITICAL
+        sev_flag = action.params.get("severity_if")
+        sev_when_true = action.params.get("severity_when_true")
+        if sev_flag and sev_when_true and session.flags.get(sev_flag):
+            severity = sev_when_true
+        elif (
             action.params.get("severity_if_concealment")
             and session.concealment_suspected
         ):
@@ -231,25 +274,23 @@ class RuleEngineAdapter:
 
         alert_level = severity
 
-        # Dedup: one alert per zone per session for loitering and repeated-visit
-        if alert_type == AlertType.LOITERING:
-            if session.loiter_alerted.get(event.region_id):
-                logger.debug(
-                    "Loiter alert already fired for zone",
-                    object_id=event.object_id,
-                    region_id=event.region_id,
-                )
-                return
-        if alert_type == AlertType.REPEATED_VISIT:
-            if session.repeated_visit_alerted.get(event.region_id):
-                logger.debug(
-                    "Repeated-visit alert already fired for zone",
-                    object_id=event.object_id,
-                    region_id=event.region_id,
-                )
-                return
+        # ---- Generic dedup, driven by rules.yaml ----------------------------
+        # Each alert action may declare ``dedup_scope: zone | session | none``.
+        # ``zone``    — one alert per (alert_type, region_id) per session.
+        # ``session`` — one alert per alert_type for the whole session.
+        # ``none`` (default) — every match fires an alert.
+        dedup_key = self._dedup_key(action.params, event)
+        alert_type_str = self._alert_type_str(alert_type)
+        if dedup_key is not None and session.is_alerted(alert_type_str, dedup_key):
+            logger.debug(
+                "Alert already fired (dedup hit)",
+                alert_type=alert_type_str,
+                dedup_key=dedup_key,
+                object_id=event.object_id,
+            )
+            return
 
-        details = self._build_details(alert_type, action.params, event, session)
+        details = self._build_details(action.params, context)
 
         alert = Alert(
             alert_type=alert_type,
@@ -270,48 +311,60 @@ class RuleEngineAdapter:
             region=event.region_name,
         )
 
-        # Mark as fired for dedup BEFORE the await on _fire_alert.
-        # Otherwise concurrent LOITER events (the scene_data stream emits
-        # one per frame, ~5/s) all pass the dedup gate while the first
-        # alert HTTP POST is in flight and a flood of duplicates fires.
-        if alert_type == AlertType.LOITERING:
-            session.loiter_alerted[event.region_id] = True
-        if alert_type == AlertType.REPEATED_VISIT:
-            session.repeated_visit_alerted[event.region_id] = True
+        # Mark as fired for dedup BEFORE the await on _fire_alert. Otherwise
+        # concurrent events (e.g. the scene_data LOITER stream firing one
+        # per frame at ~5/s) all pass the dedup gate while the first alert
+        # HTTP POST is in flight, and a flood of duplicates fires.
+        if dedup_key is not None:
+            session.mark_alerted(alert_type_str, dedup_key)
 
         await self._fire_alert(alert)
 
+    # ---- dedup helpers -------------------------------------------------------
+
     @staticmethod
-    def _build_details(
-        alert_type, params: dict, event: RegionEvent, session
-    ) -> dict:
-        """Build contextual details dict for the alert."""
-        if alert_type == AlertType.ZONE_VIOLATION:
-            return {"zone_type": event.zone_type.value}
-        elif alert_type == AlertType.REPEATED_VISIT:
-            return {
-                "visit_count": session.zone_visit_counts.get(event.region_id, 0),
-                "threshold": params.get("threshold", 2),
-            }
-        elif alert_type == AlertType.CHECKOUT_BYPASS:
-            return {
-                "visited_high_value": session.flags.get("visited_high_value", False),
-                "visited_checkout": session.flags.get("visited_checkout", False),
-                "concealment_suspected": session.flags.get("concealment_suspected", False),
-            }
-        elif alert_type == AlertType.LOITERING:
-            return {
-                "dwell_seconds": round(event.dwell_seconds, 1) if event.dwell_seconds else 0,
-                "threshold": params.get("threshold", 120),
-            }
-        elif alert_type == AlertType.CONCEALMENT:
-            ba = getattr(session, "_pending_ba_result", None) or {}
-            return {
-                "confidence": ba.get("confidence"),
-                "message": ba.get("vlm_response") or "",
-                "frames_analyzed": ba.get("frames_analyzed", 0),
-            }
-        return {}
+    def _alert_type_str(alert_type) -> str:
+        """Coerce AlertType enum / raw string into the canonical YAML key."""
+        return getattr(alert_type, "value", str(alert_type))
+
+    @staticmethod
+    def _dedup_key(params: dict, event: RegionEvent):
+        """Resolve the dedup scope key from an alert action's params.
+
+        Returns ``None`` when no dedup is configured (every match alerts).
+        """
+        scope = params.get("dedup_scope", "none")
+        if scope == "zone":
+            return event.region_id or "*"
+        if scope == "session":
+            return "*"
+        return None
+
+    @staticmethod
+    def _build_details(params: dict, ctx: dict) -> dict:
+        """Build the alert ``details`` dict from a YAML-driven spec.
+
+        ``params['details']`` is a mapping ``output_key -> value``. Each
+        value is one of:
+
+        * ``$ctx.<name>``   pulls the named field from the runtime context.
+        * ``$param.<name>`` pulls the named field from the action params
+          (so that ``threshold`` etc. set in YAML can be echoed back).
+        * any other literal scalar/dict/list is emitted verbatim.
+
+        Adding a new alert type now just means writing the rule + a
+        ``details:`` map in YAML — no Python change required.
+        """
+        spec = params.get("details") or {}
+        out: dict = {}
+        for key, value in spec.items():
+            if isinstance(value, str) and value.startswith("$ctx."):
+                out[key] = ctx.get(value[5:])
+            elif isinstance(value, str) and value.startswith("$param."):
+                out[key] = params.get(value[7:])
+            else:
+                out[key] = value
+        return out
 
     # ---- Deferred frame cleanup on HIGH_VALUE zone exit ----------------------
 
@@ -402,6 +455,70 @@ class RuleEngineAdapter:
             svc.stop_all(event.object_id)
         logger.info("Person lost — escalation tasks cancelled", object_id=event.object_id)
 
+    # ---- visit-tracker driven cleanup ---------------------------------------
+
+    @staticmethod
+    def _compact_entry_ts(entry_ts_iso: str) -> str:
+        """Mirror BehavioralAnalysisOrchestrator._compact_ts so visit keys
+        line up between the publish side and the result side.
+        """
+        if not entry_ts_iso:
+            return ""
+        return (
+            entry_ts_iso.replace(":", "")
+            .replace("-", "")
+            .split("+")[0]
+            .split(".")[0]
+        )
+
+    def _maybe_cleanup_on_exit(self, event: RegionEvent) -> None:
+        """Mark visit as exited and run cleanup if request/result counts match."""
+        if self._visit_tracker is None or self._frame_mgr is None:
+            return
+        entry_ts_iso = getattr(event, "entry_timestamp", "") or ""
+        compact = self._compact_entry_ts(entry_ts_iso)
+        if not compact:
+            return
+        visit_key = self._visit_tracker.make_key(
+            event.scene_id, event.object_id, event.region_id, compact,
+        )
+        self._visit_tracker.mark_exited(visit_key)
+        self._maybe_drain_visit(
+            visit_key, event.scene_id, event.object_id, event.region_id, compact,
+        )
+
+    def _maybe_drain_visit(
+        self, visit_key, scene_id: str, person_id: str,
+        region_id: str, entry_timestamp: str,
+    ) -> None:
+        """If the visit is fully drained (exited, counts match, not alerted)
+        clean its frames from the BA bucket and forget the counters.
+        """
+        if (
+            self._visit_tracker is None
+            or self._frame_mgr is None
+            or visit_key is None
+        ):
+            return
+        if not self._visit_tracker.is_drained(visit_key):
+            return
+        try:
+            self._frame_mgr.cleanup_visit(
+                object_id=person_id,
+                region_id=region_id,
+                entry_timestamp=entry_timestamp,
+                scene_id=scene_id,
+            )
+        except Exception:
+            logger.exception(
+                "cleanup_visit failed",
+                person_id=person_id,
+                region_id=region_id,
+                entry_timestamp=entry_timestamp,
+            )
+        finally:
+            self._visit_tracker.forget(visit_key)
+
     async def on_ba_result(self, result: dict) -> None:
         """
         Handle a BA analysis result received from the MQTT ba/results topic.
@@ -411,20 +528,34 @@ class RuleEngineAdapter:
         region_id = result.get("region_id", "")
         status = result.get("status", "")
         scene_id = result.get("scene_id", "")
+        entry_timestamp = result.get("entry_timestamp", "")
+
+        # Per-visit accounting: every ba/results bumps results_received.
+        if self._visit_tracker is not None and entry_timestamp:
+            visit_key = self._visit_tracker.make_key(
+                scene_id, person_id, region_id, entry_timestamp,
+            )
+            self._visit_tracker.note_result(visit_key)
+        else:
+            visit_key = None
 
         session = self.session_mgr.get_session(person_id, scene_id=scene_id)
         if not session:
             logger.debug("BA result for unknown session", person_id=person_id)
+            # Still attempt drain so we don't leak counters for an exited
+            # session that we've already cleaned up elsewhere.
+            self._maybe_drain_visit(visit_key, scene_id, person_id, region_id, entry_timestamp)
             return
 
         # Quick non-actionable statuses — no rule firing needed.
-        if status in ("received", "no_match"):
+        if status in ("received", "no_match", "no_enough_data"):
             logger.debug(
                 "BA queue: status update",
                 person_id=person_id,
                 region_id=region_id,
                 status=status,
             )
+            self._maybe_drain_visit(visit_key, scene_id, person_id, region_id, entry_timestamp)
             return
 
         # No per-zone dedup here — the BA service emits one ba/results per
@@ -451,14 +582,14 @@ class RuleEngineAdapter:
             scene_id=session.scene_id,
         )
 
-        # Build context the rule conditions can read.
-        context = self._build_context(synth_event, session)
-        context["ba_status"] = status
-        context["ba_confidence"] = result.get("confidence", 0.0)
-        context["ba_frames_analyzed"] = result.get("frames_analyzed", 0)
-
         # Stash raw BA result so _build_details(CONCEALMENT) can pick it up.
         session._pending_ba_result = result
+
+        # Build context the rule conditions can read. Must happen AFTER the
+        # _pending_ba_result stash so _build_context picks up ba_confidence /
+        # ba_message / ba_frames_analyzed from the raw result.
+        context = self._build_context(synth_event, session)
+        context["ba_status"] = status
 
         # Apply external flag definitions from config
         for flag_def in self._external_flags.get("behavioral_analysis", []):
@@ -469,7 +600,7 @@ class RuleEngineAdapter:
 
         try:
             actions = self._engine.evaluate("ba_result", zone_type.value, context)
-            await self._execute_actions(actions, synth_event, session)
+            await self._execute_actions(actions, synth_event, session, context)
         finally:
             session._pending_ba_result = None
 
@@ -477,24 +608,53 @@ class RuleEngineAdapter:
 
     async def _fire_alert(self, alert: Alert) -> None:
         """Persist evidence frames and send to alert-service."""
-        if self._frame_mgr and not alert.evidence_keys:
-            frame_keys = self._frame_mgr.get_person_frame_keys(alert.object_id)
-            if frame_keys:
-                stored = []
-                for idx, key in enumerate(frame_keys):
-                    raw = self._frame_mgr.get_frame(key)
-                    if raw:
-                        ev_key = self._frame_mgr.store_evidence_frame(
-                            alert.alert_id, idx, raw
-                        )
-                        stored.append(ev_key)
-                if stored:
-                    alert.evidence_keys = stored
-                    logger.info(
-                        "Evidence frames stored",
-                        alert_id=alert.alert_id,
-                        count=len(stored),
-                    )
+        # Copy BA-bucket frames (up to last_frame_ts) under
+        # alerts/{person_id}/{alert_id}/frames/. Driven by the BA result
+        # that triggered this alert (stashed on the session).
+        ba_result = getattr(
+            self.session_mgr.get_session(
+                alert.object_id, scene_id=alert.scene_id,
+            ),
+            "_pending_ba_result",
+            None,
+        ) if alert.object_id else None
+        if (
+            self._frame_mgr
+            and ba_result
+            and ba_result.get("last_frame_ts")
+            and ba_result.get("entry_timestamp")
+        ):
+            # Mark the visit as alerted so the drain logic keeps the BA
+            # frames around as evidence. We do NOT gate the copy on the
+            # first alert: every alert in the visit gets its own frames
+            # folder under alerts/{person_id}/{alert_id}/frames/.
+            if self._visit_tracker is not None:
+                visit_key = self._visit_tracker.make_key(
+                    ba_result.get("scene_id", alert.scene_id),
+                    ba_result.get("person_id", alert.object_id),
+                    ba_result.get("region_id", alert.region_id),
+                    ba_result["entry_timestamp"],
+                )
+                self._visit_tracker.mark_alerted(visit_key)
+            try:
+                copied = self._frame_mgr.copy_frames_to_alert(
+                    scene_id=ba_result.get("scene_id", alert.scene_id),
+                    person_id=ba_result.get("person_id", alert.object_id),
+                    region_id=ba_result.get("region_id", alert.region_id),
+                    entry_timestamp=ba_result["entry_timestamp"],
+                    last_frame_ts=ba_result["last_frame_ts"],
+                    alert_id=alert.alert_id,
+                )
+                logger.info(
+                    "BA frames copied to alert prefix",
+                    alert_id=alert.alert_id,
+                    copied=copied,
+                )
+            except Exception:
+                logger.exception(
+                    "copy_frames_to_alert failed",
+                    alert_id=alert.alert_id,
+                )
 
         # Send to alert-service (handles MQTT delivery with dedup)
         if self._alert_client:

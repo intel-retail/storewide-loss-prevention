@@ -42,15 +42,13 @@ class FrameManager:
     """
     Manages person frames in SeaweedFS via S3-compatible API.
 
-    Only stores frames for persons in HIGH_VALUE zones.
-    Maintains a rolling buffer of 20 frames per person.
-    Also mirrors frames to the behavioral-frames bucket for the BA service.
+    Writes frames into the ``behavioral-frames`` bucket for the BA
+    service to consume, and copies the suspect window into the
+    ``alerts`` bucket when a suspicious BA result triggers an alert.
     """
 
-    BUCKET = "loss-prevention-frames"
     BA_BUCKET = "behavioral-frames"
-    ROLLING_BUFFER_SIZE = 20  # ~10 seconds at 2fps
-    ALERT_EVIDENCE_PREFIX = "alerts"
+    ALERTS_BUCKET = "alerts"
 
     def __init__(self, config: ConfigService) -> None:
         seaweed_cfg = config.get_seaweedfs_config()
@@ -61,8 +59,7 @@ class FrameManager:
         self.retention_hours = seaweed_cfg.get("evidence_retention_hours", 24)
         self.exit_retention_seconds = seaweed_cfg.get("exit_retention_seconds", 60)
 
-        # Per-person key tracking for rolling buffer management
-        self._person_keys: Dict[str, List[str]] = {}
+        # Per-person tracking of BA-bucket keys (used by cleanup helpers).
         self._person_ba_keys: Dict[str, List[str]] = {}
 
         self.client: Optional["Minio"] = None
@@ -77,8 +74,8 @@ class FrameManager:
         logger.info(
             "FrameManager initialized",
             endpoint=self.endpoint,
-            bucket=self.BUCKET,
-            buffer_size=self.ROLLING_BUFFER_SIZE,
+            ba_bucket=self.BA_BUCKET,
+            alerts_bucket=self.ALERTS_BUCKET,
         )
 
     async def ensure_bucket(self) -> None:
@@ -88,7 +85,7 @@ class FrameManager:
         import asyncio
         for attempt in range(5):
             try:
-                for bucket in (self.BUCKET, self.BA_BUCKET):
+                for bucket in (self.BA_BUCKET, self.ALERTS_BUCKET):
                     if not self.client.bucket_exists(bucket):
                         self.client.make_bucket(bucket)
                         logger.info("Created bucket", bucket=bucket)
@@ -105,7 +102,7 @@ class FrameManager:
                     )
                     await asyncio.sleep(wait)
                 else:
-                    logger.exception("Bucket check/create failed after retries", bucket=self.BUCKET)
+                    logger.exception("Bucket check/create failed after retries")
 
     # ---- Store person frame --------------------------------------------------
     def store_person_frame(
@@ -115,24 +112,21 @@ class FrameManager:
         scene_id: Optional[str] = None,
     ) -> str:
         """
-        Store a full camera frame in the rolling buffer.
-        Also mirrors to behavioral-frames bucket for BA service consumption.
-        Evicts the oldest frame if the buffer exceeds ROLLING_BUFFER_SIZE.
-        Returns the SeaweedFS object key.
+        Store a full camera frame in the ``behavioral-frames`` bucket for the
+        BA service to consume. Returns the SeaweedFS object key.
         """
         ts = ts or datetime.now(timezone.utc)
-        # Key: {scene_id}/{object_id}/{timestamp}.jpg
         prefix = f"{scene_id}/{object_id}" if scene_id else object_id
-        key = f"{prefix}/{ts.strftime('%Y%m%dT%H%M%S_%f')}.jpg"
-        self._put(key, image_bytes)
 
-        # Mirror to behavioral-frames bucket:
+        # Behavioral-frames bucket layout:
         # {scene_id}/{person_id}/{region_id}/{entry_timestamp}/frames/{ts_ms}.jpg
         ts_ms = int(ts.timestamp() * 1000)
-        # Convert entry_timestamp ISO string to compact folder name
         entry_folder = ""
         if entry_timestamp:
-            entry_folder = entry_timestamp.replace(":", "").replace("-", "").replace("T", "T").split("+")[0].split(".")[0]
+            entry_folder = (
+                entry_timestamp.replace(":", "").replace("-", "")
+                .split("+")[0].split(".")[0]
+            )
         if region_id and entry_folder:
             ba_key = f"{prefix}/{region_id}/{entry_folder}/frames/{ts_ms}.jpg"
         elif region_id:
@@ -141,33 +135,123 @@ class FrameManager:
             ba_key = f"{prefix}/frames/{ts_ms}.jpg"
         self._put(ba_key, image_bytes, bucket=self.BA_BUCKET)
 
-        # Track keys for rolling buffer management
-        if object_id not in self._person_keys:
-            self._person_keys[object_id] = []
-        self._person_keys[object_id].append(key)
+        # Track BA keys for cleanup bookkeeping (no eviction — lifecycle is
+        # owned by the visit-tracker driven cleanup paths).
+        self._person_ba_keys.setdefault(object_id, []).append(ba_key)
+        return ba_key
 
-        # Evict oldest if over buffer size
-        while len(self._person_keys[object_id]) > self.ROLLING_BUFFER_SIZE:
-            old_key = self._person_keys[object_id].pop(0)
-            self._delete(old_key)
+    # ---- Copy BA frames into alert bucket ------------------------------------
+    def copy_frames_to_alert(
+        self,
+        scene_id: str,
+        person_id: str,
+        region_id: str,
+        entry_timestamp: str,
+        last_frame_ts: str,
+        alert_id: str,
+    ) -> int:
+        """Copy this visit's behavioral-frames up to ``last_frame_ts`` into a
+        per-alert prefix:
 
-        # Track BA keys (no eviction — BA service owns lifecycle)
-        if object_id not in self._person_ba_keys:
-            self._person_ba_keys[object_id] = []
-        self._person_ba_keys[object_id].append(ba_key)
+            ``{BA_BUCKET}/alerts/{person_id}/{alert_id}/frames/{ts_ms}.jpg``
 
-        return key
+        ``last_frame_ts`` is the SceneScape ISO string echoed in
+        ``ba/results``; converted to epoch-ms it equals the filename used
+        when the frame was first stored (see ``store_person_frame``). Any
+        frames in the visit prefix whose filename ms <= cutoff_ms are
+        copied.
 
-    # ---- Store alert evidence ------------------------------------------------
-    def store_evidence_frame(
-        self, alert_id: str, idx: int, image_bytes: bytes,
-        scene_id: Optional[str] = None,
-    ) -> str:
-        """Store an evidence frame for audit retention."""
-        prefix = f"{scene_id}/{self.ALERT_EVIDENCE_PREFIX}" if scene_id else self.ALERT_EVIDENCE_PREFIX
-        key = f"{prefix}/{alert_id}/evidence/frame_{idx:03d}.jpg"
-        self._put(key, image_bytes)
-        return key
+        Returns the number of frames successfully copied. Originals are
+        NOT deleted -- the visit cleanup path owns lifecycle.
+        """
+        if not (self.client and last_frame_ts and entry_timestamp):
+            return 0
+
+        cutoff_ms = self._iso_to_ms(last_frame_ts)
+        if cutoff_ms is None:
+            logger.warning(
+                "copy_frames_to_alert: unparseable last_frame_ts",
+                last_frame_ts=last_frame_ts,
+                alert_id=alert_id,
+            )
+            return 0
+
+        # Mirror the entry_folder transform used in store_person_frame.
+        entry_folder = (
+            entry_timestamp.replace(":", "").replace("-", "")
+            .split("+")[0].split(".")[0]
+        )
+        person_prefix = f"{scene_id}/{person_id}" if scene_id else person_id
+        src_prefix = f"{person_prefix}/{region_id}/{entry_folder}/frames/"
+        dst_prefix = f"{person_id}/{alert_id}/frames/"
+
+        copied = 0
+        skipped = 0
+        try:
+            from minio.commonconfig import CopySource
+        except ImportError:
+            logger.exception("minio.commonconfig.CopySource unavailable")
+            return 0
+
+        try:
+            objects = list(
+                self.client.list_objects(
+                    self.BA_BUCKET, prefix=src_prefix, recursive=True,
+                )
+            )
+        except S3Error:
+            logger.exception(
+                "copy_frames_to_alert: list_objects failed",
+                bucket=self.BA_BUCKET, prefix=src_prefix,
+            )
+            return 0
+
+        for obj in objects:
+            name = obj.object_name
+            stem = name.rsplit("/", 1)[-1].rsplit(".", 1)[0]
+            try:
+                ts_ms = int(stem)
+            except ValueError:
+                skipped += 1
+                continue
+            if ts_ms > cutoff_ms:
+                skipped += 1
+                continue
+            dst_key = f"{dst_prefix}{ts_ms}.jpg"
+            try:
+                self.client.copy_object(
+                    self.ALERTS_BUCKET, dst_key,
+                    CopySource(self.BA_BUCKET, name),
+                )
+                copied += 1
+            except S3Error:
+                logger.exception(
+                    "copy_frames_to_alert: copy_object failed",
+                    src=name, dst=dst_key,
+                )
+
+        logger.info(
+            "copy_frames_to_alert done",
+            alert_id=alert_id,
+            person_id=person_id,
+            region_id=region_id,
+            entry_timestamp=entry_timestamp,
+            cutoff_ms=cutoff_ms,
+            listed=len(objects),
+            copied=copied,
+            skipped=skipped,
+            dst_bucket=self.ALERTS_BUCKET,
+            dst_prefix=dst_prefix,
+        )
+        return copied
+
+    @staticmethod
+    def _iso_to_ms(iso_ts: str) -> Optional[int]:
+        try:
+            dt = datetime.fromisoformat(iso_ts.replace("Z", "+00:00"))
+            return int(dt.timestamp() * 1000)
+        except (ValueError, AttributeError):
+            return None
 
     # ---- Read frames ---------------------------------------------------------
     def get_frame(self, key: str) -> Optional[bytes]:
@@ -184,8 +268,8 @@ class FrameManager:
         return results
 
     def get_person_frame_keys(self, object_id: str) -> List[str]:
-        """Return the current rolling buffer keys for a person."""
-        return list(self._person_keys.get(object_id, []))
+        """Return tracked behavioral-frames keys for a person."""
+        return list(self._person_ba_keys.get(object_id, []))
 
     # ---- Cleanup -------------------------------------------------------------
     def cleanup_person(self, object_id: str, scene_id: Optional[str] = None) -> None:
@@ -194,15 +278,14 @@ class FrameManager:
         expiry / PERSON_LOST). Use ``cleanup_visit`` for per-visit cleanup
         on zone EXIT.
         """
-        keys = self._person_keys.pop(object_id, [])
         ba_keys = self._person_ba_keys.pop(object_id, [])
-        for key in keys:
-            self._delete(key)
-        # Clean up behavioral-frames bucket
         prefix = f"{scene_id}/{object_id}/" if scene_id else f"{object_id}/"
-        self._delete_prefix(prefix, bucket=self.BA_BUCKET)
-        if keys:
-            logger.info("Cleaned up person frames", object_id=object_id, count=len(keys))
+        deleted = self._delete_prefix(prefix, bucket=self.BA_BUCKET)
+        if ba_keys or deleted:
+            logger.info(
+                "Cleaned up person frames",
+                object_id=object_id, tracked=len(ba_keys), deleted=deleted,
+            )
 
     def cleanup_visit(
         self,
@@ -217,9 +300,6 @@ class FrameManager:
 
         Other visits (different entry_timestamp) for the same person and
         region remain intact, so the BA service can still process them.
-        Rolling-buffer keys in the LP bucket are person-wide and not
-        touched here — they age out naturally via the ROLLING_BUFFER_SIZE
-        eviction in ``store_person_frame``.
         """
         if not entry_timestamp:
             logger.warning(
@@ -267,17 +347,14 @@ class FrameManager:
         )
 
     def cleanup_person_frames_deferred(self, object_id: str) -> List[str]:
-        """
-        Return keys to delete later (after exit_retention_seconds).
-        Does NOT delete immediately — caller schedules deletion.
-        """
-        return list(self._person_keys.get(object_id, []))
+        """Return tracked BA-bucket keys for the person (caller schedules deletion)."""
+        return list(self._person_ba_keys.get(object_id, []))
 
     # ---- Internal helpers ----------------------------------------------------
     def _put(self, key: str, data: bytes, bucket: Optional[str] = None) -> None:
         if not self.client:
             return
-        bucket = bucket or self.BUCKET
+        bucket = bucket or self.BA_BUCKET
         try:
             self.client.put_object(
                 bucket, key, io.BytesIO(data), length=len(data),
@@ -286,15 +363,16 @@ class FrameManager:
         except S3Error:
             logger.exception("SeaweedFS put failed", key=key, bucket=bucket)
 
-    def _get(self, key: str) -> Optional[bytes]:
+    def _get(self, key: str, bucket: Optional[str] = None) -> Optional[bytes]:
         if not self.client:
             return None
+        bucket = bucket or self.BA_BUCKET
         resp = None
         try:
-            resp = self.client.get_object(self.BUCKET, key)
+            resp = self.client.get_object(bucket, key)
             return resp.read()
         except S3Error:
-            logger.debug("SeaweedFS get miss", key=key)
+            logger.debug("SeaweedFS get miss", key=key, bucket=bucket)
             return None
         finally:
             if resp is not None:
@@ -307,7 +385,7 @@ class FrameManager:
     def _delete(self, key: str, bucket: Optional[str] = None) -> None:
         if not self.client:
             return
-        bucket = bucket or self.BUCKET
+        bucket = bucket or self.BA_BUCKET
         try:
             self.client.remove_object(bucket, key)
         except S3Error:
@@ -320,7 +398,7 @@ class FrameManager:
         """
         if not self.client:
             return 0
-        bucket = bucket or self.BUCKET
+        bucket = bucket or self.BA_BUCKET
         deleted = 0
         failed = 0
         try:
