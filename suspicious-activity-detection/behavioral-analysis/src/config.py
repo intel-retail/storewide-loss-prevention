@@ -62,8 +62,6 @@ class Settings(BaseSettings):
     mqtt_port: int = 1883
     ba_request_topic: str = "ba/requests"
     ba_result_topic: str = "ba/results"
-    # Bucket-poll cadence per active visit (seconds).
-    visit_poll_interval: float = 1.0
 
     class Config:
         env_prefix = ""  # No prefix, use exact variable names

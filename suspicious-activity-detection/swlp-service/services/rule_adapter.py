@@ -126,19 +126,22 @@ class RuleEngineAdapter:
             # Stop any escalation services that were started for this zone
             for svc in self._service_registry.values():
                 svc.stop(event.object_id, event.region_id)
-            cleanup_key = f"{event.object_id}:{event.region_id}:{event.entry_timestamp or ''}"
-            if cleanup_key not in self._pending_cleanups:
-                self._pending_cleanups.add(cleanup_key)
-                asyncio.create_task(
-                    self._deferred_frame_cleanup(
-                        event.object_id,
-                        event.region_id,
-                        event.region_name,
-                        event.dwell_seconds,
-                        event.scene_id,
-                        event.entry_timestamp,
-                    )
-                )
+            # NOTE: behavioral-frames bucket cleanup on HIGH_VALUE zone exit
+            # is currently disabled — frames accumulate until manual purge.
+            # Re-enable by uncommenting the block below.
+            # cleanup_key = f"{event.object_id}:{event.region_id}:{event.entry_timestamp or ''}"
+            # if cleanup_key not in self._pending_cleanups:
+            #     self._pending_cleanups.add(cleanup_key)
+            #     asyncio.create_task(
+            #         self._deferred_frame_cleanup(
+            #             event.object_id,
+            #             event.region_id,
+            #             event.region_name,
+            #             event.dwell_seconds,
+            #             event.scene_id,
+            #             event.entry_timestamp,
+            #         )
+            #     )
 
         elif event.event_type == EventType.LOITER:
             # Continuous region-data feed signalled the person is in

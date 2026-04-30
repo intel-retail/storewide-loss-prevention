@@ -73,9 +73,18 @@ class YOLOPoseOV:
         image: np.ndarray,
     ) -> tuple[np.ndarray, float, tuple[int, int]]:
         """Letterbox + normalise to (1, 3, 640, 640) float32."""
+        # Coerce to 3-channel BGR. Decoded JPEGs may be grayscale (2D) or
+        # BGRA (4 channels) depending on the source camera.
+        if image.ndim == 2:
+            image = cv2.cvtColor(image, cv2.COLOR_GRAY2BGR)
+        elif image.ndim == 3 and image.shape[2] == 4:
+            image = cv2.cvtColor(image, cv2.COLOR_BGRA2BGR)
+        elif image.ndim == 3 and image.shape[2] == 1:
+            image = cv2.cvtColor(image, cv2.COLOR_GRAY2BGR)
+
         h, w = image.shape[:2]
         ratio = min(_INPUT_SIZE / h, _INPUT_SIZE / w)
-        new_w, new_h = int(w * ratio), int(h * ratio)
+        new_w, new_h = max(int(w * ratio), 1), max(int(h * ratio), 1)
         resized = cv2.resize(image, (new_w, new_h), interpolation=cv2.INTER_LINEAR)
 
         pad_w = (_INPUT_SIZE - new_w) // 2

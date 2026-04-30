@@ -24,51 +24,37 @@ BA_RESULT_TOPIC = "ba/results"
 
 class BAQueuePublisher:
     """
-    Publishes BA visit lifecycle events to MQTT topic ba/requests.
+    Publishes BA frame-arrival events to MQTT topic ba/requests.
 
-    A visit is bracketed by two messages:
-      - ``action="start"`` published once when the person enters a HV zone
-      - ``action="exit"``  published once when the visit ends
-
-    Between those messages, frames stream into the SeaweedFS bucket; the
-    behavioral-analysis service polls that bucket and emits as many
-    ``ba/results`` messages as concealment events it observes.
+    swlp-service emits one ba/requests message every time a fresh frame for
+    a HIGH_VALUE-zone person has been written to the SeaweedFS
+    ``behavioral-frames`` bucket. The behavioural-analysis service consumes
+    each message, fetches the latest K frames for that visit, runs pose +
+    VLM, and publishes a single ``ba/results`` message in response. There
+    is no start/exit lifecycle and no polling loop on the BA side.
     """
 
     def __init__(self, mqtt_service) -> None:
         self._mqtt = mqtt_service
 
-    def _publish(self, action: str, person_id: str, region_id: str,
-                 entry_timestamp: str, scene_id: str) -> None:
+    def publish_request(
+        self, person_id: str, region_id: str, entry_timestamp: str,
+        scene_id: str = "",
+    ) -> None:
+        """Publish one ba/requests message for a freshly stored frame."""
         payload = {
-            "action": action,
             "person_id": person_id,
             "region_id": region_id,
             "entry_timestamp": entry_timestamp,
             "scene_id": scene_id,
         }
         self._mqtt.publish(BA_REQUEST_TOPIC, payload)
-        logger.info(
-            "Published BA lifecycle event",
-            action=action,
+        logger.debug(
+            "Published BA request",
             person_id=person_id,
             region_id=region_id,
             scene_id=scene_id,
         )
-
-    def publish_start(
-        self, person_id: str, region_id: str, entry_timestamp: str,
-        scene_id: str = "",
-    ) -> None:
-        """Notify BA service that a visit has begun; it should start polling."""
-        self._publish("start", person_id, region_id, entry_timestamp, scene_id)
-
-    def publish_exit(
-        self, person_id: str, region_id: str, entry_timestamp: str,
-        scene_id: str = "",
-    ) -> None:
-        """Notify BA service that the visit has ended; it should stop polling."""
-        self._publish("exit", person_id, region_id, entry_timestamp, scene_id)
 
 
 class BAQueueConsumer:

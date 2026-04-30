@@ -1,26 +1,25 @@
 # Copyright (C) 2026 Intel Corporation
 # SPDX-License-Identifier: Apache-2.0
 """
-MQTT-based queue consumer for Behavioral Analysis visit lifecycle events.
+MQTT-based queue consumer for Behavioral Analysis requests.
 
-Topic ``ba/requests`` carries two kinds of messages, distinguished by the
-``action`` field:
+Topic ``ba/requests`` carries one message per fresh frame stored by
+swlp-service. Each message is fully self-describing:
 
-* ``action == "start"`` -- swlp-service published once when a person enters
-  a HIGH_VALUE zone. We spawn a polling worker keyed by
-  ``{scene_id}/{person_id}/{region_id}/{entry_timestamp}`` that watches the
-  matching prefix in the SeaweedFS ``behavioral-frames`` bucket.
+    {
+      "scene_id":        "...",
+      "person_id":       "...",
+      "region_id":       "...",
+      "entry_timestamp": "20260429T113629"
+    }
 
-* ``action == "exit"`` -- swlp-service published once when the visit ends.
-  We cancel the worker.
+The consumer is **stateless and single-shot**: for each message it fetches
+the latest K frames from SeaweedFS for that visit, runs pose extraction +
+VLM, and publishes exactly one ``ba/results`` message in response.
 
-Each worker polls the bucket on a fixed cadence
-(``settings.visit_poll_interval``). When at least
-``settings.min_frames_for_detection`` *new* frames have accumulated since
-the last analysis (tracked via a per-worker watermark on the frame
-timestamp), the worker runs pose extraction + VLM and publishes one
-``ba/results`` message. It keeps polling so that multiple discrete
-concealment events in the same visit each produce their own alert.
+Requests are processed serially via an internal ``asyncio.Queue`` so that
+multiple messages do not pile up concurrent VLM calls. There is no
+per-person worker, no polling loop, and no ``action`` (start/exit) field.
 """
 
 import asyncio
@@ -37,13 +36,8 @@ from yolo_pipeline import extract_poses
 logger = logging.getLogger(__name__)
 
 
-def _visit_key(scene_id: str, person_id: str, region_id: str,
-               entry_timestamp: str) -> str:
-    return f"{scene_id}/{person_id}/{region_id}/{entry_timestamp}"
-
-
 class BAQueueConsumer:
-    """Consumes visit lifecycle events and runs per-visit polling workers."""
+    """Stateless single-shot consumer of ``ba/requests`` events."""
 
     def __init__(
         self,
@@ -57,21 +51,20 @@ class BAQueueConsumer:
         self.frame_store = frame_store
         self.pose_analyzer = pose_analyzer
         self.min_frames = settings.min_frames_for_detection
-        self.poll_interval = settings.visit_poll_interval
 
         self.client: Optional[mqtt.Client] = None
         self.loop: Optional[asyncio.AbstractEventLoop] = None
         self.connected = False
         self._shutdown = asyncio.Event()
-        # Per-visit worker tasks, keyed by _visit_key().
-        self._workers: dict[str, asyncio.Task] = {}
-        # Cooperative-stop flags, keyed by _visit_key(). The polling loop
-        # checks this each iteration; in-flight pose/VLM calls are NOT
-        # cancelled and run to completion.
-        self._stop_flags: dict[str, bool] = {}
+        # Bounded internal queue so we apply natural backpressure when BA is
+        # slower than the publisher. Old requests are dropped if the queue
+        # is full -- the latest frame is always more interesting than stale ones.
+        self._queue: Optional[asyncio.Queue] = None
+        self._worker_task: Optional[asyncio.Task] = None
 
     def initialize(self, loop: asyncio.AbstractEventLoop) -> None:
         self.loop = loop
+        self._queue = asyncio.Queue(maxsize=64)
         self.client = mqtt.Client(client_id="ba-queue-consumer")
         self.client.on_connect = self._on_connect
         self.client.on_disconnect = self._on_disconnect
@@ -79,20 +72,20 @@ class BAQueueConsumer:
 
     async def start(self) -> None:
         logger.info(
-            "BA queue consumer connecting to MQTT",
-            extra={"host": self.settings.mqtt_host, "port": self.settings.mqtt_port},
+            "BA queue consumer connecting to MQTT host=%s port=%s",
+            self.settings.mqtt_host, self.settings.mqtt_port,
         )
         self.client.connect_async(
             self.settings.mqtt_host, self.settings.mqtt_port, keepalive=60
         )
         self.client.loop_start()
+        self._worker_task = asyncio.create_task(self._worker())
         await self._shutdown.wait()
 
     async def stop(self) -> None:
         self._shutdown.set()
-        # Signal all workers to stop after their current iteration.
-        for key in list(self._workers.keys()):
-            self._stop_flags[key] = True
+        if self._worker_task:
+            self._worker_task.cancel()
         if self.client:
             self.client.loop_stop()
             self.client.disconnect()
@@ -100,15 +93,10 @@ class BAQueueConsumer:
 
     def publish_result(self, result: dict) -> None:
         if self.client and self.connected:
-            self.client.publish(
-                self.result_topic, json.dumps(result), qos=1
-            )
+            self.client.publish(self.result_topic, json.dumps(result), qos=1)
             logger.info(
-                "Published BA result",
-                extra={
-                    "person_id": result.get("person_id"),
-                    "status": result.get("status"),
-                },
+                "Published BA result person_id=%s status=%s",
+                result.get("person_id"), result.get("status"),
             )
 
     # ---- paho callbacks ------------------------------------------------------
@@ -118,14 +106,15 @@ class BAQueueConsumer:
             self.connected = True
             client.subscribe(self.request_topic, qos=1)
             logger.info(
-                f"BA queue consumer connected, subscribed to {self.request_topic}"
+                "BA queue consumer connected, subscribed to %s",
+                self.request_topic,
             )
         else:
-            logger.error(f"BA queue consumer MQTT connect failed, rc={rc}")
+            logger.error("BA queue consumer MQTT connect failed, rc=%s", rc)
 
     def _on_disconnect(self, client, userdata, rc) -> None:
         self.connected = False
-        logger.warning(f"BA queue consumer MQTT disconnected, rc={rc}")
+        logger.warning("BA queue consumer MQTT disconnected, rc=%s", rc)
 
     def _on_message(self, client, userdata, msg: mqtt.MQTTMessage) -> None:
         if msg.topic != self.request_topic:
@@ -136,7 +125,6 @@ class BAQueueConsumer:
             logger.error("Invalid JSON in BA request message")
             return
 
-        action = payload.get("action", "start")
         person_id = payload.get("person_id", "")
         region_id = payload.get("region_id", "")
         entry_timestamp = payload.get("entry_timestamp", "")
@@ -145,178 +133,107 @@ class BAQueueConsumer:
             logger.warning("BA message missing person_id, skipping")
             return
 
-        key = _visit_key(scene_id, person_id, region_id, entry_timestamp)
-
-        if action == "exit":
-            self._stop_worker(key)
+        if not self.loop or not self._queue:
             return
 
-        # Default action is "start" (also accepts legacy messages with no action).
-        if action not in ("start",):
-            logger.debug(f"Ignoring unknown BA action: {action}")
+        request = (person_id, region_id, entry_timestamp, scene_id)
+        # Threadsafe enqueue from the paho thread onto the asyncio queue.
+        self.loop.call_soon_threadsafe(self._enqueue, request)
+
+    def _enqueue(self, request: tuple) -> None:
+        if self._queue is None:
             return
-
-        if not self.loop:
-            return
-        # Spawn the worker on the asyncio loop.
-        self.loop.call_soon_threadsafe(
-            self._spawn_worker, key, person_id, region_id, entry_timestamp, scene_id
-        )
-
-    # ---- worker management ---------------------------------------------------
-
-    def _spawn_worker(self, key: str, person_id: str, region_id: str,
-                      entry_timestamp: str, scene_id: str) -> None:
-        existing = self._workers.get(key)
-        if existing and not existing.done():
-            logger.debug(f"BA worker already running for {key}, skipping spawn")
-            return
-        self._workers[key] = asyncio.create_task(
-            self._run_worker(key, person_id, region_id, entry_timestamp, scene_id)
-        )
-
-    def _stop_worker(self, key: str) -> None:
-        """Signal the worker to stop after its current iteration.
-
-        We do NOT cancel the task: any in-flight pose extraction / VLM call
-        is allowed to finish (and publish its result). Only the polling
-        loop is asked to exit, so no further bucket fetches happen.
-        """
-        if key in self._workers:
-            self._stop_flags[key] = True
-            logger.info(f"BA worker stop requested for {key}")
-
-    async def _run_worker(self, key: str, person_id: str, region_id: str,
-                          entry_timestamp: str, scene_id: str) -> None:
-        """Per-visit polling loop.
-
-        Watches the bucket prefix for this (scene/person/region/entry_ts);
-        whenever ``min_frames`` new frames have arrived since the last
-        analysis, runs pose+VLM and publishes a result. Continues until
-        cancelled by an ``exit`` message.
-        """
-        logger.info(
-            f"BA worker started for {key} (poll={self.poll_interval}s, "
-            f"min_frames={self.min_frames})"
-        )
-        watermark_ts = 0  # only frames with timestamp > watermark are "new"
-        self._stop_flags[key] = False
         try:
-            while True:
-                if self._stop_flags.get(key):
-                    logger.info(f"BA worker exiting cleanly for {key}")
-                    return
-                await asyncio.sleep(self.poll_interval)
-                if self._stop_flags.get(key):
-                    logger.info(f"BA worker exiting cleanly for {key}")
-                    return
-                try:
-                    frames = await self.frame_store.get_frames(
-                        entity_id=person_id,
-                        max_frames=self.settings.max_frames_to_fetch,
-                        max_age_seconds=0,
-                        region_id=region_id,
-                        entry_timestamp=entry_timestamp,
-                        scene_id=scene_id,
-                    )
-                except Exception:
-                    logger.exception(f"Frame fetch failed for {key}")
-                    continue
+            self._queue.put_nowait(request)
+        except asyncio.QueueFull:
+            # Drop oldest, keep newest -- the latest frame is always more
+            # relevant for the analysis than a stale one.
+            try:
+                self._queue.get_nowait()
+                self._queue.put_nowait(request)
+            except (asyncio.QueueEmpty, asyncio.QueueFull):
+                pass
 
-                # Pick frames newer than the last analysis.
-                new_frames = [(f, ts) for (f, ts) in frames if ts > watermark_ts]
-                if len(new_frames) < self.min_frames:
-                    continue
+    # ---- worker --------------------------------------------------------------
 
-                # Analyse the latest batch and bump the watermark to the
-                # newest analysed frame so the next cycle waits for the next
-                # batch of fresh frames.
-                await self._analyze_batch(
-                    person_id, region_id, entry_timestamp, scene_id, new_frames
+    async def _worker(self) -> None:
+        """Single serial worker: process one BA request to completion at a time."""
+        assert self._queue is not None
+        while not self._shutdown.is_set():
+            try:
+                request = await self._queue.get()
+            except asyncio.CancelledError:
+                return
+            person_id, region_id, entry_timestamp, scene_id = request
+            try:
+                await self._handle_request(
+                    person_id, region_id, entry_timestamp, scene_id
                 )
-                watermark_ts = max(ts for _, ts in new_frames)
-        except asyncio.CancelledError:
-            logger.debug(f"BA worker loop cancelled for {key}")
-            raise
-        except Exception:
-            logger.exception(f"BA worker crashed for {key}")
-        finally:
-            self._workers.pop(key, None)
-            self._stop_flags.pop(key, None)
+            except Exception:
+                logger.exception(
+                    "Unhandled error processing BA request person_id=%s",
+                    person_id,
+                )
 
-    # ---- single-batch analysis -----------------------------------------------
+    # ---- single request analysis --------------------------------------------
 
-    async def _analyze_batch(
-        self, person_id: str, region_id: str, entry_timestamp: str,
-        scene_id: str, frames: list,
+    async def _handle_request(
+        self, person_id: str, region_id: str,
+        entry_timestamp: str, scene_id: str,
     ) -> None:
-        """Run pose + VLM on a batch of frames and publish exactly one result."""
-        frames_available = len(frames)
+        """Fetch latest K frames, run pose+VLM, publish one ba/results."""
         try:
-            pose_frames = frames[-self.settings.pose_frames_count:]
-            poses = await extract_poses(pose_frames, person_id, self.settings)
-
-            if not poses:
-                self.publish_result({
-                    "person_id": person_id, "region_id": region_id,
-                    "entry_timestamp": entry_timestamp, "scene_id": scene_id,
-                    "status": "no_match", "confidence": 0.0,
-                    "vlm_response": None, "frames_analyzed": frames_available,
-                })
-                return
-
-            results = self.pose_analyzer.detect_all_patterns(poses)
-            matched = [r for r in results if r.matched]
-            result = (
-                max(matched, key=lambda r: r.confidence)
-                if matched
-                else results[0] if results
-                else PatternResult(
-                    matched=False, confidence=0.0,
-                    pattern_id="shelf_to_waist",
-                    description="No patterns evaluated",
-                )
+            frames = await self.frame_store.get_frames(
+                entity_id=person_id,
+                max_frames=self.settings.max_frames_to_fetch,
+                max_age_seconds=0,
+                region_id=region_id,
+                entry_timestamp=entry_timestamp,
+                scene_id=scene_id,
             )
+        except Exception:
+            logger.exception(
+                "Frame fetch failed person_id=%s region_id=%s",
+                person_id, region_id,
+            )
+            return
 
-            if result.matched:
-                logger.warning(
-                    f"Entity {person_id}: pose pattern matched "
-                    f"(confidence={result.confidence:.3f}), calling VLM"
-                )
-                if self.settings.vlm_enabled and self.pose_analyzer.vlm_client:
-                    result = await self.pose_analyzer.analyze_with_vlm(
-                        frames=frames,
-                        pose_result=result,
-                    )
-                vlm_response = None
-                if result.vlm_result:
-                    vlm_response = result.vlm_result.get("reasoning")
+        # frame_store.get_frames returns [(ndarray_bgr, timestamp_ms), ...].
+        # extract_poses() consumes the same tuple shape directly.
+        frames_available = len(frames)
+        if frames_available < self.min_frames:
+            logger.debug(
+                "Skipping BA request: %d/%d frames",
+                frames_available, self.min_frames,
+            )
+            return
 
-                if result.vlm_confirmed is True:
-                    self.publish_result({
-                        "person_id": person_id, "region_id": region_id,
-                        "entry_timestamp": entry_timestamp, "scene_id": scene_id,
-                        "status": "suspicious",
-                        "confidence": result.confidence,
-                        "vlm_response": vlm_response,
-                        "frames_analyzed": frames_available,
-                    })
-                    return
-                # VLM disagreed or failed -> not suspicious for this batch.
-                logger.info(
-                    f"Entity {person_id}: VLM did not confirm "
-                    f"(vlm_confirmed={result.vlm_confirmed})"
-                )
-                self.publish_result({
-                    "person_id": person_id, "region_id": region_id,
-                    "entry_timestamp": entry_timestamp, "scene_id": scene_id,
-                    "status": "no_match",
-                    "confidence": result.confidence,
-                    "vlm_response": vlm_response,
-                    "frames_analyzed": frames_available,
-                })
-                return
+        pose_frames = frames[-self.settings.pose_frames_count:]
+        poses = await extract_poses(pose_frames, person_id, self.settings)
 
+        if not poses:
+            self.publish_result({
+                "person_id": person_id, "region_id": region_id,
+                "entry_timestamp": entry_timestamp, "scene_id": scene_id,
+                "status": "no_match", "confidence": 0.0,
+                "vlm_response": None, "frames_analyzed": frames_available,
+            })
+            return
+
+        results = self.pose_analyzer.detect_all_patterns(poses)
+        matched = [r for r in results if r.matched]
+        result = (
+            max(matched, key=lambda r: r.confidence)
+            if matched
+            else results[0] if results
+            else PatternResult(
+                matched=False, confidence=0.0,
+                pattern_id="shelf_to_waist",
+                description="No patterns evaluated",
+            )
+        )
+
+        if not result.matched:
             self.publish_result({
                 "person_id": person_id, "region_id": region_id,
                 "entry_timestamp": entry_timestamp, "scene_id": scene_id,
@@ -325,5 +242,33 @@ class BAQueueConsumer:
                 "vlm_response": None,
                 "frames_analyzed": frames_available,
             })
-        except Exception:
-            logger.exception(f"Error analysing batch for {person_id}")
+            return
+
+        logger.warning(
+            "Entity %s: pose pattern matched (confidence=%.3f), calling VLM",
+            person_id, result.confidence,
+        )
+        if self.settings.vlm_enabled and self.pose_analyzer.vlm_client:
+            result = await self.pose_analyzer.analyze_with_vlm(
+                frames=frames,
+                pose_result=result,
+            )
+        vlm_response = None
+        if result.vlm_result:
+            vlm_response = result.vlm_result.get("reasoning")
+
+        status = "suspicious" if result.vlm_confirmed is True else "no_match"
+        if result.vlm_confirmed is not True:
+            logger.info(
+                "Entity %s: VLM did not confirm (vlm_confirmed=%s)",
+                person_id, result.vlm_confirmed,
+            )
+
+        self.publish_result({
+            "person_id": person_id, "region_id": region_id,
+            "entry_timestamp": entry_timestamp, "scene_id": scene_id,
+            "status": status,
+            "confidence": result.confidence,
+            "vlm_response": vlm_response,
+            "frames_analyzed": frames_available,
+        })

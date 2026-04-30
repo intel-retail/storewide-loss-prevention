@@ -9,7 +9,7 @@
 # Runtime settings consumed by swlp-service (non-rule knobs).
 settings:
   session_timeout_seconds: 90
-  behavioural_analysis_fps: 5
+  behavioural_analysis_fps: 3
 
 # Default variable values used by the rule engine for ${var:default}
 # placeholders in the rules below. Can be overridden at runtime via the
