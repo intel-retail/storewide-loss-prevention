@@ -35,8 +35,8 @@ class Settings(BaseSettings):
 
     # Frame analysis settings
     min_frames_for_detection: int = 3
-    max_frames_to_fetch: int = 30
-    pose_frames_count: int = 15
+    max_frames_to_fetch: int = 20
+    pose_frames_count: int = 10
 
     # SeaweedFS settings
     seaweedfs_endpoint: str = "http://localhost:8333"
