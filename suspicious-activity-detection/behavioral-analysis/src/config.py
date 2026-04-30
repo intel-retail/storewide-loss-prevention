@@ -35,8 +35,8 @@ class Settings(BaseSettings):
 
     # Frame analysis settings
     min_frames_for_detection: int = 3
-    max_frames_to_fetch: int = 20
-    pose_frames_count: int = 10
+    max_frames_to_fetch: int = 30
+    pose_frames_count: int = 15
 
     # SeaweedFS settings
     seaweedfs_endpoint: str = "http://localhost:8333"
@@ -62,8 +62,6 @@ class Settings(BaseSettings):
     mqtt_port: int = 1883
     ba_request_topic: str = "ba/requests"
     ba_result_topic: str = "ba/results"
-    # Bucket-poll cadence per active visit (seconds).
-    visit_poll_interval: float = 1.0
 
     class Config:
         env_prefix = ""  # No prefix, use exact variable names

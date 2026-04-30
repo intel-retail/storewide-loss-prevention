@@ -14,16 +14,34 @@ PROJECT_ROOT="$(dirname "${SCRIPT_DIR}")"
 MODELS_DIR="${PROJECT_ROOT}/models"
 
 ###############################################
-# CONFIGURATION — load from configs/.env, then apply defaults
+# CONFIGURATION — load AI-model settings from configs/.env.example
+# (single source of truth for VLM_*/TARGET_DEVICE/YOLO_*/RTMPOSE_*).
+# Falls back to configs/.env if .env.example is missing.
+# Only AI-model keys are sourced — placeholder keys like SUPASS,
+# CAMERA_NAME, etc. in .env.example are intentionally ignored.
 ###############################################
+ENV_EXAMPLE="${PROJECT_ROOT}/configs/.env.example"
 ENV_FILE="${PROJECT_ROOT}/configs/.env"
-if [ -f "${ENV_FILE}" ]; then
+AI_KEYS_REGEX='^(VLM_ENABLED|VLM_MODEL_NAME|VLM_SOURCE_MODEL|VLM_PRECISION|TARGET_DEVICE|YOLO_MODEL_NAME|RTMPOSE_MODEL_NAME)='
+
+SOURCE_FILE=""
+if [ -f "${ENV_EXAMPLE}" ]; then
+    SOURCE_FILE="${ENV_EXAMPLE}"
+elif [ -f "${ENV_FILE}" ]; then
+    SOURCE_FILE="${ENV_FILE}"
+fi
+
+if [ -n "${SOURCE_FILE}" ]; then
+    AI_ENV_TMP="$(mktemp)"
+    grep -E "${AI_KEYS_REGEX}" "${SOURCE_FILE}" > "${AI_ENV_TMP}" || true
     set -a
-    source "${ENV_FILE}"
+    # shellcheck disable=SC1090
+    . "${AI_ENV_TMP}"
     set +a
-    echo "  Loaded config from ${ENV_FILE}"
+    rm -f "${AI_ENV_TMP}"
+    echo "  Loaded AI-model settings from ${SOURCE_FILE}"
 else
-    echo "  No configs/.env found, using defaults"
+    echo "  No configs/.env.example or configs/.env found, using defaults"
 fi
 
 VLM_MODEL_NAME="${VLM_MODEL_NAME:-Qwen/Qwen2.5-VL-7B-Instruct}"

@@ -11,6 +11,7 @@ the prompt and response schema are fully driven by configuration.
 import base64
 import json
 import logging
+import time
 from dataclasses import dataclass
 from typing import Any, Optional
 
@@ -126,6 +127,7 @@ class VLMClient:
 
         url = f"{self.endpoint}/v3/chat/completions"
 
+        t0 = time.perf_counter()
         try:
             async with httpx.AsyncClient(timeout=self.timeout) as client:
                 response = await client.post(url, json=payload)
@@ -133,7 +135,18 @@ class VLMClient:
 
             data = response.json()
             raw_text = data["choices"][0]["message"]["content"]
+            latency_ms = (time.perf_counter() - t0) * 1000.0
 
+            usage = data.get("usage") or {}
+            logger.info(
+                "VLM call latency=%.0fms model=%s frames=%d prompt_tokens=%s completion_tokens=%s total_tokens=%s",
+                latency_ms,
+                self.model_name,
+                len(frames),
+                usage.get("prompt_tokens"),
+                usage.get("completion_tokens"),
+                usage.get("total_tokens"),
+            )
             logger.debug(f"VLM raw response: {raw_text}")
 
             # Try to parse as JSON
@@ -146,21 +159,30 @@ class VLMClient:
             )
 
         except httpx.TimeoutException:
-            logger.warning("VLM request timed out")
+            latency_ms = (time.perf_counter() - t0) * 1000.0
+            logger.warning(
+                "VLM request timed out after %.0fms (timeout=%ss, frames=%d)",
+                latency_ms, self.timeout, len(frames),
+            )
             return VLMResult(
                 raw_response="",
                 success=False,
                 error="VLM request timed out",
             )
         except httpx.HTTPStatusError as e:
-            logger.error(f"VLM HTTP error: {e.response.status_code}")
+            latency_ms = (time.perf_counter() - t0) * 1000.0
+            logger.error(
+                "VLM HTTP error %s after %.0fms",
+                e.response.status_code, latency_ms,
+            )
             return VLMResult(
                 raw_response="",
                 success=False,
                 error=f"HTTP {e.response.status_code}",
             )
         except Exception as e:
-            logger.error(f"VLM request failed: {e}")
+            latency_ms = (time.perf_counter() - t0) * 1000.0
+            logger.error("VLM request failed after %.0fms: %s", latency_ms, e)
             return VLMResult(
                 raw_response="",
                 success=False,
