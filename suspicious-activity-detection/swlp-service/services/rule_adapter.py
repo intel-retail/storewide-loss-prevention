@@ -16,7 +16,7 @@ from typing import Optional, Protocol, runtime_checkable
 
 import structlog
 
-from models.events import EventType, RegionEvent, ZoneType
+from models.events import EventType, RegionEvent
 from models.alerts import Alert
 from .config import ConfigService
 from .session_manager import SessionManager
@@ -111,7 +111,7 @@ class RuleEngineAdapter:
 
         # ---- Config-driven state transitions (replaces hardcoded if/elif) ----
         if event.event_type == EventType.ENTERED:
-            zone_type_str = event.zone_type.value if event.zone_type else ""
+            zone_type_str = event.zone_type or ""
             flag_names = self._zone_visited_flags.get(zone_type_str, [])
             for flag_name in flag_names:
                 if not session.flags.get(flag_name):
@@ -156,7 +156,7 @@ class RuleEngineAdapter:
         context = self._build_context(event, session)
 
         # ---- Evaluate rules (local rule engine) ----
-        actions = self._engine.evaluate(trigger_event, event.zone_type.value, context)
+        actions = self._engine.evaluate(trigger_event, event.zone_type or "", context)
 
         # ---- Execute actions (LP-specific side effects) ----
         await self._execute_actions(actions, event, session, context)
@@ -203,9 +203,9 @@ class RuleEngineAdapter:
         })
         _spread(event, skip={"event_type"})
 
-        # Coerce enum-typed fields to strings (YAML compares as strings).
+        # Normalize zone_type to a string (it should already be one).
         zt = ctx.get("zone_type")
-        ctx["zone_type"] = zt.value if hasattr(zt, "value") else (zt or "")
+        ctx["zone_type"] = zt if isinstance(zt, str) else (zt or "")
 
         # Derived helpers / overrides.
         ctx["dwell_seconds"] = (
@@ -324,7 +324,7 @@ class RuleEngineAdapter:
 
     @staticmethod
     def _alert_type_str(alert_type) -> str:
-        """Coerce AlertType enum / raw string into the canonical YAML key."""
+        """Coerce a YAML-supplied alert_type to its canonical string key."""
         return getattr(alert_type, "value", str(alert_type))
 
     @staticmethod
@@ -565,11 +565,7 @@ class RuleEngineAdapter:
 
         # Resolve zone metadata for the synthetic event.
         zone_name = self.config.get_zone_name(region_id)
-        zone_type_str = self.config.get_zone_type(region_id) or "HIGH_VALUE"
-        try:
-            zone_type = ZoneType[zone_type_str]
-        except KeyError:
-            zone_type = ZoneType.HIGH_VALUE
+        zone_type = self.config.get_zone_type(region_id) or "HIGH_VALUE"
 
         synth_event = RegionEvent(
             event_type=EventType.ENTERED,  # placeholder; engine matches on "ba_result" string
@@ -599,7 +595,7 @@ class RuleEngineAdapter:
                 session.flags[flag_def["flag_name"]] = True
 
         try:
-            actions = self._engine.evaluate("ba_result", zone_type.value, context)
+            actions = self._engine.evaluate("ba_result", zone_type, context)
             await self._execute_actions(actions, synth_event, session, context)
         finally:
             session._pending_ba_result = None

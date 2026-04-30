@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 import pytest
 import pytest_asyncio
 
-from models.events import EventType, ZoneType
+from models.events import EventType
 from services.session_manager import SessionManager
 
 
@@ -72,7 +72,7 @@ async def test_region_enter_fires_entered(manager):
 
     assert len(events) == 1
     assert events[0].event_type == EventType.ENTERED
-    assert events[0].zone_type == ZoneType.HIGH_VALUE
+    assert events[0].zone_type == "HIGH_VALUE"
     assert events[0].object_id == "42"
 
 

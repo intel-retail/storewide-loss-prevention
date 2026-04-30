@@ -4,29 +4,21 @@
 
 from dataclasses import dataclass, field
 from datetime import datetime
-from enum import Enum
 from typing import Dict, List, Optional, Any
 import uuid
 
 
-class AlertType(str, Enum):
-    CONCEALMENT = "CONCEALMENT"
-    CHECKOUT_BYPASS = "CHECKOUT_BYPASS"
-    LOITERING = "LOITERING"
-    REPEATED_VISIT = "REPEATED_VISIT"
-    ZONE_VIOLATION = "ZONE_VIOLATION"
-
-
-class AlertLevel(str, Enum):
-    WARNING = "WARNING"
-    CRITICAL = "CRITICAL"
-
-
 @dataclass
 class Alert:
-    """A suspicious-activity alert produced by the system."""
-    alert_type: AlertType
-    alert_level: AlertLevel
+    """A suspicious-activity alert produced by the system.
+
+    ``alert_type`` and ``alert_level`` are free-form strings sourced
+    verbatim from the YAML rule definitions (rules.yaml) so adding a new
+    rule with a brand-new alert type / severity does not require a code
+    change.
+    """
+    alert_type: str
+    alert_level: str
     object_id: str
     timestamp: datetime
     scene_id: str = ""  # SceneScape scene UUID
@@ -39,8 +31,8 @@ class Alert:
     def to_dict(self) -> Dict[str, Any]:
         return {
             "alert_id": self.alert_id,
-            "alert_type": getattr(self.alert_type, "value", self.alert_type),
-            "alert_level": getattr(self.alert_level, "value", self.alert_level),
+            "alert_type": self.alert_type,
+            "alert_level": self.alert_level,
             "object_id": self.object_id,
             "scene_id": self.scene_id,
             "timestamp": self.timestamp.isoformat(),

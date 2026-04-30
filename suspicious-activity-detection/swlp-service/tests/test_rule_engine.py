@@ -8,8 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from models.events import EventType, RegionEvent, ZoneType
-from models.alerts import AlertType, AlertLevel
+from models.events import EventType, RegionEvent
 from models.session import PersonSession
 from rule_engine import RuleEngine, Action
 from services.rule_adapter import RuleEngineAdapter
@@ -187,12 +186,12 @@ async def test_restricted_zone_immediate_alert(setup):
     session = PersonSession(object_id="42", first_seen=datetime.now(timezone.utc), last_seen=datetime.now(timezone.utc))
     sm.add(session)
 
-    event = _make_event(EventType.ENTERED, ZoneType.RESTRICTED)
+    event = _make_event(EventType.ENTERED, "RESTRICTED")
     await adapter.on_event(event)
 
     assert len(alerts) == 1
-    assert alerts[0].alert_type == AlertType.ZONE_VIOLATION
-    assert alerts[0].alert_level == AlertLevel.CRITICAL
+    assert alerts[0].alert_type == "ZONE_VIOLATION"
+    assert alerts[0].alert_level == "CRITICAL"
 
 
 @pytest.mark.asyncio
@@ -201,11 +200,11 @@ async def test_loitering_alert(setup):
     session = PersonSession(object_id="42", first_seen=datetime.now(timezone.utc), last_seen=datetime.now(timezone.utc))
     sm.add(session)
 
-    event = _make_event(EventType.EXITED, ZoneType.HIGH_VALUE, dwell=150.0)
+    event = _make_event(EventType.EXITED, "HIGH_VALUE", dwell=150.0)
     await adapter.on_event(event)
 
     assert len(alerts) == 1
-    assert alerts[0].alert_type == AlertType.LOITERING
+    assert alerts[0].alert_type == "LOITERING"
 
 
 @pytest.mark.asyncio
@@ -219,12 +218,12 @@ async def test_checkout_bypass(setup):
     )
     sm.add(session)
 
-    event = _make_event(EventType.ENTERED, ZoneType.EXIT)
+    event = _make_event(EventType.ENTERED, "EXIT")
     await adapter.on_event(event)
 
     assert len(alerts) == 1
-    assert alerts[0].alert_type == AlertType.CHECKOUT_BYPASS
-    assert alerts[0].alert_level == AlertLevel.WARNING
+    assert alerts[0].alert_type == "CHECKOUT_BYPASS"
+    assert alerts[0].alert_level == "WARNING"
 
 
 @pytest.mark.asyncio
@@ -238,11 +237,11 @@ async def test_checkout_bypass_critical_with_concealment(setup):
     )
     sm.add(session)
 
-    event = _make_event(EventType.ENTERED, ZoneType.EXIT)
+    event = _make_event(EventType.ENTERED, "EXIT")
     await adapter.on_event(event)
 
     assert len(alerts) == 1
-    assert alerts[0].alert_level == AlertLevel.CRITICAL
+    assert alerts[0].alert_level == "CRITICAL"
 
 
 @pytest.mark.asyncio
@@ -256,11 +255,11 @@ async def test_repeated_visits_alert(setup):
     )
     sm.add(session)
 
-    event = _make_event(EventType.ENTERED, ZoneType.HIGH_VALUE)
+    event = _make_event(EventType.ENTERED, "HIGH_VALUE")
     await adapter.on_event(event)
 
     assert len(alerts) == 1
-    assert alerts[0].alert_type == AlertType.REPEATED_VISIT
+    assert alerts[0].alert_type == "REPEATED_VISIT"
 
 
 @pytest.mark.asyncio
@@ -270,12 +269,12 @@ async def test_loitering_dedup_per_zone(setup):
     session = PersonSession(object_id="42", first_seen=datetime.now(timezone.utc), last_seen=datetime.now(timezone.utc))
     sm.add(session)
 
-    event1 = _make_event(EventType.EXITED, ZoneType.HIGH_VALUE, dwell=150.0)
+    event1 = _make_event(EventType.EXITED, "HIGH_VALUE", dwell=150.0)
     await adapter.on_event(event1)
     assert len(alerts) == 1
 
     # Second exit from same zone should not fire again
-    event2 = _make_event(EventType.EXITED, ZoneType.HIGH_VALUE, dwell=200.0)
+    event2 = _make_event(EventType.EXITED, "HIGH_VALUE", dwell=200.0)
     await adapter.on_event(event2)
     assert len(alerts) == 1  # still 1, not 2
 
@@ -287,11 +286,11 @@ async def test_loitering_via_region_data_feed(setup):
     session = PersonSession(object_id="42", first_seen=datetime.now(timezone.utc), last_seen=datetime.now(timezone.utc))
     sm.add(session)
 
-    event = _make_event(EventType.LOITER, ZoneType.HIGH_VALUE, dwell=25.0)
+    event = _make_event(EventType.LOITER, "HIGH_VALUE", dwell=25.0)
     await adapter.on_event(event)
 
     assert len(alerts) == 1
-    assert alerts[0].alert_type == AlertType.LOITERING
+    assert alerts[0].alert_type == "LOITERING"
     assert alerts[0].details["source"] == "region_data_feed"
     assert alerts[0].details["dwell_seconds"] == 25.0
 
@@ -303,12 +302,12 @@ async def test_loitering_via_region_data_dedup(setup):
     session = PersonSession(object_id="42", first_seen=datetime.now(timezone.utc), last_seen=datetime.now(timezone.utc))
     sm.add(session)
 
-    event1 = _make_event(EventType.LOITER, ZoneType.HIGH_VALUE, dwell=25.0)
+    event1 = _make_event(EventType.LOITER, "HIGH_VALUE", dwell=25.0)
     await adapter.on_event(event1)
     assert len(alerts) == 1
 
     # Second LOITER for same zone should be suppressed
-    event2 = _make_event(EventType.LOITER, ZoneType.HIGH_VALUE, dwell=30.0)
+    event2 = _make_event(EventType.LOITER, "HIGH_VALUE", dwell=30.0)
     await adapter.on_event(event2)
     assert len(alerts) == 1  # still 1
 
@@ -321,12 +320,12 @@ async def test_loitering_region_data_prevents_exit_duplicate(setup):
     sm.add(session)
 
     # First: loiter fires via region-data feed
-    loiter_event = _make_event(EventType.LOITER, ZoneType.HIGH_VALUE, dwell=25.0)
+    loiter_event = _make_event(EventType.LOITER, "HIGH_VALUE", dwell=25.0)
     await adapter.on_event(loiter_event)
     assert len(alerts) == 1
 
     # Then: person exits with high dwell — exit-based loiter rule should be suppressed
-    exit_event = _make_event(EventType.EXITED, ZoneType.HIGH_VALUE, dwell=90.0)
+    exit_event = _make_event(EventType.EXITED, "HIGH_VALUE", dwell=90.0)
     await adapter.on_event(exit_event)
     assert len(alerts) == 1  # still 1, not 2
 
@@ -353,8 +352,8 @@ async def test_concealment_alert_from_ba_result(setup):
     await adapter.on_ba_result(result)
 
     assert len(alerts) == 1
-    assert alerts[0].alert_type == AlertType.CONCEALMENT
-    assert alerts[0].alert_level == AlertLevel.WARNING
+    assert alerts[0].alert_type == "CONCEALMENT"
+    assert alerts[0].alert_level == "WARNING"
     assert alerts[0].details["confidence"] == 0.85
     assert alerts[0].details["frames_analyzed"] == 10
     assert session.concealment_suspected is True
@@ -394,13 +393,13 @@ async def test_repeated_visit_dedup_per_zone(setup):
     )
     sm.add(session)
 
-    event1 = _make_event(EventType.ENTERED, ZoneType.HIGH_VALUE)
+    event1 = _make_event(EventType.ENTERED, "HIGH_VALUE")
     await adapter.on_event(event1)
     assert len(alerts) == 1
-    assert alerts[0].alert_type == AlertType.REPEATED_VISIT
+    assert alerts[0].alert_type == "REPEATED_VISIT"
 
     # Second entry with even higher count — should not duplicate
     session.zone_visit_counts["r1"] = 5
-    event2 = _make_event(EventType.ENTERED, ZoneType.HIGH_VALUE)
+    event2 = _make_event(EventType.ENTERED, "HIGH_VALUE")
     await adapter.on_event(event2)
     assert len(alerts) == 1  # still 1, not 2

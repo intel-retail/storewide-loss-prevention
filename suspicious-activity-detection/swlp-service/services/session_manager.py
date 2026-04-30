@@ -18,7 +18,7 @@ from typing import Callable, Dict, List, Optional, Set
 import structlog
 
 from models.session import PersonSession, RegionVisit
-from models.events import EventType, RegionEvent, ZoneType
+from models.events import EventType, RegionEvent
 from .config import ConfigService
 
 logger = structlog.get_logger(__name__)
@@ -329,7 +329,7 @@ class SessionManager:
                 object_id=oid,
                 region_id=region_id,
                 region_name=zone_name,
-                zone_type=ZoneType(zone_type),
+                zone_type=zone_type,
                 timestamp=now,
                 scene_id=scene_id,
                 dwell_seconds=round(dwell, 1),
@@ -358,7 +358,7 @@ class SessionManager:
                     object_id=oid,
                     region_id=visit.region_id,
                     region_name=visit.region_name,
-                    zone_type=ZoneType(zone_type),
+                    zone_type=zone_type,
                     timestamp=now,
                     scene_id=session.scene_id,
                     dwell_seconds=visit.duration_seconds,
@@ -387,7 +387,7 @@ class SessionManager:
             object_id=oid,
             region_id="",
             region_name="",
-            zone_type=ZoneType.HIGH_VALUE,
+            zone_type="HIGH_VALUE",
             timestamp=now,
             scene_id=session.scene_id,
         )
@@ -435,7 +435,7 @@ class SessionManager:
             object_id=session.object_id,
             region_id=region_id,
             region_name=zone_name,
-            zone_type=ZoneType(zone_type),
+            zone_type=zone_type,
             timestamp=now,
             scene_id=session.scene_id,
         )
@@ -471,7 +471,7 @@ class SessionManager:
             object_id=session.object_id,
             region_id=region_id,
             region_name=zone_name,
-            zone_type=ZoneType(zone_type),
+            zone_type=zone_type,
             timestamp=now,
             scene_id=session.scene_id,
             dwell_seconds=dwell,
