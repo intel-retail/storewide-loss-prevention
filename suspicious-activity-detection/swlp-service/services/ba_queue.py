@@ -39,7 +39,7 @@ class BAQueuePublisher:
 
     def publish_request(
         self, person_id: str, region_id: str, entry_timestamp: str,
-        scene_id: str = "",
+        scene_id: str = "", last_frame_ts: str = "",
     ) -> None:
         """Publish one ba/requests message for a freshly stored frame."""
         payload = {
@@ -47,6 +47,7 @@ class BAQueuePublisher:
             "region_id": region_id,
             "entry_timestamp": entry_timestamp,
             "scene_id": scene_id,
+            "last_frame_ts": last_frame_ts,
         }
         self._mqtt.publish(BA_REQUEST_TOPIC, payload)
         logger.debug(
@@ -54,6 +55,7 @@ class BAQueuePublisher:
             person_id=person_id,
             region_id=region_id,
             scene_id=scene_id,
+            last_frame_ts=last_frame_ts,
         )
 
 

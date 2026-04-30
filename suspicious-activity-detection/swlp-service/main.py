@@ -34,7 +34,7 @@ from services.scenescape_client import SceneScapeClient
 from services.alert_service_client import AlertServiceClient
 from services.ba_queue import BAQueuePublisher, BAQueueConsumer
 from services.ba_orchestrator import BehavioralAnalysisOrchestrator
-from services.frame_capture import FrameCaptureService
+from services.frame_capture import FrameCaptureService, CapturedFrameTracker
 
 # ---- Structured logging setup -----------------------------------------------
 logging.basicConfig(format="%(message)s", stream=__import__("sys").stdout, level=logging.DEBUG)
@@ -158,14 +158,18 @@ async def lifespan(app: FastAPI):
 
     # 6b. BA orchestrator (owns per-visit getimage + ba/requests cadence)
     rules_cfg = config.get_rules_config()
+    frame_tracker = CapturedFrameTracker()
+    app.state.frame_tracker = frame_tracker
     ba_orchestrator = BehavioralAnalysisOrchestrator(
         mqtt_service=mqtt_svc,
         session_manager=session_mgr,
         ba_publisher=ba_publisher,
         config=config,
-        frames_per_request=int(rules_cfg.get("frame_capture_count", 5)),
-        request_interval=float(rules_cfg.get("frame_capture_interval_seconds", 1.0)),
-        ba_initial_delay=float(rules_cfg.get("ba_initial_delay_seconds", 2.0)),
+        frame_capture_count=int(rules_cfg.get("frame_capture_count", 5)),
+        frame_capture_interval_seconds=float(
+            rules_cfg.get("frame_capture_interval_seconds", 1.0)
+        ),
+        frame_tracker=frame_tracker,
     )
     app.state.ba_orchestrator = ba_orchestrator
 
@@ -202,6 +206,7 @@ async def lifespan(app: FastAPI):
         config=config,
         session_manager=session_mgr,
         frame_manager=frame_mgr,
+        frame_tracker=frame_tracker,
     )
     mqtt_svc.register_camera_image_handler(frame_capture.on_camera_image)
 

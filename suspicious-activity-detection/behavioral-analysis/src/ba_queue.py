@@ -249,9 +249,17 @@ class BAQueueConsumer:
             person_id, result.confidence,
         )
         if self.settings.vlm_enabled and self.pose_analyzer.vlm_client:
+            # Reconstruct the SeaweedFS prefix used by frame_store.get_frames
+            # so analyze_with_vlm can log the full bucket key per frame.
+            bucket = getattr(self.frame_store, "bucket", "behavioral-frames")
+            prefix = (
+                f"{bucket}/{scene_id}/{person_id}/{region_id}/"
+                f"{entry_timestamp}/frames/"
+            )
             result = await self.pose_analyzer.analyze_with_vlm(
                 frames=frames,
                 pose_result=result,
+                frame_key_prefix=prefix,
             )
         vlm_response = None
         if result.vlm_result:
