@@ -15,21 +15,18 @@ class EventType(str, Enum):
     PERSON_LOST = "PERSON_LOST"
 
 
-class ZoneType(str, Enum):
-    HIGH_VALUE = "HIGH_VALUE"
-    CHECKOUT = "CHECKOUT"
-    EXIT = "EXIT"
-    RESTRICTED = "RESTRICTED"
-
-
 @dataclass
 class RegionEvent:
-    """Event produced when a person enters or exits a region."""
+    """Event produced when a person enters or exits a region.
+
+    ``zone_type`` is a free-form string sourced from ``zone_config.json`` /
+    ``rules.yaml`` so adding a new zone type does not require a code change.
+    """
     event_type: EventType
     object_id: str
     region_id: str
     region_name: str
-    zone_type: ZoneType
+    zone_type: str
     timestamp: datetime
     scene_id: str = ""  # SceneScape scene UUID
     dwell_seconds: Optional[float] = None   # populated on EXIT
