@@ -128,19 +128,9 @@ class RuleEngineAdapter:
             # Stop any escalation services that were started for this zone
             for svc in self._service_registry.values():
                 svc.stop(event.object_id, event.region_id)
-
-            # Mark visit as exited; drain check will fire cleanup once all
-            # in-flight ba/results have been accounted for.
             self._maybe_cleanup_on_exit(event)
 
-        elif event.event_type == EventType.LOITER:
-            # Continuous region-data feed signalled the person is in
-            # the zone. Skip if we've already alerted for this visit;
-            # the post-fire set in `_execute_alert` is the authoritative
-            # dedup point — DO NOT set the flag here, otherwise we gate
-            # ourselves out before the rule engine evaluates the
-            # threshold (early ticks have dwell < threshold and would
-            # mark the zone as alerted without firing).
+        elif event.event_type == EventType.LOITER:          
             if session.loiter_alerted.get(event.region_id):
                 return
 
