@@ -200,6 +200,7 @@ class PoseAnalyzer:
         self,
         frames: list[tuple[np.ndarray, int]],
         pose_result: PatternResult,
+        frame_key_prefix: str = "",
     ) -> PatternResult:
         """
         Send frames to VLM for visual confirmation after pose match.
@@ -235,10 +236,17 @@ class PoseAnalyzer:
         num_frames = vlm_cfg.get("num_frames", 4)
         sampled = self._sample_frames(frames, num_frames)
         frame_images = [f[0] for f in sampled]
+        sampled_ts = [int(f[1]) for f in sampled]
+        sampled_keys = (
+            [f"{frame_key_prefix}{ts}.jpg" for ts in sampled_ts]
+            if frame_key_prefix else []
+        )
 
         logger.info(
-            f"Sending {len(frame_images)} frames to VLM for "
-            f"pattern '{pose_result.pattern_id}' confirmation"
+            "Sending %d frames to VLM for pattern '%s' "
+            "(input_pool=%d, sampled_keys=%s)",
+            len(frame_images), pose_result.pattern_id,
+            len(frames), sampled_keys or sampled_ts,
         )
 
         vlm_result = await self.vlm_client.analyze(frame_images, prompt)
