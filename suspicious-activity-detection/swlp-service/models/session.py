@@ -89,7 +89,7 @@ class PersonSession:
     reid_state: str = ""
 
     # Generic per-(alert_type, scope_key) dedup map. Driven entirely by the
-    # ``dedup_scope`` field on each alert action in rules.yaml — adding a new
+    # ``fire_once_per`` field on each alert action in rules.yaml — adding a new
     # alert type does not require any code change here.
     #
     #   alert_dedup["LOITERING"][region_id]   -> True   (scope=zone)

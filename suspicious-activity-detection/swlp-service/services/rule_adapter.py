@@ -30,7 +30,7 @@ logger = structlog.get_logger(__name__)
 class EscalationService(Protocol):
     """Protocol for services that can be invoked by the 'escalate' action type."""
     def start(self, object_id: str, region_id: str, scene_id: str) -> None: ...
-    def stop(self, object_id: str, region_id: str) -> None: ...
+    def stop(self, object_id: str, region_id: str, scene_id: str = "") -> None: ...
     def stop_all(self, object_id: str) -> None: ...
 
 
@@ -127,7 +127,7 @@ class RuleEngineAdapter:
         elif event.event_type == EventType.EXITED:
             # Stop any escalation services that were started for this zone
             for svc in self._service_registry.values():
-                svc.stop(event.object_id, event.region_id)
+                svc.stop(event.object_id, event.region_id, event.scene_id)
             self._maybe_cleanup_on_exit(event)
 
         elif event.event_type == EventType.LOITER:          
@@ -217,10 +217,19 @@ class RuleEngineAdapter:
 
     async def _execute_actions(
         self, actions: list[Action], event: RegionEvent, session, context: dict
-    ) -> None:
+    ) -> list[Alert]:
+        """Execute each action; return the list of alerts actually fired.
+
+        Callers that need to attach side effects to a fired alert (e.g.
+        the BA result path copying evidence frames) can inspect the
+        returned alerts. Other callers may safely ignore the return.
+        """
+        fired: list[Alert] = []
         for action in actions:
             if action.type == "alert":
-                await self._execute_alert(action, event, session, context)
+                alert = await self._execute_alert(action, event, session, context)
+                if alert is not None:
+                    fired.append(alert)
             elif action.type == "escalate":
                 service_name = action.params.get("service", "")
                 handler = self._service_registry.get(service_name)
@@ -234,10 +243,11 @@ class RuleEngineAdapter:
                         service=service_name,
                         rule_id=action.rule_id,
                     )
+        return fired
 
     async def _execute_alert(
         self, action: Action, event: RegionEvent, session, context: dict
-    ) -> None:
+    ) -> Alert | None:
         """Build and fire an LP Alert from a generic Action.
 
         ``alert_type`` and ``severity`` are taken verbatim from rules.yaml,
@@ -265,7 +275,7 @@ class RuleEngineAdapter:
         alert_level = severity
 
         # ---- Generic dedup, driven by rules.yaml ----------------------------
-        # Each alert action may declare ``dedup_scope: zone | session | none``.
+        # Each alert action may declare ``fire_once_per: zone | session | none``.
         # ``zone``    — one alert per (alert_type, region_id) per session.
         # ``session`` — one alert per alert_type for the whole session.
         # ``none`` (default) — every match fires an alert.
@@ -278,7 +288,7 @@ class RuleEngineAdapter:
                 dedup_key=dedup_key,
                 object_id=event.object_id,
             )
-            return
+            return None
 
         details = self._build_details(action.params, context)
 
@@ -309,6 +319,7 @@ class RuleEngineAdapter:
             session.mark_alerted(alert_type_str, dedup_key)
 
         await self._fire_alert(alert)
+        return alert
 
     # ---- dedup helpers -------------------------------------------------------
 
@@ -323,7 +334,7 @@ class RuleEngineAdapter:
 
         Returns ``None`` when no dedup is configured (every match alerts).
         """
-        scope = params.get("dedup_scope", "none")
+        scope = params.get("fire_once_per", "none")
         if scope == "zone":
             return event.region_id or "*"
         if scope == "session":
@@ -586,62 +597,71 @@ class RuleEngineAdapter:
 
         try:
             actions = self._engine.evaluate("ba_result", zone_type, context)
-            await self._execute_actions(actions, synth_event, session, context)
+            fired = await self._execute_actions(
+                actions, synth_event, session, context,
+            )
         finally:
             session._pending_ba_result = None
+
+        # BA-specific evidence handling: for each alert that fired in
+        # response to this BA result, copy the visit's frames (up to
+        # last_frame_ts) into the per-alert prefix and mark the visit as
+        # alerted so its frames are excluded from cleanup.
+        for alert in fired:
+            self._copy_ba_evidence(result, visit_key, alert)
+
+    # ---- BA-specific evidence handling --------------------------------------
+
+    def _copy_ba_evidence(
+        self, result: dict, visit_key, alert: Alert,
+    ) -> None:
+        """Copy BA-bucket frames for ``result`` under the alert's prefix.
+
+        Marks the visit as alerted (so cleanup leaves frames in place as
+        evidence) and copies frames up to ``last_frame_ts`` into
+        ``alerts/{person_id}/{alert_id}/frames/``. No-op if the result
+        lacks the timestamps needed to bound the copy, or if the
+        frame_manager is not configured.
+        """
+        if not self._frame_mgr:
+            return
+        last_frame_ts = result.get("last_frame_ts")
+        entry_timestamp = result.get("entry_timestamp")
+        if not (last_frame_ts and entry_timestamp):
+            return
+
+        if self._visit_tracker is not None and visit_key is not None:
+            self._visit_tracker.mark_alerted(visit_key)
+
+        try:
+            copied = self._frame_mgr.copy_frames_to_alert(
+                scene_id=result.get("scene_id", alert.scene_id),
+                person_id=result.get("person_id", alert.object_id),
+                region_id=result.get("region_id", alert.region_id),
+                entry_timestamp=entry_timestamp,
+                last_frame_ts=last_frame_ts,
+                alert_id=alert.alert_id,
+            )
+            logger.info(
+                "BA frames copied to alert prefix",
+                alert_id=alert.alert_id,
+                copied=copied,
+            )
+        except Exception:
+            logger.exception(
+                "copy_frames_to_alert failed",
+                alert_id=alert.alert_id,
+            )
 
     # ---- alert dispatch ------------------------------------------------------
 
     async def _fire_alert(self, alert: Alert) -> None:
-        """Persist evidence frames and send to alert-service."""
-        # Copy BA-bucket frames (up to last_frame_ts) under
-        # alerts/{person_id}/{alert_id}/frames/. Driven by the BA result
-        # that triggered this alert (stashed on the session).
-        ba_result = getattr(
-            self.session_mgr.get_session(
-                alert.object_id, scene_id=alert.scene_id,
-            ),
-            "_pending_ba_result",
-            None,
-        ) if alert.object_id else None
-        if (
-            self._frame_mgr
-            and ba_result
-            and ba_result.get("last_frame_ts")
-            and ba_result.get("entry_timestamp")
-        ):
-            # Mark the visit as alerted so the drain logic keeps the BA
-            # frames around as evidence. We do NOT gate the copy on the
-            # first alert: every alert in the visit gets its own frames
-            # folder under alerts/{person_id}/{alert_id}/frames/.
-            if self._visit_tracker is not None:
-                visit_key = self._visit_tracker.make_key(
-                    ba_result.get("scene_id", alert.scene_id),
-                    ba_result.get("person_id", alert.object_id),
-                    ba_result.get("region_id", alert.region_id),
-                    ba_result["entry_timestamp"],
-                )
-                self._visit_tracker.mark_alerted(visit_key)
-            try:
-                copied = self._frame_mgr.copy_frames_to_alert(
-                    scene_id=ba_result.get("scene_id", alert.scene_id),
-                    person_id=ba_result.get("person_id", alert.object_id),
-                    region_id=ba_result.get("region_id", alert.region_id),
-                    entry_timestamp=ba_result["entry_timestamp"],
-                    last_frame_ts=ba_result["last_frame_ts"],
-                    alert_id=alert.alert_id,
-                )
-                logger.info(
-                    "BA frames copied to alert prefix",
-                    alert_id=alert.alert_id,
-                    copied=copied,
-                )
-            except Exception:
-                logger.exception(
-                    "copy_frames_to_alert failed",
-                    alert_id=alert.alert_id,
-                )
+        """Generic alert dispatch: send to alert-service and log.
 
+        This path is intentionally type-agnostic. Per-alert-type side
+        effects (e.g. copying BA evidence frames for CONCEALMENT) live
+        with the producing flow, not here.
+        """
         # Send to alert-service (handles MQTT delivery with dedup)
         if self._alert_client:
             try:
