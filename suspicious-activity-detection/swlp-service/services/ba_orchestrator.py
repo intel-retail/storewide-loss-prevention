@@ -78,7 +78,7 @@ class BehavioralAnalysisOrchestrator:
         self._sessions = session_manager
         self._ba = ba_publisher
         self._config = config
-        self._tracker = frame_tracker
+        self._frame_tracker = frame_tracker
         self._visit_tracker = visit_tracker
         self._frame_capture_count = max(int(frame_capture_count), 1)
         self._frame_capture_interval_seconds = max(
@@ -89,7 +89,7 @@ class BehavioralAnalysisOrchestrator:
             self._frame_capture_interval_seconds / self._frame_capture_count
         )
 
-        # Active per-visit tasks, keyed by "{object_id}:{region_id}"
+        # Active per-visit tasks, keyed by "{scene_id}:{object_id}:{region_id}"
         self._tasks: Dict[str, asyncio.Task] = {}
 
         logger.info(
@@ -107,29 +107,41 @@ class BehavioralAnalysisOrchestrator:
         Idempotent: re-entry events from re-id flicker are ignored if the
         existing task is still alive.
         """
-        key = self._key(object_id, region_id)
+        key = self._key(scene_id, object_id, region_id)
         prev = self._tasks.get(key)
         if prev and not prev.done():
             logger.debug(
                 "BA visit task already active, ignoring re-start",
-                object_id=object_id, region_id=region_id,
+                scene_id=scene_id, object_id=object_id, region_id=region_id,
             )
             return
         self._tasks[key] = asyncio.create_task(
             self._run(object_id, region_id, scene_id)
         )
 
-    def stop(self, object_id: str, region_id: str) -> None:
-        """Cancel the visit task for one (person, region) pair."""
-        key = self._key(object_id, region_id)
-        task = self._tasks.pop(key, None)
-        if task and not task.done():
-            task.cancel()
+    def stop(self, object_id: str, region_id: str, scene_id: str = "") -> None:
+        """Cancel the visit task for one (scene, person, region) tuple.
+
+        ``scene_id`` is optional for back-compat: when omitted we cancel
+        every task matching ``(object_id, region_id)`` across scenes
+        (which in practice is at most one).
+        """
+        if scene_id:
+            key = self._key(scene_id, object_id, region_id)
+            task = self._tasks.pop(key, None)
+            if task and not task.done():
+                task.cancel()
+            return
+        suffix = f":{object_id}:{region_id}"
+        for key in [k for k in self._tasks if k.endswith(suffix)]:
+            task = self._tasks.pop(key, None)
+            if task and not task.done():
+                task.cancel()
 
     def stop_all(self, object_id: str) -> None:
         """Cancel every visit task for a person (used on PERSON_LOST)."""
-        prefix = f"{object_id}:"
-        for key in [k for k in self._tasks if k.startswith(prefix)]:
+        marker = f":{object_id}:"
+        for key in [k for k in self._tasks if marker in k]:
             task = self._tasks.pop(key, None)
             if task and not task.done():
                 task.cancel()
@@ -140,8 +152,8 @@ class BehavioralAnalysisOrchestrator:
     # ---- internals -----------------------------------------------------------
 
     @staticmethod
-    def _key(object_id: str, region_id: str) -> str:
-        return f"{object_id}:{region_id}"
+    def _key(scene_id: str, object_id: str, region_id: str) -> str:
+        return f"{scene_id}:{object_id}:{region_id}"
 
     async def _run(self, object_id: str, region_id: str, scene_id: str) -> None:
         logger.info(
@@ -164,8 +176,8 @@ class BehavioralAnalysisOrchestrator:
                 #    commands across the interval. Camera replies land in
                 #    FrameCaptureService and are stored in the
                 #    behavioral-frames bucket.
-                if self._tracker is not None:
-                    self._tracker.set_remaining(
+                if self._frame_tracker is not None:
+                    self._frame_tracker.set_remaining(
                         scene_id, object_id, region_id,
                         self._frame_capture_count,
                     )
@@ -187,11 +199,11 @@ class BehavioralAnalysisOrchestrator:
                 #    request so BA processes the latest window once.
                 entry_ts_iso = session.current_zones.get(region_id, "")
                 last_frame_ts = ""
-                if self._tracker is not None:
+                if self._frame_tracker is not None:
                     last_frame_ts = (
-                        self._tracker.get_latest(scene_id, object_id, region_id) or ""
+                        self._frame_tracker.get_latest(scene_id, object_id, region_id) or ""
                     )
-                    self._tracker.clear(scene_id, object_id, region_id)
+                    self._frame_tracker.clear(scene_id, object_id, region_id)
                 try:
                     if self._visit_tracker is not None:
                         self._visit_tracker.note_request(
@@ -225,4 +237,4 @@ class BehavioralAnalysisOrchestrator:
                 object_id=object_id, region_id=region_id,
             )
         finally:
-            self._tasks.pop(self._key(object_id, region_id), None)
+            self._tasks.pop(self._key(scene_id, object_id, region_id), None)

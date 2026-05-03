@@ -186,9 +186,20 @@ class SessionManager:
                     if cam not in session.camera_history:
                         session.camera_history.append(cam)
             else:
+                # Prefer SceneScape's first_seen (track origin time) when
+                # provided; fall back to local now if absent / unparseable.
+                first_seen_str = obj.get("first_seen")
+                first_seen = now
+                if first_seen_str:
+                    try:
+                        first_seen = datetime.fromisoformat(
+                            first_seen_str.replace("Z", "+00:00")
+                        )
+                    except (ValueError, TypeError):
+                        first_seen = now
                 session = PersonSession(
                     object_id=oid,
-                    first_seen=now,
+                    first_seen=first_seen,
                     last_seen=now,
                     scene_id=scene_id,
                     current_cameras=list(cameras),
@@ -222,6 +233,22 @@ class SessionManager:
                 continue
             prev_chain = obj.get("previous_ids_chain") or []
             oid = self._resolve_canonical(scene_id, raw_oid, prev_chain)
+
+            # Prefer SceneScape's per-region ``entered`` timestamp as the
+            # authoritative visit anchor (becomes the BA bucket folder
+            # name and visit key). Falls back to local ``now`` if absent.
+            ss_entered_iso = (
+                ((obj.get("regions") or {}).get(region_id) or {}).get("entered")
+            )
+            entry_dt = now
+            if ss_entered_iso:
+                try:
+                    entry_dt = datetime.fromisoformat(
+                        ss_entered_iso.replace("Z", "+00:00")
+                    )
+                except (ValueError, TypeError):
+                    entry_dt = now
+
             # Ensure session exists (region event may arrive before scene-data)
             skey = (scene_id, oid)
             if skey not in self._sessions:
@@ -247,7 +274,7 @@ class SessionManager:
                 session = self._sessions[skey]
                 session.last_seen = now
 
-            await self._fire_enter(session, region_id, now)
+            await self._fire_enter(session, region_id, now, entry_dt=entry_dt)
 
         # Process persons that exited this region
         for exit_entry in data.get("exited", []):
@@ -395,8 +422,18 @@ class SessionManager:
 
     # ---- event helpers -------------------------------------------------------
     async def _fire_enter(
-        self, session: PersonSession, region_id: str, now: datetime
+        self, session: PersonSession, region_id: str, now: datetime,
+        entry_dt: Optional[datetime] = None,
     ) -> None:
+        """Open a new visit for ``region_id``.
+
+        ``entry_dt`` (when provided) is SceneScape's authoritative
+        per-region ``entered`` timestamp and becomes the visit anchor —
+        i.e. the value stored in ``session.current_zones`` and used
+        downstream as the BA bucket folder name. Falls back to ``now``
+        when SceneScape didn't supply one.
+        """
+        entry_ts = entry_dt or now
         zone_type = self.config.get_zone_type(region_id)
         zone_name = self.config.get_zone_name(region_id) or region_id
         if not zone_type:
@@ -423,12 +460,12 @@ class SessionManager:
             region_id=region_id,
             region_name=zone_name,
             zone_type=zone_type,
-            entry_time=now,
+            entry_time=entry_ts,
         )
         session.region_visits.append(visit)
 
         # Update current_zones and zone_visit_counts
-        session.enter_zone(region_id, now)
+        session.enter_zone(region_id, entry_ts)
 
         event = RegionEvent(
             event_type=EventType.ENTERED,
