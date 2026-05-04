@@ -93,7 +93,7 @@ services:
       start_period: 120s
     restart: unless-stopped
 
-  # ---------- Behavioral Analysis (DL Streamer + RTMPose + VLM) ----------
+  # ---------- Behavioral Analysis (YOLO Pose + VLM) ----------
   behavioral-analysis:
     build:
       context: behavioral-analysis
@@ -121,11 +121,12 @@ services:
       MAX_FRAMES_TO_FETCH: ${BA_MAX_FRAMES:-20}
       POSE_FRAMES_COUNT: ${BA_POSE_FRAMES:-10}
       POSE_CONFIDENCE_THRESHOLD: ${BA_CONFIDENCE:-0.5}
-      YOLO_POSE_MODEL: /models/yolo_models/yolo11n-pose/yolo11n-pose.xml
+      YOLO_POSE_MODEL: /models/yolo_models/yolo26n-pose/yolo26n-pose.xml
       GST_INFERENCE_DEVICE: ${BA_GST_DEVICE:-CPU}
       VLM_ENDPOINT: http://ovms-vlm:8001
       VLM_MODEL_NAME: ${VLM_MODEL_NAME:-Qwen/Qwen2.5-VL-7B-Instruct}
       VLM_ENABLED: ${VLM_ENABLED:-true}
+      VLM_TIMEOUT: ${VLM_TIMEOUT:-120}
       MQTT_HOST: ${MQTT_HOST:-broker.scenescape.intel.com}
       MQTT_PORT: ${MQTT_PORT:-1883}
       BA_REQUEST_TOPIC: ${BA_REQUEST_TOPIC:-ba/requests}

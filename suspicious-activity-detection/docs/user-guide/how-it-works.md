@@ -65,9 +65,9 @@ merchandise:
 
 - **Trigger:** swlp-service publishes one `ba/requests` message per stored
   HIGH_VALUE-zone frame.
-- **Pose pre-filter:** RTMPose extracts keypoints to detect hand-near-body or
-  pocket-region interactions; non-suspicious frames short-circuit and emit a
-  `no_match` result without invoking the VLM.
+- **Pose pre-filter:** YOLO pose estimation extracts keypoints to detect
+  hand-near-body or pocket-region interactions; non-suspicious frames
+  short-circuit and emit a `no_match` result without invoking the VLM.
 - **VLM inference:** Suspicious candidates are passed to Qwen2.5-VL on the
   configured device (`VLM_DEVICE`). The model returns a natural-language
   justification and a confidence score.
