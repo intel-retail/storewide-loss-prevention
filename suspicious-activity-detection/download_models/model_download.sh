@@ -16,13 +16,13 @@ MODELS_DIR="${PROJECT_ROOT}/models"
 ###############################################
 # CONFIGURATION — load AI-model settings from configs/.env.example
 # (single source of truth for VLM_*/TARGET_DEVICE/YOLO_*/RTMPOSE_*).
-# Falls back to configs/.env if .env.example is missing.
+# Falls back to docker/.env if .env.example is missing.
 # Only AI-model keys are sourced — placeholder keys like SUPASS,
 # CAMERA_NAME, etc. in .env.example are intentionally ignored.
 ###############################################
 ENV_EXAMPLE="${PROJECT_ROOT}/configs/.env.example"
-ENV_FILE="${PROJECT_ROOT}/configs/.env"
-AI_KEYS_REGEX='^(VLM_ENABLED|VLM_MODEL_NAME|VLM_SOURCE_MODEL|VLM_PRECISION|TARGET_DEVICE|YOLO_MODEL_NAME|RTMPOSE_MODEL_NAME)='
+ENV_FILE="${PROJECT_ROOT}/docker/.env"
+AI_KEYS_REGEX='^(VLM_ENABLED|VLM_MODEL_NAME|VLM_PRECISION|TARGET_DEVICE|YOLO_MODEL_NAME|RTMPOSE_MODEL_NAME)='
 
 SOURCE_FILE=""
 if [ -f "${ENV_EXAMPLE}" ]; then
@@ -41,11 +41,10 @@ if [ -n "${SOURCE_FILE}" ]; then
     rm -f "${AI_ENV_TMP}"
     echo "  Loaded AI-model settings from ${SOURCE_FILE}"
 else
-    echo "  No configs/.env.example or configs/.env found, using defaults"
+    echo "  No configs/.env.example or docker/.env found, using defaults"
 fi
 
 VLM_MODEL_NAME="${VLM_MODEL_NAME:-Qwen/Qwen2.5-VL-7B-Instruct}"
-VLM_SOURCE_MODEL="${VLM_SOURCE_MODEL:-Qwen/Qwen2.5-VL-7B-Instruct}"
 VLM_PRECISION="${VLM_PRECISION:-int8}"
 TARGET_DEVICE="${TARGET_DEVICE:-GPU}"
 YOLO_MODEL_NAME="${YOLO_MODEL_NAME:-yolo11n-pose}"
@@ -214,7 +213,7 @@ else
         fi
 
         python "${SCRIPT_DIR}/export_model.py" text_generation \
-            --source_model "${VLM_SOURCE_MODEL}" \
+            --source_model "${VLM_MODEL_NAME}" \
             --weight-format "${VLM_PRECISION}" \
             --pipeline_type VLM_CB \
             "${target_device_args[@]}" \

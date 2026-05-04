@@ -11,7 +11,7 @@ subscriptions:
         - metadata.scene_id
         - metadata.person_id
         - metadata.zone_id
-      window_seconds: 60
+      window_seconds: 55
       on_missing: skip
       hash:
         algorithm: sha1
@@ -29,7 +29,7 @@ subscriptions:
         - metadata.scene_id
         - metadata.person_id
         - metadata.zone_id
-      window_seconds: 120
+      window_seconds: 55
       on_missing: skip
       hash:
         algorithm: sha1
@@ -47,7 +47,7 @@ subscriptions:
         - metadata.scene_id
         - metadata.person_id
         - metadata.zone_id
-      window_seconds: 60
+      window_seconds: 55
       on_missing: skip
       hash:
         algorithm: sha1
@@ -72,7 +72,7 @@ subscriptions:
       fields:
         - metadata.scene_id
         - metadata.person_id
-      window_seconds: 60
+      window_seconds: 55
       on_missing: skip
       hash:
         algorithm: sha1
@@ -90,7 +90,7 @@ subscriptions:
         - metadata.scene_id
         - metadata.person_id
         - metadata.zone_id
-      window_seconds: 60
+      window_seconds: 55
       on_missing: skip
       hash:
         algorithm: sha1
