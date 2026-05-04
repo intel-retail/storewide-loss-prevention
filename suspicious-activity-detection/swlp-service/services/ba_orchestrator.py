@@ -88,6 +88,7 @@ class BehavioralAnalysisOrchestrator:
         self._frame_interval = (
             self._frame_capture_interval_seconds / self._frame_capture_count
         )
+        self._cmd_topic_pattern = config.get_cmd_topic_pattern()
 
         # Active per-visit tasks, keyed by "{scene_id}:{object_id}:{region_id}"
         self._tasks: Dict[str, asyncio.Task] = {}
@@ -186,7 +187,8 @@ class BehavioralAnalysisOrchestrator:
                     for cam in cams:
                         try:
                             self._mqtt.publish_raw(
-                                f"scenescape/cmd/camera/{cam}", "getimage"
+                                self._cmd_topic_pattern.replace("{camera_name}", cam),
+                                "getimage"
                             )                           
                         except Exception:
                             logger.exception(

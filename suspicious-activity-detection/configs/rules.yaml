@@ -87,7 +87,6 @@ rules:
           alert_type: REPEATED_VISIT
           severity: WARNING
           threshold: ${repeat_visit_threshold:4}
-          fire_once_per: session
           details:
             visit_count: $ctx.visit_count
             threshold: $param.threshold
@@ -180,7 +179,6 @@ rules:
           alert_type: LOITERING
           severity: WARNING
           threshold: ${loiter_threshold_seconds:20}
-          fire_once_per: zone
           details:
             dwell_seconds: $ctx.dwell_seconds
             threshold: $param.threshold

@@ -105,10 +105,7 @@ class ConfigService:
 
     # ---- store ----
     def get_store_id(self) -> str:
-        return self._app_cfg.get("store", {}).get("id", "store_001")
-
-    def get_store_name(self) -> str:
-        return self._app_cfg.get("store", {}).get("name", "retail_store_1")
+        return os.environ.get("STORE_ID", "store_001")
 
     # ---- cameras (derived from scene configs) ----
     def get_cameras(self) -> List[dict]:
@@ -204,6 +201,11 @@ class ConfigService:
     def get_image_topic_pattern(self) -> str:
         return self.get_mqtt_config().get(
             "image_topic_pattern", "scenescape/image/camera/+"
+        )
+
+    def get_cmd_topic_pattern(self) -> str:
+        return self.get_mqtt_config().get(
+            "cmd_topic_pattern", "scenescape/cmd/camera/{camera_name}"
         )
 
     def get_alert_topic_prefix(self) -> str:

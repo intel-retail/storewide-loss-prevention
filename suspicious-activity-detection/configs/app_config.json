@@ -1,8 +1,4 @@
 {
-  "store": {
-    "name": "retail_store_1",
-    "id": "store_001"
-  },
   "mqtt": {
     "host": "broker.scenescape.intel.com",
     "port": 1883,
@@ -23,17 +19,6 @@
     "secure": false,
     "evidence_retention_hours": 24,
     "exit_retention_seconds": 100
-  },
-  "behavioral_analysis": {
-    "base_url": "http://behavioral-analysis:8080",
-    "timeout_seconds": 30,
-    "enabled": true,
-    "pattern_id": "shelf_to_waist"
-  },
-  "rule_service": {
-    "base_url": "http://rule-engine:8091",
-    "timeout_seconds": 10,
-    "enabled": true
   },
   "alert_service": {
     "base_url": "http://alert-service:8000",
