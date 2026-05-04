@@ -274,6 +274,24 @@ class SessionManager:
                 session = self._sessions[skey]
                 session.last_seen = now
 
+            # If entering a non-HV zone, synthetically exit any HV zones the
+            # person is still recorded in. SceneScape often skips the EXITED
+            # event for the HV zone when the person walks directly into the
+            # adjacent checkout/exit zone without a gap large enough for the
+            # tracker to observe them outside both zones.
+            entering_zone_type = self.config.get_zone_type(region_id)
+            if entering_zone_type and entering_zone_type != "HIGH_VALUE":
+                for hv_zid in list(session.current_zones):
+                    if self.config.get_zone_type(hv_zid) == "HIGH_VALUE":
+                        logger.info(
+                            "Synthesising HV zone exit — person entered non-HV zone",
+                            object_id=oid,
+                            hv_region_id=hv_zid,
+                            entered_region_id=region_id,
+                            entered_zone_type=entering_zone_type,
+                        )
+                        await self._fire_exit(session, hv_zid, now)
+
             await self._fire_enter(session, region_id, now, entry_dt=entry_dt)
 
         # Process persons that exited this region

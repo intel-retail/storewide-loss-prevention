@@ -8,10 +8,9 @@ subscriptions:
       enabled: true
       strategy: field_hash
       fields:
-        - metadata.scene_id
         - metadata.person_id
         - metadata.zone_id
-      window_seconds: 55
+      window_seconds: 10
       on_missing: skip
       hash:
         algorithm: sha1
@@ -26,7 +25,6 @@ subscriptions:
       enabled: true
       strategy: field_hash
       fields:
-        - metadata.scene_id
         - metadata.person_id
         - metadata.zone_id
       window_seconds: 55
@@ -44,7 +42,6 @@ subscriptions:
       enabled: true
       strategy: field_hash
       fields:
-        - metadata.scene_id
         - metadata.person_id
         - metadata.zone_id
       window_seconds: 55
