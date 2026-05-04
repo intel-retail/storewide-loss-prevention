@@ -86,6 +86,7 @@ rules:
         params:
           alert_type: REPEATED_VISIT
           severity: WARNING
+          fire_once_per: session
           threshold: ${repeat_visit_threshold:4}
           details:
             visit_count: $ctx.visit_count
