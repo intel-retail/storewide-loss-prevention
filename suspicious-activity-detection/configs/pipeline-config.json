@@ -8,7 +8,20 @@
       {
         "name": "reid_{{CAMERA_NAME}}",
         "source": "gstreamer",
-        "pipeline": "rtspsrc location=rtsp://mediaserver:8554/{{CAMERA_NAME}} latency=200 ! rtph264depay ! h264parse ! avdec_h264 ! videoconvert ! video/x-raw,format=BGR ! gvapython class=PostDecodeTimestampCapture function=processFrame module=/home/pipeline-server/user_scripts/gvapython/sscape/sscape_adapter.py name=timesync ! gvadetect model=/home/pipeline-server/models/intel/person-detection-retail-0013/FP32/person-detection-retail-0013.xml model-proc=/home/pipeline-server/models/object_detection/person/person-detection-retail-0013.json name=detection ! gvainference model=/home/pipeline-server/models/intel/person-reidentification-retail-0277/FP32/person-reidentification-retail-0277.xml inference-region=roi-list ! gvametaconvert add-tensor-data=true name=metaconvert ! gvapython class=PostInferenceDataPublish function=processFrame module=/home/pipeline-server/user_scripts/gvapython/sscape/sscape_adapter.py name=datapublisher ! gvametapublish name=destination ! appsink sync=true",
+        "pipeline_description": [
+          "rtspsrc location=rtsp://mediaserver:8554/{{CAMERA_NAME}} latency=200 protocols=tcp",
+          "! rtph264depay ! h264parse ! avdec_h264",
+          "! videoconvert ! video/x-raw,format=BGR",
+          "! queue max-size-buffers=1 leaky=downstream",
+          "! gvapython class=PostDecodeTimestampCapture function=processFrame module=...sscape_adapter.py name=timesync",
+          "! gvadetect model=yolo_detect/yolo11s/yolo11s.xml model-proc=yolo11n.json labels-file=labels.txt device=GPU",
+          "! gvainference model=person-reidentification-retail-0277.xml inference-region=roi-list device=GPU",
+          "! gvametaconvert add-tensor-data=true name=metaconvert",
+          "! gvapython class=PostInferenceDataPublish function=processFrame module=...sscape_adapter.py name=datapublisher",
+          "! gvametapublish name=destination",
+          "! appsink sync=true"
+        ],
+        "pipeline": "rtspsrc location=rtsp://mediaserver:8554/{{CAMERA_NAME}} latency=200 protocols=tcp ! rtph264depay ! h264parse ! avdec_h264 ! videoconvert ! video/x-raw,format=BGR ! queue max-size-buffers=1 leaky=downstream ! gvapython class=PostDecodeTimestampCapture function=processFrame module=/home/pipeline-server/user_scripts/gvapython/sscape/sscape_adapter.py name=timesync ! gvadetect scheduling-policy=latency model=/home/pipeline-server/models/yolo_detect/yolo11s/yolo11s.xml model-proc=/home/pipeline-server/models/yolo_detect/yolo11s/yolo11n.json labels-file=/home/pipeline-server/models/object_detection/person/labels.txt name=detection device=GPU ! gvainference model=/home/pipeline-server/models/intel/person-reidentification-retail-0277/FP32/person-reidentification-retail-0277.xml inference-region=roi-list device=GPU ! gvametaconvert add-tensor-data=true name=metaconvert ! gvapython class=PostInferenceDataPublish function=processFrame module=/home/pipeline-server/user_scripts/gvapython/sscape/sscape_adapter.py name=datapublisher ! gvametapublish name=destination ! appsink sync=true",
         "auto_start": true,
         "parameters": {
           "type": "object",

@@ -15,6 +15,13 @@ SAMPLE_DATA_DIR := $(SCENESCAPE_DIR)/sample_data
 
 .PHONY: init
 init:
+	@if [ -z "$(APP_DIR)" ]; then \
+		echo "ERROR: APP_DIR is not set."; \
+		echo "Usage: make run APP_DIR=<path-to-app-dir>"; \
+		echo "  <app-dir> must contain configs/ and docker/ subdirectories."; \
+		echo "  Example: make run APP_DIR=../suspicious-activity-detection"; \
+		exit 1; \
+	fi
 	@chmod +x $(SCENESCAPE_DIR)/scripts/init.sh
 	@$(SCENESCAPE_DIR)/scripts/init.sh $(APP_DIR)
 

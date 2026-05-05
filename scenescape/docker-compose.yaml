@@ -283,8 +283,8 @@ services:
     tty: true
     entrypoint: ["./run.sh"]
     # Uncomment to use GPU acceleration:
-    # devices:
-    #   - "/dev/dri:/dev/dri"
+    devices:
+      - "/dev/dri:/dev/dri"
     # Uncomment to use NPU acceleration:
     # devices:
     #   - "/dev/accel:/dev/accel"
@@ -332,6 +332,7 @@ services:
       - vol-dlstreamer-pipeline-root:/var/cache/pipeline_root:uid=1999,gid=1999
       - vol-sample-data:/home/pipeline-server/videos
       - vol-models:/home/pipeline-server/models
+      - ${MODEL_PATH:-../suspicious-activity-detection/models}/yolo_detect_models:/home/pipeline-server/models/yolo_detect:ro
     secrets:
       - source: root-cert
         target: certs/scenescape-ca.pem

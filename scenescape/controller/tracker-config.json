@@ -1,8 +1,8 @@
 {
-  "max_unreliable_time_s": 5.0,
-  "non_measurement_time_dynamic_s": 3.0,
-  "non_measurement_time_static_s": 6.0,
-  "effective_object_update_rate": 10,
+  "max_unreliable_time_s": 0.3333333333,
+  "non_measurement_time_dynamic_s": 0.2666666667,
+  "non_measurement_time_static_s": 0.5333333333,
+  "effective_object_update_rate": 30,
   "time_chunking_enabled": false,
   "suspended_track_timeout_secs": 60.0
 }
