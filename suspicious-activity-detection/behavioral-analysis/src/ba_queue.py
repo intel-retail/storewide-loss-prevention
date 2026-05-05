@@ -172,7 +172,7 @@ class BAQueueConsumer:
             frames = await self.frame_store.get_frames(
                 entity_id=person_id,
                 max_frames=self.settings.max_frames_to_fetch,
-                max_age_seconds=0,
+                last_frame_ts=last_frame_ts,
                 region_id=region_id,
                 entry_timestamp=entry_timestamp,
                 scene_id=scene_id,

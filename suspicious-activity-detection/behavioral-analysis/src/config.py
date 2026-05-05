@@ -36,7 +36,6 @@ class Settings(BaseSettings):
     seaweedfs_bucket: str = "behavioral-frames"
     seaweedfs_access_key: str = ""
     seaweedfs_secret_key: str = ""
-    seaweedfs_max_frame_age: int = 120  # seconds
 
     # VLM settings
     vlm_endpoint: str = "http://ovms-vlm:8001"
