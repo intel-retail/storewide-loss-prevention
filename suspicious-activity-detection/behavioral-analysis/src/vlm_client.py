@@ -30,6 +30,7 @@ class VLMResult:
     parsed: Optional[dict[str, Any]] = None
     success: bool = False
     error: Optional[str] = None
+    metrics: Optional[dict[str, Any]] = None
 
 
 class VLMClient:
@@ -156,6 +157,14 @@ class VLMClient:
                 raw_response=raw_text,
                 parsed=parsed,
                 success=parsed is not None,
+                metrics={
+                    "latency_ms": round(latency_ms, 1),
+                    "prompt_tokens": usage.get("prompt_tokens"),
+                    "completion_tokens": usage.get("completion_tokens"),
+                    "total_tokens": usage.get("total_tokens"),
+                    "model": self.model_name,
+                    "num_frames": len(frames),
+                },
             )
 
         except httpx.TimeoutException:

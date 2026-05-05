@@ -107,6 +107,7 @@ class PatternResult:
     key_frames: list[int] = field(default_factory=list)
     vlm_result: Optional[dict[str, Any]] = None
     vlm_confirmed: Optional[bool] = None
+    vlm_metrics: Optional[dict[str, Any]] = None
 
 
 class PoseAnalyzer:
@@ -258,6 +259,7 @@ class PoseAnalyzer:
 
         parsed = vlm_result.parsed
         pose_result.vlm_result = parsed
+        pose_result.vlm_metrics = vlm_result.metrics
 
         # Check if VLM confirms the suspicious behavior
         vlm_suspicious = parsed.get("suspicious", False) if parsed else False

@@ -131,6 +131,8 @@ services:
       MQTT_PORT: ${MQTT_PORT:-1883}
       BA_REQUEST_TOPIC: ${BA_REQUEST_TOPIC:-ba/requests}
       BA_RESULT_TOPIC: ${BA_RESULT_TOPIC:-ba/results}
+      USECASE_1: ${USECASE_1:-Behavorial-Analysis}
+      CONTAINER_RESULTS_PATH: /app/results/ba
       http_proxy: ${http_proxy}
       https_proxy: ${https_proxy}
       no_proxy: ${no_proxy:-${NO_PROXY:-}},seaweedfs,ovms-vlm,broker.scenescape.intel.com,localhost,127.0.0.1,172.18.0.0/16,10.0.0.0/8
@@ -138,6 +140,7 @@ services:
       - ${MODEL_PATH:-./models}:/models:ro
       - ${OMZ_VOLUME:-storewide-lp_vol-models}:/omz_models:ro
       - ../scenescape/secrets:/app/secrets:ro
+      - ${RESULTS_PATH:-./results}:/app/results
     restart: unless-stopped
 
   # ---------- Store-wide Loss Prevention ----------
@@ -183,9 +186,12 @@ services:
       BEHAVIORAL_ANALYSIS_URL: ${BEHAVIORAL_ANALYSIS_URL:-http://behavioral-analysis:8080}
       ALERT_SERVICE_URL: ${ALERT_SERVICE_URL:-http://alert-service:8000}
       ANALYSIS_FPS: ${ANALYSIS_FPS:-1}
+      USECASE_1: ${USECASE_1:-SWLP-Service}
+      CONTAINER_RESULTS_PATH: /app/results/swlp
     volumes:
       - ./configs:/app/configs:ro
       - ../scenescape/secrets:/app/secrets:ro
+      - ${RESULTS_PATH:-./results}:/app/results
     restart: unless-stopped
 
   # ---------- Alert Service ----------

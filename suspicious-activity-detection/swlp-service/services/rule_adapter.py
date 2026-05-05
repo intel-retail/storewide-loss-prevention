@@ -15,6 +15,10 @@ from datetime import datetime, timezone
 from typing import Optional, Protocol, runtime_checkable
 
 import structlog
+from vlm_metrics_logger import (
+    user_log_start_time, 
+    log_end_time
+)
 
 from models.events import EventType, RegionEvent
 from models.alerts import Alert
@@ -559,6 +563,14 @@ class RuleEngineAdapter:
             self._maybe_drain_visit(visit_key, scene_id, person_id, region_id, entry_timestamp)
             return
 
+        # Log performance metric with last_frame_ts
+        last_frame_ts = result.get("last_frame_ts", "")
+        if last_frame_ts:
+            ts_ms = int(datetime.fromisoformat(
+                last_frame_ts.replace("Z", "+00:00")
+            ).timestamp() * 1000)
+            user_log_start_time(ts_ms, "USECASE_1","suspcious-activity")
+
         # No per-zone dedup here — the BA service emits one ba/results per
         # discrete concealment event it observes, and a single visit may
         # legitimately produce multiple suspicious verdicts (e.g. two thefts
@@ -577,7 +589,7 @@ class RuleEngineAdapter:
             timestamp=session.last_seen,
             dwell_seconds=0.0,
             scene_id=session.scene_id,
-        )
+        )        
 
         # Stash raw BA result so _build_details(CONCEALMENT) can pick it up.
         session._pending_ba_result = result
@@ -603,6 +615,7 @@ class RuleEngineAdapter:
         finally:
             session._pending_ba_result = None
 
+        log_end_time("SWLP-Service","suspcious-activity")
         # BA-specific evidence handling: for each alert that fired in
         # response to this BA result, copy the visit's frames (up to
         # last_frame_ts) into the per-alert prefix and mark the visit as

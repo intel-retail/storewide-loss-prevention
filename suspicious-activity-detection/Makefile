@@ -15,6 +15,8 @@ COMPOSE_ALL := docker compose --project-directory . --env-file docker/.env -f $(
 CAMERAS_OVERRIDE := docker/docker-compose.cameras.yaml
 COMPOSE_ALL := $(if $(wildcard $(CAMERAS_OVERRIDE)),$(COMPOSE_ALL) -f $(CAMERAS_OVERRIDE),$(COMPOSE_ALL))
 
+RESULTS_PATH ?= ./results
+
 # ---- Initialization ----
 
 .PHONY: init
@@ -26,6 +28,7 @@ init:
 .PHONY: demo
 demo:
 	@$(MAKE) -C $(SCENESCAPE_DIR) APP_DIR=$(CURDIR) init init-sample-data download-models init-volumes
+	@mkdir -p $(RESULTS_PATH)
 	@echo ""
 	@echo "=== Building LP images ==="
 	$(COMPOSE_ALL) build swlp-service behavioral-analysis gradio-ui

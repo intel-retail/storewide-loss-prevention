@@ -10,6 +10,7 @@ RUN apt-get update && \
     apt-get install -y --no-install-recommends \
     curl \
     ca-certificates \
+    git \
     && rm -rf /var/lib/apt/lists/*
 
 # Install uv package manager
@@ -23,6 +24,9 @@ COPY rule-engine/ /tmp/rule-engine/
 
 # Create virtual environment and install dependencies
 RUN uv sync && uv pip install /tmp/rule-engine/ && rm -rf /tmp/rule-engine/
+
+# Install performance-tools for metrics logging
+RUN uv pip install git+https://github.com/sumanaga/performance-tools.git@user_log_time#subdirectory=benchmark-scripts
 
 # Create non-root user
 RUN useradd -m -u 1000 lpuser && \
