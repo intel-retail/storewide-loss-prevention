@@ -1,0 +1,47 @@
+{
+  "config": {
+    "logging": {
+      "C_LOG_LEVEL": "INFO",
+      "PY_LOG_LEVEL": "INFO"
+    },
+    "pipelines": [
+      {
+        "name": "reid_Camera_01",
+        "source": "gstreamer",
+        "pipeline": "rtspsrc location=rtsp://mediaserver:8554/Camera_01 latency=200 ! rtph264depay ! h264parse ! avdec_h264 ! videoconvert ! videorate ! video/x-raw,format=BGR,framerate=10/1 ! gvapython class=PostDecodeTimestampCapture function=processFrame module=/home/pipeline-server/user_scripts/gvapython/sscape/sscape_adapter.py name=timesync ! gvadetect model=/home/pipeline-server/models/intel/person-detection-retail-0013/FP32/person-detection-retail-0013.xml model-proc=/home/pipeline-server/models/object_detection/person/person-detection-retail-0013.json threshold=0.75 name=detection ! gvainference model=/home/pipeline-server/models/intel/clip-reid-rn50/FP16/clip_reid_rn50.xml model-proc=/home/pipeline-server/models/object_detection/person/clip-reid-rn50.json inference-region=roi-list object-class=person name=personreid ! gvadetect model=/home/pipeline-server/models/intel/face-detection-retail-0004/FP32/face-detection-retail-0004.xml model-proc=/home/pipeline-server/models/object_detection/person/face-detection-retail-0004.json inference-region=roi-list object-class=person threshold=0.75 name=facedetection ! gvainference model=/home/pipeline-server/models/intel/face-reidentification-retail-0095/FP32/face-reidentification-retail-0095.xml model-proc=/home/pipeline-server/models/object_detection/person/face-reidentification-retail-0095.json inference-region=roi-list object-class=face ! gvatrack tracking-type=short-term-imageless ! gvametaconvert add-tensor-data=true name=metaconvert ! gvapython class=PostInferenceDataPublish function=processFrame module=/home/pipeline-server/user_scripts/gvapython/sscape/sscape_adapter.py name=datapublisher ! gvametapublish name=destination ! appsink sync=true",
+        "auto_start": true,
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "ntp_config": {
+              "element": { "name": "timesync", "property": "kwarg", "format": "json" },
+              "type": "object",
+              "properties": { "ntpServer": { "type": "string" } }
+            },
+            "camera_config": {
+              "element": { "name": "datapublisher", "property": "kwarg", "format": "json" },
+              "type": "object",
+              "properties": {
+                "cameraid": { "type": "string" },
+                "metadatagenpolicy": { "type": "string" },
+                "publish_frame": { "type": "boolean" },
+                "detection_labels": { "type": "array", "items": { "type": "string" } }
+              }
+            }
+          }
+        },
+        "payload": {
+          "parameters": {
+            "ntp_config": { "ntpServer": "ntpserv" },
+            "camera_config": {
+              "cameraid": "Camera_01",
+              "metadatagenpolicy": "reidPolicy",
+              "detection_labels": ["person", "face"],
+              "publish_image": true
+            }
+          }
+        }
+      }
+    ]
+  }
+}
