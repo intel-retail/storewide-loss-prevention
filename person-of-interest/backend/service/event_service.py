@@ -150,11 +150,16 @@ class EventService:
             },
         }
 
-    def store_region_entry(self, object_id, timestamp, scene_id, region_id, region_name, camera_id=None):
+    def store_region_entry(self, object_id, timestamp, scene_id, region_id, region_name, camera_id=None,
+                           entry_frame_key=None):
         """Record region entry — store presence key in Redis."""
-        self._repo.store_region_presence(object_id, timestamp, scene_id, region_id, region_name, camera_id)
+        self._repo.store_region_presence(
+            object_id, timestamp, scene_id, region_id, region_name, camera_id,
+            entry_frame_key=entry_frame_key,
+        )
 
-    def store_region_exit(self, object_id, timestamp, scene_id, region_id, region_name):
+    def store_region_exit(self, object_id, timestamp, scene_id, region_id, region_name,
+                          exit_frame_key=None):
         """Record region exit — calculate dwell time and store."""
         entry_data = self._repo.get_region_presence(object_id, scene_id, region_id)
         dwell_sec = None
@@ -174,5 +179,7 @@ class EventService:
             object_id, timestamp, scene_id, region_id, region_name, dwell_sec,
             entry_time=entry_time,
             camera_id=entry_data.get("camera_id") if entry_data else None,
+            entry_frame_key=entry_data.get("entry_frame_key") if entry_data else None,
+            exit_frame_key=exit_frame_key,
         )
         self._repo.delete_region_presence(object_id, scene_id, region_id)

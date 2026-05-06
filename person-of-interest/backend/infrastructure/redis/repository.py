@@ -211,11 +211,17 @@ class RedisEventRepository(EventRepository):
         """Atomically claim the right to capture thumbnail (NX). Returns True if claim acquired."""
         return bool(self._r.set(f"thumbnail:claiming:{object_id}", "1", ex=ttl, nx=True))
 
-    def store_region_presence(self, object_id, timestamp, scene_id, region_id, region_name, camera_id=None):
+    def store_region_presence(self, object_id, timestamp, scene_id, region_id, region_name, camera_id=None,
+                               entry_frame_key=None):
         """Store region entry presence record."""
         import json
         key = f"region:presence:{scene_id}:{region_id}:{object_id}"
-        data = {"first_seen": timestamp, "region_name": region_name, "camera_id": camera_id or ""}
+        data = {
+            "first_seen": timestamp,
+            "region_name": region_name,
+            "camera_id": camera_id or "",
+            "entry_frame_key": entry_frame_key or "",
+        }
         self._r.setex(key, 3600, json.dumps(data))  # 1h TTL
 
     def get_region_presence(self, object_id, scene_id, region_id):
@@ -231,8 +237,8 @@ class RedisEventRepository(EventRepository):
         self._r.delete(key)
 
     def store_region_dwell(self, object_id, timestamp, scene_id, region_id, region_name, dwell_sec=None,
-                           entry_time=None, camera_id=None):
-        """Store region dwell record (entry + exit + duration)."""
+                           entry_time=None, camera_id=None, entry_frame_key=None, exit_frame_key=None):
+        """Store region dwell record (entry + exit + duration + frame keys)."""
         import json
         from datetime import datetime, timezone
         date_key = timestamp[:10] if len(timestamp) >= 10 else datetime.now(timezone.utc).strftime("%Y-%m-%d")
@@ -246,8 +252,47 @@ class RedisEventRepository(EventRepository):
             "exit_time": timestamp,
             "dwell_sec": dwell_sec,
             "camera_id": camera_id or "",
+            "entry_frame_key": entry_frame_key or "",
+            "exit_frame_key": exit_frame_key or "",
         }
         self._r.setex(key, 86400 * 7, json.dumps(data))  # 7 day TTL
+
+    def store_zone_frame(self, frame_key: str, b64_jpeg: str, ttl: int = 86400 * 7) -> None:
+        """Store a base64-encoded JPEG frame for a zone entry or exit event."""
+        self._r.setex(frame_key, ttl, b64_jpeg)
+
+    def get_zone_frame(self, frame_key: str) -> Optional[str]:
+        """Return the stored base64 JPEG for a zone frame key, or None if expired."""
+        val = self._r.get(frame_key)
+        return val.decode() if isinstance(val, bytes) else val
+
+    def claim_track_entry(self, object_id: str, ttl: int = 86400 * 7) -> bool:
+        """Atomically claim the entry frame slot for a track (NX).
+
+        Returns True only the first time this track_id is seen — used to
+        trigger entry frame capture without zones.  TTL matches detection
+        retention so the marker expires with the rest of the track data.
+        """
+        return bool(self._r.set(f"track:entry:claimed:{object_id}", "1", ex=ttl, nx=True))
+
+    def store_track_frame(self, object_id: str, event_type: str, b64_jpeg: str,
+                          ttl: int = 86400 * 7) -> str:
+        """Store a base64 JPEG as the entry or last_seen frame for a track.
+
+        event_type: "entry" (written once, NX) or "last_seen" (always overwritten).
+        Returns the Redis key.
+        """
+        key = f"track:frame:{object_id}:{event_type}"
+        self._r.setex(key, ttl, b64_jpeg)
+        return key
+
+    def get_track_frame_key(self, object_id: str, event_type: str) -> str:
+        """Return the Redis key for a track frame without fetching the value."""
+        return f"track:frame:{object_id}:{event_type}"
+
+    def track_frame_exists(self, object_id: str, event_type: str) -> bool:
+        """Return True if a frame is stored for this track/event_type."""
+        return bool(self._r.exists(f"track:frame:{object_id}:{event_type}"))
 
     def set_reid_meta(self, global_uuid: str, metadata: dict, ttl: int = 120) -> None:
         """Store reid metadata for a global UUID (for MCP tool observability)."""

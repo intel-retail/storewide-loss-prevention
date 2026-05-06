@@ -50,11 +50,12 @@ def build_rtsp_url(camera_id: str) -> str:
 # ---------------------------------------------------------------------------
 
 class _MqttImageSubscriber:
-    """Subscribes to scenescape/image/camera/{camera_id} and caches the latest
-    base64 JPEG frame published by DLStreamer sscape_adapter.
+    """Subscribes to scenescape/image/camera/{camera_id}.
 
-    Also publishes "getimage" to the pipeline control topic on demand so the
-    adapter sends a fresh frame at exactly the right moment.
+    The DLStreamer sscape_adapter publishes ONE frame per `getimage` command
+    (publish_image flag is reset after each publish).  This class sends the
+    command and uses a threading.Condition to wait for exactly that response,
+    guaranteeing the returned frame matches the detection moment.
     """
 
     def __init__(self, camera_id: str, mqtt_host: str, mqtt_port: int) -> None:
@@ -62,20 +63,21 @@ class _MqttImageSubscriber:
         self._camera_id = camera_id
         self._host = mqtt_host
         self._port = mqtt_port
-        self._frame_b64: Optional[str] = None
-        self._frame_event = threading.Event()
-        self._lock = threading.Lock()
+
+        self._latest_b64: Optional[str] = None
+        self._cond = threading.Condition(threading.Lock())
 
         self._image_topic = f"scenescape/image/camera/{camera_id}"
-        # sscape_adapter listens on scenescape/cmd/camera/{cameraid} for "getimage"
-        self._cmd_topic = f"scenescape/cmd/camera/{camera_id}"
+        self._cmd_topic   = f"scenescape/cmd/camera/{camera_id}"
 
         self._client = mqtt.Client(client_id=f"poi-thumbnail-{camera_id}")
-        self._client.on_connect = self._on_connect
-        self._client.on_message = self._on_message
+        self._client.on_connect    = self._on_connect
+        self._client.on_message    = self._on_message
         self._client.on_disconnect = self._on_disconnect
 
-        self._thread = threading.Thread(target=self._run, daemon=True, name=f"mqtt-img-{camera_id}")
+        self._thread = threading.Thread(
+            target=self._run, daemon=True, name=f"mqtt-img-{camera_id}"
+        )
         self._thread.start()
 
     def _run(self) -> None:
@@ -84,13 +86,14 @@ class _MqttImageSubscriber:
                 self._client.connect(self._host, self._port, keepalive=30)
                 self._client.loop_forever()
             except Exception as exc:
-                log.warning("MQTT image subscriber for camera=%s disconnected: %s", self._camera_id, exc)
+                log.warning("MQTT image subscriber disconnected camera=%s: %s", self._camera_id, exc)
             time.sleep(3)
 
     def _on_connect(self, client, userdata, flags, rc) -> None:
         if rc == 0:
             client.subscribe(self._image_topic, qos=0)
-            log.info("MQTT image subscriber connected for camera=%s topic=%s", self._camera_id, self._image_topic)
+            log.info("MQTT image subscriber connected: camera=%s topic=%s",
+                     self._camera_id, self._image_topic)
         else:
             log.warning("MQTT image subscriber failed rc=%d camera=%s", rc, self._camera_id)
 
@@ -103,42 +106,49 @@ class _MqttImageSubscriber:
             data = _json.loads(msg.payload)
             b64 = data.get("image")
             if b64:
-                with self._lock:
-                    self._frame_b64 = b64
-                self._frame_event.set()
-                log.debug("MQTT image received for camera=%s (%d bytes)", self._camera_id, len(b64))
+                with self._cond:
+                    self._latest_b64 = b64
+                    self._cond.notify_all()   # wake everyone waiting for a frame
+                log.debug("MQTT image received camera=%s len=%d", self._camera_id, len(b64))
         except Exception as exc:
             log.debug("MQTT image parse error camera=%s: %s", self._camera_id, exc)
 
     def request_frame(self) -> None:
-        """Ask the DLStreamer adapter to publish a fresh frame now."""
+        """Ask the DLStreamer adapter to publish a fresh frame."""
         try:
             self._client.publish(self._cmd_topic, "getimage", qos=0)
-            log.debug("Sent getimage request for camera=%s", self._camera_id)
+            log.debug("Sent getimage for camera=%s", self._camera_id)
         except Exception as exc:
-            log.debug("Failed to send getimage for camera=%s: %s", self._camera_id, exc)
+            log.debug("Failed to send getimage camera=%s: %s", self._camera_id, exc)
 
+    def request_frame_and_wait(self, timeout: float = 3.0) -> Optional[str]:
+        """Send getimage and block until the pipeline publishes the response.
+
+        Returns the base64 JPEG string, or None on timeout.
+        The pipeline processes getimage in the next video frame cycle (~100 ms),
+        so the returned frame is guaranteed to be from the detection moment.
+        """
+        with self._cond:
+            self.request_frame()
+            # Wait for _on_message to deliver a new frame
+            arrived = self._cond.wait(timeout=timeout)
+            if not arrived:
+                log.warning("Timeout waiting for MQTT image camera=%s", self._camera_id)
+                return self._latest_b64   # return whatever we have (may be None)
+            return self._latest_b64
+
+    # Legacy helpers kept for prewarm / compatibility
     def get_latest_b64(self, wait_timeout: float = 2.0) -> Optional[str]:
-        """Return the latest base64 JPEG. Waits up to wait_timeout seconds for
-        the first frame if none cached yet."""
-        with self._lock:
-            if self._frame_b64:
-                return self._frame_b64
-        # Wait for a frame to arrive
-        self._frame_event.wait(timeout=wait_timeout)
-        with self._lock:
-            return self._frame_b64
+        return self.request_frame_and_wait(timeout=wait_timeout)
 
     def get_latest_frame(self, wait_timeout: float = 2.0) -> Optional[np.ndarray]:
-        """Decode and return the latest frame as a numpy array."""
         b64 = self.get_latest_b64(wait_timeout)
         if b64 is None:
             return None
         try:
             raw = base64.b64decode(b64)
             buf = np.frombuffer(raw, dtype=np.uint8)
-            frame = cv2.imdecode(buf, cv2.IMREAD_COLOR)
-            return frame
+            return cv2.imdecode(buf, cv2.IMREAD_COLOR)
         except Exception as exc:
             log.debug("MQTT image decode error camera=%s: %s", self._camera_id, exc)
             return None
@@ -251,50 +261,38 @@ def frame_to_base64_jpeg(image: np.ndarray, quality: int = 80) -> Optional[str]:
     return base64.b64encode(buf.tobytes()).decode("ascii")
 
 
-def capture_thumbnail(camera_id: str, bbox: Optional[dict]) -> Optional[str]:
-    """Return a base64 JPEG thumbnail for camera_id cropped to bbox.
+def capture_thumbnail(camera_id: str, bbox: Optional[dict], timestamp: str = "") -> Optional[str]:
+    """Return a base64 JPEG for camera_id at the detection moment.
 
-    If the camera is configured for MQTT image publishing (MQTT_IMAGE_CAMERAS),
-    requests a fresh frame from the DLStreamer pipeline and waits for it — this
-    gives a frame that is perfectly synchronised with the detection event.
+    MQTT image path (preferred — cameras listed in MQTT_IMAGE_CAMERAS):
+      Sends a getimage command to the DLStreamer pipeline and waits for the
+      response.  The pipeline captures the current video frame and publishes it
+      within ~100 ms (next pipeline cycle).  This frame is from the detection
+      moment, not a stale RTSP cache.
 
-    Falls back to the persistent RTSP grabber for cameras without MQTT image.
+    RTSP fallback:
+      Used for cameras not configured in MQTT_IMAGE_CAMERAS.
     """
     if use_mqtt_image(camera_id):
         sub = _get_mqtt_subscriber(camera_id)
-        # Request a fresh frame from the pipeline, then wait briefly for delivery
-        sub.request_frame()
-        frame = sub.get_latest_frame(wait_timeout=3.0)
-        if frame is None:
+        b64 = sub.request_frame_and_wait(timeout=3.0)
+        if b64 is None:
             log.warning("No MQTT image received for camera=%s — falling back to RTSP", camera_id)
-            # Fall through to RTSP
         else:
-            if bbox:
-                crop = crop_bbox(frame, bbox)
-                if crop is None or crop.size == 0:
-                    log.debug("Bbox crop failed for camera=%s, using full frame", camera_id)
-                    crop = frame
-            else:
-                crop = frame
-            b64 = frame_to_base64_jpeg(crop)
-            if b64:
-                return b64
-            log.warning("Failed to encode MQTT thumbnail for camera=%s", camera_id)
+            return b64
 
     # RTSP fallback
     grabber = _get_grabber(camera_id)
     frame = grabber.get_latest()
     if frame is None:
-        log.warning("No cached frame yet for camera=%s — grabber may still be connecting", camera_id)
+        log.warning("No cached RTSP frame for camera=%s", camera_id)
         return None
 
+    crop = frame
     if bbox:
-        crop = crop_bbox(frame, bbox)
-        if crop is None or crop.size == 0:
-            log.debug("Bbox crop failed for camera=%s bbox=%s, using full frame", camera_id, bbox)
-            crop = frame
-    else:
-        crop = frame
+        c = crop_bbox(frame, bbox)
+        if c is not None and c.size > 0:
+            crop = c
 
     b64 = frame_to_base64_jpeg(crop)
     if b64 is None:
@@ -302,9 +300,9 @@ def capture_thumbnail(camera_id: str, bbox: Optional[dict]) -> Optional[str]:
     return b64
 
 
-def submit_capture(camera_id: str, bbox: Optional[dict]):
+def submit_capture(camera_id: str, bbox: Optional[dict], timestamp: str = ""):
     """Submit a thumbnail capture to the shared thread pool. Returns a Future."""
-    return _executor.submit(capture_thumbnail, camera_id, bbox)
+    return _executor.submit(capture_thumbnail, camera_id, bbox, timestamp)
 
 
 def prewarm_grabbers(camera_ids: list[str]) -> None:

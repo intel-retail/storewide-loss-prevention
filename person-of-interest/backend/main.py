@@ -22,6 +22,7 @@ from backend.consumers.scenescape_consumer import ScenescapeRegionConsumer
 from backend.core.config import get_config
 from backend.factory.factories import EmbeddingModelFactory
 from backend.infrastructure.faiss.repository import FAISSRepository
+from backend.infrastructure.faiss.detection_index import DetectionIndexRepository
 from backend.infrastructure.mqtt.adapter import MQTTAdapter
 from backend.infrastructure.redis.repository import (
     RedisCacheRepository,
@@ -66,6 +67,14 @@ async def lifespan(app: FastAPI):
     event_repo = RedisEventRepository()
     mapping_repo = RedisEmbeddingMappingRepository()
 
+    log.info("Initializing detection index...")
+    import redis as _redis_mod
+    # decode_responses=False — DetectionIndexRepository stores raw float32 bytes for vectors
+    _redis_client = _redis_mod.Redis(
+        host=cfg.redis_host, port=cfg.redis_port, db=cfg.redis_db, decode_responses=False
+    )
+    detection_index = DetectionIndexRepository(_redis_client) if cfg.detection_index_enabled else None
+
     log.info("Initializing SceneScape adapter...")
     scenescape = ScenescapeAPIAdapter()
 
@@ -86,8 +95,12 @@ async def lifespan(app: FastAPI):
     alert_service = AlertService(alert_strategies, event_repo, poi_repo, event_bus)
 
     # ── Consumer ──
-    consumer = EventConsumer(matching_service, event_service, alert_service, event_bus, event_repo=event_repo)
-    region_consumer = ScenescapeRegionConsumer(event_service)
+    consumer = EventConsumer(
+        matching_service, event_service, alert_service, event_bus,
+        event_repo=event_repo,
+        detection_index=detection_index,
+    )
+    region_consumer = ScenescapeRegionConsumer(event_service, event_repo=event_repo)
 
     # ── MQTT ──
     if cfg.mqtt_host:
@@ -102,7 +115,7 @@ async def lifespan(app: FastAPI):
     # ── Inject services into API routes ──
     poi_routes.init(poi_service)
     search_routes.init(
-        matching_service, event_service, EmbeddingModelFactory.create(), faiss_repo
+        EmbeddingModelFactory.create(), detection_index, event_repo
     )
     camera_routes.init(scenescape)
     thumbnail_routes.init(event_repo)

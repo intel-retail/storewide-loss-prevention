@@ -145,3 +145,47 @@ class EmbeddingMappingRepository(ABC):
 
     @abstractmethod
     def remove_mappings_for_poi(self, poi_id: str) -> None: ...
+
+
+class DetectionIndexRepository(ABC):
+    """Interface for the all-detections FAISS index used by offline search.
+
+    Stores a face embedding for every person detected (not just enrolled POIs).
+    Metadata linking each vector back to its camera/track/time is stored in Redis
+    with a 7-day TTL and cleaned up automatically.
+    """
+
+    @abstractmethod
+    def add(
+        self,
+        vector: np.ndarray,
+        camera_id: str,
+        track_id: str,
+        timestamp: str,
+        bbox: Optional[list],
+    ) -> int:
+        """Add a detection vector and return the assigned faiss_id."""
+        ...
+
+    @abstractmethod
+    def search(self, vector: np.ndarray, top_k: int = 20) -> list[tuple[int, float]]:
+        """Return [(faiss_id, similarity_score), ...] sorted by descending similarity."""
+        ...
+
+    @abstractmethod
+    def get_metadata(self, faiss_id: int) -> Optional[dict]:
+        """Return stored metadata dict for a faiss_id, or None if expired/missing."""
+        ...
+
+    @abstractmethod
+    def total_vectors(self) -> int:
+        """Return current number of vectors in the index."""
+        ...
+
+    @abstractmethod
+    def claim_track(self, track_id: str, ttl: Optional[int] = None) -> bool:
+        """Atomically claim a track ID (Redis NX). Returns True only the first time.
+
+        Used to deduplicate: one embedding per track, not one per frame.
+        """
+        ...

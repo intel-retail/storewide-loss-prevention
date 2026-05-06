@@ -1,35 +1,56 @@
 import { useState } from 'react';
-import type { HistoryResult } from '../../types';
-import { mockHistoryResult } from '../../mockData';
-import VisitCard from './SearchResultCard';
+import type { SearchResult } from '../../types';
+import { searchHistory } from '../../api/poiApi';
+import AppearanceCard from './SearchResultCard';
 
 const SearchPanel = () => {
-  const [queryImage, setQueryImage] = useState<string | null>(null);
+  const [imageFile, setImageFile] = useState<File | null>(null);
+  const [imagePreview, setImagePreview] = useState<string | null>(null);
   const [startTime, setStartTime] = useState('');
   const [endTime, setEndTime] = useState('');
-  const [result, setResult] = useState<HistoryResult | null>(null);
+  const [result, setResult] = useState<SearchResult | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [searched, setSearched] = useState(false);
 
   const handleUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
+      setImageFile(file);
       const reader = new FileReader();
-      reader.onload = () => setQueryImage(reader.result as string);
+      reader.onload = () => setImagePreview(reader.result as string);
       reader.readAsDataURL(file);
     }
   };
 
-  const handleSearch = () => {
-    // In production: POST query image + time range to backend
-    setResult(mockHistoryResult);
-    setSearched(true);
+  const handleSearch = async () => {
+    if (!imageFile) return;
+    setLoading(true);
+    setError(null);
+    setResult(null);
+    try {
+      const data = await searchHistory({
+        image: imageFile,
+        topK: 20,
+        startTime: startTime ? new Date(startTime).toISOString() : '',
+        endTime: endTime ? new Date(endTime).toISOString() : '',
+      });
+      setResult(data);
+      setSearched(true);
+    } catch (err: any) {
+      setError(err.message ?? 'Search failed');
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handleReset = () => {
-    setQueryImage(null);
+    setImageFile(null);
+    setImagePreview(null);
     setStartTime('');
     setEndTime('');
     setResult(null);
+    setError(null);
     setSearched(false);
   };
 
@@ -42,11 +63,11 @@ const SearchPanel = () => {
         {/* Query image */}
         <div className="space-y-2">
           <span className="text-xs font-medium text-intel-gray">Query Image</span>
-          {queryImage ? (
+          {imagePreview ? (
             <div className="relative group">
-              <img src={queryImage} alt="Query" className="w-full aspect-square object-cover rounded-lg border border-gray-200" />
+              <img src={imagePreview} alt="Query" className="w-full aspect-square object-cover rounded-lg border border-gray-200" />
               <button
-                onClick={() => setQueryImage(null)}
+                onClick={() => { setImageFile(null); setImagePreview(null); }}
                 className="absolute top-1 right-1 w-6 h-6 rounded-full bg-black/60 text-white text-xs flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
               >
                 ×
@@ -59,6 +80,9 @@ const SearchPanel = () => {
               <input type="file" accept="image/*" onChange={handleUpload} className="hidden" />
             </label>
           )}
+          <p className="text-[10px] text-intel-gray leading-tight">
+            Use a surveillance screenshot or photo that includes the face (not a pre-cropped face-only image)
+          </p>
         </div>
 
         {/* Time range */}
@@ -85,10 +109,11 @@ const SearchPanel = () => {
         <div className="space-y-2 pt-2">
           <button
             onClick={handleSearch}
-            disabled={!queryImage}
-            className="w-full px-4 py-2 text-sm font-medium text-white bg-intel-blue rounded-lg hover:bg-intel-blue-dark transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+            disabled={!imageFile || loading}
+            className="w-full px-4 py-2 text-sm font-medium text-white bg-intel-blue rounded-lg hover:bg-intel-blue-dark transition-colors disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-2"
           >
-            Search
+            {loading && <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />}
+            {loading ? 'Searching...' : 'Search'}
           </button>
           <button
             onClick={handleReset}
@@ -105,17 +130,24 @@ const SearchPanel = () => {
           <h2 className="text-xl font-display font-medium text-intel-dark">Historical Search</h2>
           <p className="text-sm text-intel-gray mt-1">
             {searched && result
-              ? `${result.total_visits} visit${result.total_visits !== 1 ? 's' : ''} found for ${result.poi_id}`
+              ? `${result.total_appearances} appearance${result.total_appearances !== 1 ? 's' : ''} found across ${result.search_stats.unique_tracks} track${result.search_stats.unique_tracks !== 1 ? 's' : ''}`
               : 'Upload a reference image and search for historical appearances'}
           </p>
         </div>
 
+        {/* Error */}
+        {error && (
+          <div className="bg-red-50 border border-red-200 rounded-lg px-4 py-3 text-sm text-red-700">
+            {error}
+          </div>
+        )}
+
         {/* Search stats */}
         {result && (
-          <div className="flex gap-3">
+          <div className="flex flex-wrap gap-3">
             <div className="bg-blue-50 rounded-lg px-4 py-2 text-center">
-              <p className="text-lg font-semibold text-intel-blue">{result.total_visits}</p>
-              <p className="text-[11px] text-intel-gray">Visits</p>
+              <p className="text-lg font-semibold text-intel-blue">{result.total_appearances}</p>
+              <p className="text-[11px] text-intel-gray">Appearances</p>
             </div>
             <div className="bg-blue-50 rounded-lg px-4 py-2 text-center">
               <p className="text-lg font-semibold text-intel-blue">{result.search_stats.vectors_searched.toLocaleString()}</p>
@@ -125,34 +157,35 @@ const SearchPanel = () => {
               <p className="text-lg font-semibold text-intel-blue">{result.search_stats.query_latency_ms} ms</p>
               <p className="text-[11px] text-intel-gray">Query Latency</p>
             </div>
-            <div className="bg-gray-50 rounded-lg px-4 py-2 text-center text-[11px] text-intel-gray">
-              <p className="font-medium text-intel-dark text-xs">Range</p>
-              <p>{new Date(result.query_range.start).toLocaleDateString()} — {new Date(result.query_range.end).toLocaleDateString()}</p>
+            <div className="bg-blue-50 rounded-lg px-4 py-2 text-center">
+              <p className="text-lg font-semibold text-intel-blue">{result.search_stats.raw_hits}</p>
+              <p className="text-[11px] text-intel-gray">Raw Hits</p>
             </div>
           </div>
         )}
 
-        {/* Visit list */}
-        {result && result.visits.length > 0 ? (
+        {/* Appearances list */}
+        {result && result.appearances.length > 0 ? (
           <div className="space-y-3">
-            {result.visits.map((visit, i) => (
-              <VisitCard key={visit.alert_id} visit={visit} index={i} />
+            {result.appearances.map((appearance, i) => (
+              <AppearanceCard key={appearance.track_id} appearance={appearance} index={i} />
             ))}
           </div>
-        ) : searched ? (
+        ) : searched && !loading ? (
           <div className="text-center py-20 text-intel-gray">
             <p className="text-lg">No appearances found</p>
             <p className="text-sm mt-1">Try a different image or expand the time range</p>
           </div>
-        ) : (
+        ) : !searched ? (
           <div className="text-center py-20 text-intel-gray">
             <p className="text-lg">Upload a query image to begin</p>
-            <p className="text-sm mt-1">Historical visit records will appear here</p>
+            <p className="text-sm mt-1">Historical appearances will appear here</p>
           </div>
-        )}
+        ) : null}
       </div>
     </div>
   );
 };
 
 export default SearchPanel;
+

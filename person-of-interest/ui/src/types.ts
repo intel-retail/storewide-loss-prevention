@@ -91,3 +91,39 @@ export interface HistoryResult {
     query_latency_ms: number;
   };
 }
+
+/* ── Offline Search (detection index) ─────────────────── */
+
+export interface ZoneAppearance {
+  zone: string;
+  scene_id: string;
+  entry_time: string;
+  exit_time: string;
+  dwell_seconds: number | null;
+  entry_frame_url?: string;
+  exit_frame_url?: string;
+}
+
+export interface Appearance {
+  track_id: string;
+  camera_id: string;
+  similarity: number;
+  best_match_time: string;
+  entry_frame_url: string | null;
+  last_seen_frame_url: string | null;
+  zone_appearances: ZoneAppearance[];
+}
+
+export interface SearchResult {
+  event_type: 'offline_search_result';
+  query_timestamp: string;
+  query_range: { start: string; end: string };
+  total_appearances: number;
+  appearances: Appearance[];
+  search_stats: {
+    vectors_searched: number;
+    raw_hits: number;
+    unique_tracks: number;
+    query_latency_ms: number;
+  };
+}

@@ -27,10 +27,14 @@ class Config:
     redis_db: int = 0
     appearance_ttl_days: int = 7
 
-    # FAISS
+    # FAISS — enrolled POI index
     faiss_dimension: int = 256
     faiss_index_path: str = "/data/faiss/poi.index"
     faiss_id_map_path: str = "/data/faiss/id_map.json"
+
+    # FAISS — detection index (all faces seen, 7-day TTL)
+    detection_index_enabled: bool = True
+    detection_index_top_k: int = 20
 
     # Thresholds
     similarity_threshold: float = 0.6
@@ -105,6 +109,8 @@ class Config:
             faiss_dimension=int(os.getenv("FAISS_DIMENSION", "256")),
             faiss_index_path=os.getenv("FAISS_INDEX_PATH", "/data/faiss/poi.index"),
             faiss_id_map_path=os.getenv("FAISS_ID_MAP_PATH", "/data/faiss/id_map.json"),
+            detection_index_enabled=os.getenv("DETECTION_INDEX_ENABLED", "true").lower() == "true",
+            detection_index_top_k=int(os.getenv("DETECTION_INDEX_TOP_K", "20")),
             similarity_threshold=float(os.getenv("SIMILARITY_THRESHOLD", "0.6")),
             search_top_k=int(os.getenv("SEARCH_TOP_K", "10")),
             model_base=model_base,

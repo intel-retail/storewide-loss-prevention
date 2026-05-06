@@ -117,12 +117,14 @@ class EventConsumer:
         alert_service: AlertService,
         event_bus: EventBus,
         event_repo=None,
+        detection_index=None,
     ) -> None:
         self._matching = matching_service
         self._events = event_service
         self._alerts = alert_service
         self._event_bus = event_bus
         self._event_repo = event_repo  # used for thumbnail Redis ops
+        self._detection_index = detection_index  # DetectionIndexRepository or None
 
     def handle_event(self, topic: str, payload: dict) -> None:
         """Route incoming MQTT message to the appropriate handler."""
@@ -198,17 +200,45 @@ class EventConsumer:
                 camera_id, person_int_id, best_face_conf, len(embedding_vector),
             )
 
+            # ── Detection index: store one embedding per unique track (not per frame) ──
+            object_id = f"cam:{camera_id}:{person_int_id}"
+            if self._detection_index is not None:
+                import numpy as _np
+                try:
+                    # claim_track() uses Redis NX — returns True only the FIRST time
+                    # this track_id is seen. Subsequent detections of the same person
+                    # (same tracker track) are skipped — no duplicate embeddings.
+                    if self._detection_index.claim_track(object_id):
+                        self._detection_index.add(
+                            vector=_np.array(embedding_vector, dtype=_np.float32),
+                            camera_id=camera_id,
+                            track_id=object_id,
+                            timestamp=timestamp,
+                            bbox=best_face_bbox,
+                        )
+                        log.info("DetectionIndex: new track stored %s", object_id)
+                    else:
+                        log.debug("DetectionIndex: track already stored, skipping %s", object_id)
+                except Exception:
+                    log.debug("DetectionIndex.add failed for %s", object_id, exc_info=True)
+
             # Use a stable camera-local track key for dedup.
             # MatchingService cache-aside handles alert suppression (object_cache_ttl).
             # The external topic global UUID is NOT used here — per-camera tracking
             # is both correct and avoids the multi-person / timing-race problems of
             # a camera→UUID map.
-            object_id = f"cam:{camera_id}:{person_int_id}"
+            # NOTE: object_id is already set above for the detection index tap.
 
             # For thumbnail: use person bbox (wider) rather than face bbox to tolerate
             # timing drift between MQTT detection frame and RTSP grabber frame.
             # Face bbox is only ~30-50px and any movement causes a miss-crop.
             person_bbox = obj.get("bounding_box_px") or best_face_bbox
+
+            # ── Track-level entry / last-seen frames (no-zone fallback) ──────
+            # Entry:     captured once per track lifetime via atomic Redis NX claim.
+            # Last-seen: always overwritten; acts as the exit frame when track stops.
+            if self._event_repo is not None:
+                self._capture_track_frames(object_id, camera_id, person_bbox, timestamp)
 
             self._run_matching(
                 object_id=object_id,
@@ -220,6 +250,32 @@ class EventConsumer:
             )
 
     # ── Secondary: external topic (monitoring / UUID tracking only) ──────────
+
+    def _capture_track_frames(self, object_id: str, camera_id: str, bbox, timestamp: str = "") -> None:
+        """Capture entry frame (first detection) and update last-seen frame.
+
+        Uses the detection timestamp to retrieve the buffered MQTT image frame
+        whose pipeline timestamp is closest to the detection — this guarantees
+        the stored frame shows the same scene as the detection event, not a
+        later frame where the person may have moved.
+        """
+        try:
+            if self._event_repo.claim_track_entry(object_id):
+                future = submit_capture(camera_id, None, timestamp)
+                b64 = future.result(timeout=4)
+                if b64:
+                    self._event_repo.store_track_frame(object_id, "entry", b64)
+                    log.info("Track entry frame captured: %s", object_id)
+        except Exception:
+            log.debug("Track entry frame failed for %s", object_id, exc_info=True)
+
+        try:
+            future = submit_capture(camera_id, None, timestamp)
+            b64 = future.result(timeout=2)
+            if b64:
+                self._event_repo.store_track_frame(object_id, "last_seen", b64)
+        except Exception:
+            log.debug("Track last-seen frame failed for %s", object_id, exc_info=True)
 
     def _handle_external_event(self, topic: str, payload: dict) -> None:
         """Process scenescape/external/{scene_id}/person messages.

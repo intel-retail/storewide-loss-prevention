@@ -37,3 +37,24 @@ export async function clearAlerts() {
   if (!res.ok) throw new Error(`Failed to clear alerts: ${res.statusText}`);
   return res.json() as Promise<{ status: string; deleted: number }>;
 }
+
+export interface SearchParams {
+  image: File;
+  topK?: number;
+  startTime?: string;
+  endTime?: string;
+}
+
+export async function searchHistory({ image, topK = 20, startTime = '', endTime = '' }: SearchParams) {
+  const form = new FormData();
+  form.append('image', image);
+  form.append('top_k', String(topK));
+  form.append('start_time', startTime);
+  form.append('end_time', endTime);
+  const res = await fetch(`${API_BASE}/api/v1/search`, { method: 'POST', body: form });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: res.statusText }));
+    throw new Error(err.detail || 'Search failed');
+  }
+  return res.json();
+}
