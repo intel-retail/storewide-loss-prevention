@@ -74,6 +74,7 @@ export const mockAlerts: Alert[] = [
       thumbnail_path: '/images/poi1.png',
     },
     poi_metadata: {
+      name: "",
       notes: 'Repeat offender, last seen 2026-02-10',
       enrollment_date: '2026-02-15T10:00:00Z',
       total_previous_matches: 3,
@@ -95,6 +96,7 @@ export const mockAlerts: Alert[] = [
       thumbnail_path: '/images/poi3.png',
     },
     poi_metadata: {
+      name: "",
       notes: 'Suspected of concealment in electronics aisle',
       enrollment_date: '2026-02-17T14:30:00Z',
       total_previous_matches: 1,
@@ -116,6 +118,7 @@ export const mockAlerts: Alert[] = [
       thumbnail_path: '/images/poi2.png',
     },
     poi_metadata: {
+      name: "",
       notes: 'Repeat offender, last seen 2026-02-10',
       enrollment_date: '2026-02-15T10:00:00Z',
       total_previous_matches: 2,
@@ -137,6 +140,7 @@ export const mockAlerts: Alert[] = [
       thumbnail_path: '/images/poi4.png',
     },
     poi_metadata: {
+      name: "",
       notes: 'Known associate of poi-001',
       enrollment_date: '2026-02-16T08:00:00Z',
       total_previous_matches: 0,

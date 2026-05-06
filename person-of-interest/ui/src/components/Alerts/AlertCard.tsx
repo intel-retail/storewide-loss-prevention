@@ -35,7 +35,7 @@ const AlertCard = ({ alert, onImageClick, poiPrimaryImage }: AlertCardProps) => 
         {/* Details */}
         <div className="flex-1 min-w-0 space-y-1.5">
           <div className="flex items-center gap-2 flex-wrap">
-            <h3 className="font-medium text-sm text-intel-dark">{alert.poi_id}</h3>
+            <h3 className="font-medium text-sm text-intel-dark">{alert.poi_metadata.name || alert.poi_id}</h3>
             {sevBadge(alert.severity)}
           </div>
 

@@ -2,11 +2,11 @@ import { useState, useRef } from 'react';
 
 interface UploadModalProps {
   onClose: () => void;
-  onSave: (data: { notes: string; severity: 'low' | 'medium' | 'high'; files: File[] }) => void;
+  onSave: (data: { name: string; severity: 'low' | 'medium' | 'high'; files: File[] }) => void;
 }
 
 const UploadModal = ({ onClose, onSave }: UploadModalProps) => {
-  const [notes, setNotes] = useState('');
+  const [name, setName] = useState('');
   const [severity, setSeverity] = useState<'low' | 'medium' | 'high'>('medium');
   const [files, setFiles] = useState<File[]>([]);
   const [previews, setPreviews] = useState<string[]>([]);
@@ -83,15 +83,15 @@ const UploadModal = ({ onClose, onSave }: UploadModalProps) => {
           </select>
         </label>
 
-        {/* Notes */}
+        {/* POI Name */}
         <label className="block mb-4">
-          <span className="text-sm font-medium text-intel-dark">Notes</span>
-          <textarea
-            value={notes}
-            onChange={(e) => setNotes(e.target.value)}
-            placeholder="e.g. Repeat offender, last seen 2026-02-10"
-            rows={2}
-            className="mt-1 block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-intel-blue focus:ring-1 focus:ring-intel-blue outline-none resize-none"
+          <span className="text-sm font-medium text-intel-dark">POI Name</span>
+          <input
+            type="text"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder="e.g. John Doe"
+            className="mt-1 block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-intel-blue focus:ring-1 focus:ring-intel-blue outline-none"
           />
         </label>
 
@@ -101,7 +101,7 @@ const UploadModal = ({ onClose, onSave }: UploadModalProps) => {
             Cancel
           </button>
           <button
-            onClick={() => onSave({ notes, severity, files })}
+            onClick={() => onSave({ name, severity, files })}
             disabled={files.length === 0}
             className="px-4 py-2 text-sm font-medium text-white bg-intel-blue rounded-lg hover:bg-intel-blue-dark transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
           >

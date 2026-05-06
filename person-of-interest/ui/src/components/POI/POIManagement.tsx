@@ -40,10 +40,10 @@ const POIManagement = () => {
     }
   };
 
-  const handleSave = async ({ notes, severity, files }: { notes: string; severity: 'low' | 'medium' | 'high'; files: File[] }) => {
+  const handleSave = async ({ name, severity, files }: { name: string; severity: 'low' | 'medium' | 'high'; files: File[] }) => {
     if (files.length === 0) return;
     try {
-      await createPOI({ files, severity, description: notes });
+      await createPOI({ files, severity, description: name });
       setShowUpload(false);
       await fetchPOIs();
     } catch (err) {

@@ -78,7 +78,7 @@ class AlertService:
         """Build an AlertPayload from a match result."""
         poi = self._poi_repo.get(match.poi_id)
         severity = poi.severity.value if poi else "medium"
-        notes = poi.notes if poi else ""
+        poi_name = poi.notes if poi else ""
         enrollment_date = poi.created_at if poi else ""
 
         # Count previous matches
@@ -110,7 +110,8 @@ class AlertService:
                 "thumbnail_path": thumbnail_path,
             },
             poi_metadata={
-                "notes": notes,
+                "name": poi_name,
+                "notes": "",
                 "enrollment_date": enrollment_date,
                 "total_previous_matches": total_previous,
             },

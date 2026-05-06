@@ -30,6 +30,7 @@ export interface AlertMatch {
 }
 
 export interface AlertPOIMetadata {
+  name: string;
   notes: string;
   enrollment_date: string;
   total_previous_matches: number;

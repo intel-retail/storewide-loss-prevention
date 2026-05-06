@@ -31,6 +31,7 @@ function mapEnvelopeToAlert(data: Record<string, unknown>): Alert | null {
         thumbnail_path: (meta.thumbnail_path as string) ?? '',
       },
       poi_metadata: {
+        name: (meta.name as string) ?? '',
         notes: (meta.notes as string) ?? '',
         enrollment_date: (meta.enrollment_date as string) ?? '',
         total_previous_matches: (meta.total_previous_matches as number) ?? 0,
