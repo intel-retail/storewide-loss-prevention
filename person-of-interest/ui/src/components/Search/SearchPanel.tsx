@@ -130,7 +130,7 @@ const SearchPanel = () => {
           <h2 className="text-xl font-display font-medium text-intel-dark">Historical Search</h2>
           <p className="text-sm text-intel-gray mt-1">
             {searched && result
-              ? `${result.total_appearances} appearance${result.total_appearances !== 1 ? 's' : ''} found across ${result.search_stats.unique_tracks} track${result.search_stats.unique_tracks !== 1 ? 's' : ''}`
+              ? `${result.total_appearances} appearance${result.total_appearances !== 1 ? 's' : ''} found${result.matched_poi_id ? ` for POI ${result.matched_poi_id}` : ''}`
               : 'Upload a reference image and search for historical appearances'}
           </p>
         </div>
@@ -149,18 +149,28 @@ const SearchPanel = () => {
               <p className="text-lg font-semibold text-intel-blue">{result.total_appearances}</p>
               <p className="text-[11px] text-intel-gray">Appearances</p>
             </div>
-            <div className="bg-blue-50 rounded-lg px-4 py-2 text-center">
-              <p className="text-lg font-semibold text-intel-blue">{result.search_stats.vectors_searched.toLocaleString()}</p>
-              <p className="text-[11px] text-intel-gray">Vectors Searched</p>
-            </div>
+            {result.search_stats.poi_similarity != null && (
+              <div className="bg-blue-50 rounded-lg px-4 py-2 text-center">
+                <p className="text-lg font-semibold text-intel-blue">{(result.search_stats.poi_similarity * 100).toFixed(1)}%</p>
+                <p className="text-[11px] text-intel-gray">POI Similarity</p>
+              </div>
+            )}
+            {result.search_stats.best_similarity != null && (
+              <div className="bg-blue-50 rounded-lg px-4 py-2 text-center">
+                <p className="text-lg font-semibold text-intel-blue">{(result.search_stats.best_similarity * 100).toFixed(1)}%</p>
+                <p className="text-[11px] text-intel-gray">Best Similarity</p>
+              </div>
+            )}
             <div className="bg-blue-50 rounded-lg px-4 py-2 text-center">
               <p className="text-lg font-semibold text-intel-blue">{result.search_stats.query_latency_ms} ms</p>
               <p className="text-[11px] text-intel-gray">Query Latency</p>
             </div>
-            <div className="bg-blue-50 rounded-lg px-4 py-2 text-center">
-              <p className="text-lg font-semibold text-intel-blue">{result.search_stats.raw_hits}</p>
-              <p className="text-[11px] text-intel-gray">Raw Hits</p>
-            </div>
+            {result.search_stats.search_stage && (
+              <div className="bg-blue-50 rounded-lg px-4 py-2 text-center">
+                <p className="text-lg font-semibold text-intel-blue capitalize">{result.search_stats.search_stage.replace('_', ' ')}</p>
+                <p className="text-[11px] text-intel-gray">Search Stage</p>
+              </div>
+            )}
           </div>
         )}
 

@@ -326,6 +326,27 @@ class RedisEventRepository(EventRepository):
                 dwells.append(dwell)
         return dwells
 
+    def get_track_poi_counts(self, track_id: str) -> dict[str, int]:
+        """Return {poi_id: event_count} for all POIs that have events on this track."""
+        pattern = f"event:{track_id}:*"
+        cursor = 0
+        counts: dict[str, int] = {}
+        while True:
+            cursor, batch = self._r.scan(cursor, match=pattern, count=200)
+            for key in batch:
+                try:
+                    raw = self._r.get(key)
+                    if raw:
+                        evt = json.loads(raw)
+                        pid = evt.get("poi_id", "")
+                        if pid:
+                            counts[pid] = counts.get(pid, 0) + 1
+                except Exception:
+                    pass
+            if cursor == 0:
+                break
+        return counts
+
     # Kept for backwards-compatibility; no longer called from the consumer.
     def set_reid_matched(self, camera_id: str, global_uuid: str, metadata: dict, ttl: int = 15) -> None:
         """Deprecated: use set_reid_meta instead. Writes gate key + meta."""

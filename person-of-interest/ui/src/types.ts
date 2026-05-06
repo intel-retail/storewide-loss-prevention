@@ -119,12 +119,21 @@ export interface SearchResult {
   event_type: 'offline_search_result';
   query_timestamp: string;
   query_range: { start: string; end: string };
+  matched_poi_id?: string;
   total_appearances: number;
   appearances: Appearance[];
+  rejection_reason?: string;
   search_stats: {
-    vectors_searched: number;
-    raw_hits: number;
-    unique_tracks: number;
+    search_stage?: string;
+    vectors_searched?: number;
+    raw_hits?: number;
+    unique_tracks?: number;
+    unique_tracks_above_threshold?: number;
+    hits_above_threshold?: number;
+    best_similarity?: number;
+    poi_similarity?: number;
+    detection_hits?: number;
+    margin?: number;
     query_latency_ms: number;
   };
 }

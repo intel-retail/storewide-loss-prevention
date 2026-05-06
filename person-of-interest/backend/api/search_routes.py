@@ -75,41 +75,38 @@ async def search_history(
     # ── Stage 1: enrolled POI index ──
     poi_match = _match_poi_index(query_vector, cfg)
 
-    # ── Stage 2: detection index (all faces seen) ──
-    detection_appearances = _search_detection_index(
-        query_vector, cfg, top_k, start_time, end_time,
-    )
-
     total_latency_ms = (time.perf_counter() - t_start) * 1000
 
     # ── Merge results ──
     if poi_match is not None:
-        # POI identified — enrich with event history from Redis
+        # POI identified — return only verified POI event appearances
         poi_id = poi_match["poi_id"]
         poi_sim = poi_match["similarity"]
         poi_appearances = _get_poi_event_appearances(
             poi_id, poi_sim, start_time, end_time,
         )
-        # Combine: POI events + any detection index hits
-        all_appearances = poi_appearances + detection_appearances
-        # Deduplicate by track_id, keeping highest similarity
-        deduped = _deduplicate_appearances(all_appearances)
-        deduped.sort(key=lambda a: a.get("best_match_time", ""), reverse=True)
+        poi_appearances.sort(key=lambda a: a.get("best_match_time", ""), reverse=True)
 
         return {
             "event_type": "offline_search_result",
             "query_range": {"start": start_time, "end": end_time},
             "query_timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
             "matched_poi_id": poi_id,
-            "total_appearances": len(deduped),
-            "appearances": deduped,
+            "total_appearances": len(poi_appearances),
+            "appearances": poi_appearances,
             "search_stats": {
                 "search_stage": "poi_index",
                 "poi_similarity": round(poi_sim, 4),
-                "detection_hits": len(detection_appearances),
                 "query_latency_ms": round(total_latency_ms, 2),
             },
         }
+
+    # ── Stage 2: detection index (only for non-enrolled persons) ──
+    detection_appearances = _search_detection_index(
+        query_vector, cfg, top_k, start_time, end_time,
+    )
+
+    total_latency_ms = (time.perf_counter() - t_start) * 1000
 
     # No POI match — return detection index results only
     if not detection_appearances:
@@ -180,7 +177,11 @@ def _get_poi_event_appearances(
     start_time: str,
     end_time: str,
 ) -> list[dict]:
-    """Retrieve recorded events for a matched POI, grouped by track."""
+    """Retrieve recorded events for a matched POI, grouped by track.
+
+    Filters out tracks where another POI has more events (track purity check)
+    to avoid false positives from reused track IDs.
+    """
     if _event_repo is None:
         return []
 
@@ -192,6 +193,24 @@ def _get_poi_event_appearances(
 
     appearances = []
     for track_id, track_events in tracks.items():
+        # Track purity check: skip tracks clearly dominated by another POI
+        poi_counts = _event_repo.get_track_poi_counts(track_id)
+        if poi_counts:
+            our_count = poi_counts.get(poi_id, 0)
+            total = sum(poi_counts.values())
+            purity = our_count / total if total else 0
+            best_other = max(
+                (c for pid, c in poi_counts.items() if pid != poi_id),
+                default=0,
+            )
+            # Require at least 40% purity — allows ties but rejects clear outsiders
+            if purity < 0.4:
+                log.info(
+                    "Skipping track %s: purity %.1f%% (our=%d, other=%d)",
+                    track_id, 100 * purity, our_count, best_other,
+                )
+                continue
+
         track_events.sort(key=lambda e: e.get("timestamp", ""))
         first = track_events[0]
         appearance = _build_appearance(track_id, {

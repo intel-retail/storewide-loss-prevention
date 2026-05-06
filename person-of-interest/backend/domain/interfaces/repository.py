@@ -119,6 +119,10 @@ class EventRepository(ABC):
         """Return region dwell records for an object, optionally filtered by date."""
         return []
 
+    def get_track_poi_counts(self, track_id: str) -> dict[str, int]:
+        """Return {poi_id: event_count} for all POIs that have events on this track."""
+        return {}
+
     def set_reid_matched(self, camera_id: str, global_uuid: str, metadata: dict, ttl: int = 15) -> None:
         """Store SceneScape reid_state=matched signal for a camera (with TTL)."""
 
