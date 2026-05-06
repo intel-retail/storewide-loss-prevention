@@ -2,9 +2,7 @@ import type { Alert } from '../../types';
 
 interface AlertCardProps {
   alert: Alert;
-  onAcknowledge: (id: string) => void;
   onImageClick: (url: string) => void;
-  onViewTracking: (alertId: string) => void;
   poiPrimaryImage?: string;
 }
 
@@ -13,13 +11,12 @@ const sevBadge = (s: Alert['severity']) => {
   return <span className={`px-2 py-0.5 rounded-full text-[10px] font-semibold capitalize ${c}`}>{s}</span>;
 };
 
-const AlertCard = ({ alert, onAcknowledge, onImageClick, onViewTracking, poiPrimaryImage }: AlertCardProps) => {
-  const isNew = alert.status === 'New';
+const AlertCard = ({ alert, onImageClick, poiPrimaryImage }: AlertCardProps) => {
   const score = alert.match.similarity_score;
   const scoreColor = score >= 0.9 ? 'text-red-600' : score >= 0.8 ? 'text-yellow-600' : 'text-green-600';
 
   return (
-    <div className={`bg-white rounded-xl shadow-sm border overflow-hidden transition-all ${isNew ? 'border-red-300 ring-1 ring-red-200 bg-red-50/30' : 'border-gray-100'}`}>
+    <div className="bg-white rounded-xl shadow-sm border overflow-hidden transition-all border-gray-100">
       <div className="flex gap-3 p-4">
         {/* POI reference image */}
         {poiPrimaryImage && (
@@ -40,9 +37,6 @@ const AlertCard = ({ alert, onAcknowledge, onImageClick, onViewTracking, poiPrim
           <div className="flex items-center gap-2 flex-wrap">
             <h3 className="font-medium text-sm text-intel-dark">{alert.poi_id}</h3>
             {sevBadge(alert.severity)}
-            <span className={`px-2 py-0.5 rounded-full text-[10px] font-semibold ${isNew ? 'bg-red-100 text-red-700' : 'bg-gray-100 text-gray-600'}`}>
-              {alert.status}
-            </span>
           </div>
 
           <p className="text-xs text-intel-gray">
@@ -63,18 +57,6 @@ const AlertCard = ({ alert, onAcknowledge, onImageClick, onViewTracking, poiPrim
           {alert.poi_metadata.notes && (
             <p className="text-[11px] text-intel-gray italic truncate" title={alert.poi_metadata.notes}>{alert.poi_metadata.notes}</p>
           )}
-        </div>
-
-        {/* Actions */}
-        <div className="flex flex-col gap-2 flex-shrink-0">
-          {isNew && (
-            <button onClick={() => onAcknowledge(alert.alert_id)} className="px-3 py-1.5 text-xs font-medium text-white bg-intel-blue rounded-lg hover:bg-intel-blue-dark transition-colors">
-              Acknowledge
-            </button>
-          )}
-          <button onClick={() => onViewTracking(alert.alert_id)} className="px-3 py-1.5 text-xs font-medium text-intel-blue bg-blue-50 rounded-lg hover:bg-blue-100 transition-colors">
-            Track POI
-          </button>
         </div>
       </div>
     </div>

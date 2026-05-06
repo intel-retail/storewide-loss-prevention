@@ -1,25 +1,18 @@
-import type { TrackingUpdate } from '../../types';
-import { mockTrackingUpdates } from '../../mockData';
 import { useAlertWebSocket } from '../../hooks/useAlertWebSocket';
 import AlertCard from './AlertCard';
-import TrackingPanel from './TrackingPanel';
 import ImagePreviewModal from '../common/ImagePreviewModal';
 import { useState } from 'react';
 import { clearAlerts } from '../../api/poiApi';
+
+const ALERTS_PER_PAGE = 10;
 
 const LiveAlerts = () => {
   const { alerts, connected, setAlerts } = useAlertWebSocket();
   const [filterPoi, setFilterPoi] = useState('');
   const [filterCamera, setFilterCamera] = useState('');
   const [previewImage, setPreviewImage] = useState<string | null>(null);
-  const [activeTracking, setActiveTracking] = useState<TrackingUpdate | null>(null);
   const [clearing, setClearing] = useState(false);
-
-  const handleAcknowledge = (alertId: string) => {
-    setAlerts((prev) =>
-      prev.map((a) => (a.alert_id === alertId ? { ...a, status: 'Acknowledged' as const } : a))
-    );
-  };
+  const [currentPage, setCurrentPage] = useState(1);
 
   const handleClearAlerts = async () => {
     if (!window.confirm('Clear all alerts? This cannot be undone.')) return;
@@ -29,16 +22,12 @@ const LiveAlerts = () => {
       setAlerts([]);
       setFilterPoi('');
       setFilterCamera('');
+      setCurrentPage(1);
     } catch (err) {
       console.error('Failed to clear alerts:', err);
     } finally {
       setClearing(false);
     }
-  };
-
-  const handleViewTracking = (alertId: string) => {
-    const track = mockTrackingUpdates[alertId];
-    if (track) setActiveTracking(track);
   };
 
   const getPoiPrimaryImage = (_poiId: string) => undefined;
@@ -52,6 +41,10 @@ const LiveAlerts = () => {
     return true;
   });
 
+  const totalPages = Math.max(1, Math.ceil(filtered.length / ALERTS_PER_PAGE));
+  const safePage = Math.min(currentPage, totalPages);
+  const paginatedAlerts = filtered.slice((safePage - 1) * ALERTS_PER_PAGE, safePage * ALERTS_PER_PAGE);
+
   const newCount = filtered.filter((a) => a.status === 'New').length;
 
   return (
@@ -64,7 +57,7 @@ const LiveAlerts = () => {
           <span className="text-xs font-medium text-intel-gray">POI</span>
           <select
             value={filterPoi}
-            onChange={(e) => setFilterPoi(e.target.value)}
+            onChange={(e) => { setFilterPoi(e.target.value); setCurrentPage(1); }}
             className="mt-1 block w-full rounded-lg border border-gray-300 px-2.5 py-1.5 text-xs focus:border-intel-blue focus:ring-1 focus:ring-intel-blue outline-none"
           >
             <option value="">All POIs</option>
@@ -76,7 +69,7 @@ const LiveAlerts = () => {
           <span className="text-xs font-medium text-intel-gray">Camera</span>
           <select
             value={filterCamera}
-            onChange={(e) => setFilterCamera(e.target.value)}
+            onChange={(e) => { setFilterCamera(e.target.value); setCurrentPage(1); }}
             className="mt-1 block w-full rounded-lg border border-gray-300 px-2.5 py-1.5 text-xs focus:border-intel-blue focus:ring-1 focus:ring-intel-blue outline-none"
           >
             <option value="">All Cameras</option>
@@ -85,7 +78,7 @@ const LiveAlerts = () => {
         </label>
 
         <button
-          onClick={() => { setFilterPoi(''); setFilterCamera(''); }}
+          onClick={() => { setFilterPoi(''); setFilterCamera(''); setCurrentPage(1); }}
           className="w-full px-3 py-1.5 text-xs font-medium text-intel-gray bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors"
         >
           Reset Filters
@@ -118,17 +111,37 @@ const LiveAlerts = () => {
         </div>
 
         <div className="space-y-3">
-          {filtered.map((alert) => (
+          {paginatedAlerts.map((alert) => (
             <AlertCard
               key={alert.alert_id}
               alert={alert}
-              onAcknowledge={handleAcknowledge}
               onImageClick={setPreviewImage}
-              onViewTracking={handleViewTracking}
               poiPrimaryImage={getPoiPrimaryImage(alert.poi_id)}
             />
           ))}
         </div>
+
+        {totalPages > 1 && (
+          <div className="flex items-center justify-center gap-2 pt-4">
+            <button
+              onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+              disabled={safePage <= 1}
+              className="px-3 py-1.5 text-xs font-medium text-intel-blue bg-blue-50 rounded-lg hover:bg-blue-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+            >
+              Previous
+            </button>
+            <span className="text-xs text-intel-gray">
+              Page {safePage} of {totalPages}
+            </span>
+            <button
+              onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+              disabled={safePage >= totalPages}
+              className="px-3 py-1.5 text-xs font-medium text-intel-blue bg-blue-50 rounded-lg hover:bg-blue-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+            >
+              Next
+            </button>
+          </div>
+        )}
 
         {filtered.length === 0 && (
           <div className="text-center py-20 text-intel-gray">
@@ -138,7 +151,6 @@ const LiveAlerts = () => {
         )}
       </div>
 
-      {activeTracking && <TrackingPanel tracking={activeTracking} onClose={() => setActiveTracking(null)} />}
       {previewImage && <ImagePreviewModal imageUrl={previewImage} onClose={() => setPreviewImage(null)} />}
     </div>
   );
