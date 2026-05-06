@@ -2,6 +2,11 @@
 # SPDX-License-Identifier: Apache-2.0
 
 services:
+  # ---------- DLStreamer override: app-specific model mounts ----------
+  lp-video:
+    volumes:
+      - ${MODEL_PATH:-./models}/yolo_detect_models:/home/pipeline-server/models/yolo_detect:ro
+
   # ---------- Gradio UI Service ----------
   gradio-ui:
     build:

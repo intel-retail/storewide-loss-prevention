@@ -121,7 +121,12 @@ fi
 
 # Generate single DLStreamer pipeline config
 # For multi-stream density, run: make stream-density
-sed "s/{{CAMERA_NAME}}/${CAMERA_NAME}/g" "${DLSTREAMER_TEMPLATE}" > "${DLSTREAMER_CONFIG}"
+DETECT_DEVICE="${DETECT_DEVICE:-GPU}"
+REID_DEVICE="${REID_DEVICE:-CPU}"
+sed -e "s/{{CAMERA_NAME}}/${CAMERA_NAME}/g" \
+    -e "s/{{DETECT_DEVICE}}/${DETECT_DEVICE}/g" \
+    -e "s/{{REID_DEVICE}}/${REID_DEVICE}/g" \
+    "${DLSTREAMER_TEMPLATE}" > "${DLSTREAMER_CONFIG}"
 echo "  Generated ${DLSTREAMER_CONFIG}"
 echo "  Using pre-existing ${APP_DIR}/docker/docker-compose.cameras.yaml"
 

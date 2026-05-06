@@ -278,18 +278,16 @@ services:
     pids_limit: 1000
 
   # ---- DLStreamer Pipeline Server (inference + MQTT publishing) ----
+  # App-specific configuration (model mounts, pipeline config) is in
+  # each app's docker/docker-compose.yaml overlay.
   lp-video:
     image: docker.io/intel/dlstreamer-pipeline-server:${DLSTREAMER_VERSION:-2026.1.0-20260331-weekly-ubuntu24}
     networks:
       storewide-lp:
     tty: true
     entrypoint: ["./run.sh"]
-    # Uncomment to use GPU acceleration:
     devices:
       - "/dev/dri:/dev/dri"
-    # Uncomment to use NPU acceleration:
-    # devices:
-    #   - "/dev/accel:/dev/accel"
     group_add:
       - "109"
       - "110"
@@ -326,6 +324,8 @@ services:
       - http_proxy=${http_proxy}
       - NO_PROXY=mediaserver,${NO_PROXY}
       - no_proxy=mediaserver,${no_proxy}
+      - DETECT_DEVICE=${DETECT_DEVICE:-GPU}
+      - REID_DEVICE=${REID_DEVICE:-CPU}
     configs:
       - source: lp-config
         target: /home/pipeline-server/config.json
@@ -334,7 +334,6 @@ services:
       - vol-dlstreamer-pipeline-root:/var/cache/pipeline_root:uid=1999,gid=1999
       - vol-sample-data:/home/pipeline-server/videos
       - vol-models:/home/pipeline-server/models
-      - ${MODEL_PATH:-../suspicious-activity-detection/models}/yolo_detect_models:/home/pipeline-server/models/yolo_detect:ro
     secrets:
       - source: root-cert
         target: certs/scenescape-ca.pem
