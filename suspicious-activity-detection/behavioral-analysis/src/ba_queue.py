@@ -19,6 +19,8 @@ import json
 import logging
 from typing import Optional
 
+from vlm_metrics_logger import log_ovms_performance_metric
+
 import paho.mqtt.client as mqtt
 
 from config import Settings
@@ -172,7 +174,7 @@ class BAQueueConsumer:
             frames = await self.frame_store.get_frames(
                 entity_id=person_id,
                 max_frames=self.settings.max_frames_to_fetch,
-                max_age_seconds=0,
+                last_frame_ts=last_frame_ts,
                 region_id=region_id,
                 entry_timestamp=entry_timestamp,
                 scene_id=scene_id,
@@ -249,6 +251,10 @@ class BAQueueConsumer:
                         result = await self.pose_analyzer.analyze_with_vlm(
                             frames=frames,
                             pose_result=result,
+                        )
+                    if result.vlm_metrics:
+                        log_ovms_performance_metric(
+                            "USECASE_1", result.vlm_metrics
                         )
                 vlm_response = None
                 if result.vlm_result:

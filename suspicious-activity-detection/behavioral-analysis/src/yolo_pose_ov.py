@@ -4,7 +4,12 @@
 Lightweight YOLO-Pose inference using OpenVINO Runtime directly.
 
 Replaces ultralytics.YOLO to avoid pulling in PyTorch (~2 GB).
-Expects an OpenVINO IR model (.xml/.bin) exported from yolo11n-pose.
+Expects an OpenVINO IR model (.xml/.bin) exported from yolo26n-pose.
+
+YOLO26 uses an end-to-end architecture with built-in NMS.
+Output shape: (1, 300, 57)
+  - 300 = max post-NMS detections
+  - 57  = 4 (x1,y1,x2,y2 bbox) + 1 (score) + 1 (class_id) + 51 (17 kp * 3)
 """
 
 import logging
@@ -63,7 +68,7 @@ class YOLOPoseOV:
     ) -> list[_PoseResult]:
         """Run inference on a single BGR image."""
         img, ratio, (pad_w, pad_h) = self._preprocess(image)
-        output = self._model([img])[self._output_layer]  # (1, 56, 8400)
+        output = self._model([img])[self._output_layer]  # (1, 300, 57)
         results = self._postprocess(output, ratio, pad_w, pad_h)
         return results
 
@@ -104,34 +109,32 @@ class YOLOPoseOV:
         pad_w: int,
         pad_h: int,
         conf_threshold: float = 0.25,
-        iou_threshold: float = 0.7,
     ) -> list[_PoseResult]:
         """
-        Parse YOLO-Pose output tensor.
+        Parse YOLO26-Pose end-to-end output tensor.
 
-        output shape: (1, 56, 8400)
-          - 0:4   = bbox (cx, cy, w, h)
-          - 4     = objectness score
-          - 5:56  = 17 keypoints * 3 (x, y, conf)
+        YOLO26 has built-in NMS — output is already post-NMS.
+        output shape: (1, 300, 57)
+          - 0:4   = bbox (x1, y1, x2, y2) in letterbox coords
+          - 4     = confidence score
+          - 5     = class id (always 0 for single-class pose)
+          - 6:57  = 17 keypoints * 3 (x, y, conf)
         """
-        predictions = output[0].T  # (8400, 56)
+        detections = output[0]  # (300, 57)
 
-        scores = predictions[:, 4]
+        scores = detections[:, 4]
         mask = scores > conf_threshold
-        predictions = predictions[mask]
-        scores = scores[mask]
+        detections = detections[mask]
 
-        if len(predictions) == 0:
+        if len(detections) == 0:
             return [_PoseResult(keypoints=None)]
 
-        # NMS
-        boxes_xywh = predictions[:, :4]
-        boxes_xyxy = self._xywh_to_xyxy(boxes_xywh)
-        keep = self._nms(boxes_xyxy, scores, iou_threshold)
-        predictions = predictions[keep]
+        # Sort by score descending (highest confidence first)
+        order = detections[:, 4].argsort()[::-1]
+        detections = detections[order]
 
-        # Extract keypoints — columns 5..56 → (N, 17, 3)
-        raw_kp = predictions[:, 5:].reshape(-1, 17, 3)
+        # Extract keypoints — columns 6..57 → (N, 17, 3)
+        raw_kp = detections[:, 6:].reshape(-1, 17, 3)
         kp_xy = raw_kp[:, :, :2].copy()
         kp_conf = raw_kp[:, :, 2].copy()
 
@@ -140,37 +143,3 @@ class YOLOPoseOV:
         kp_xy[:, :, 1] = (kp_xy[:, :, 1] - pad_h) / ratio
 
         return [_PoseResult(keypoints=_KeypointsResult(xy=kp_xy, conf=kp_conf))]
-
-    # ------------------------------------------------------------------
-    @staticmethod
-    def _xywh_to_xyxy(boxes: np.ndarray) -> np.ndarray:
-        result = np.empty_like(boxes)
-        result[:, 0] = boxes[:, 0] - boxes[:, 2] / 2
-        result[:, 1] = boxes[:, 1] - boxes[:, 3] / 2
-        result[:, 2] = boxes[:, 0] + boxes[:, 2] / 2
-        result[:, 3] = boxes[:, 1] + boxes[:, 3] / 2
-        return result
-
-    @staticmethod
-    def _nms(
-        boxes: np.ndarray, scores: np.ndarray, iou_threshold: float
-    ) -> list[int]:
-        x1, y1, x2, y2 = boxes[:, 0], boxes[:, 1], boxes[:, 2], boxes[:, 3]
-        areas = (x2 - x1) * (y2 - y1)
-        order = scores.argsort()[::-1]
-
-        keep: list[int] = []
-        while order.size > 0:
-            i = order[0]
-            keep.append(int(i))
-            if order.size == 1:
-                break
-            xx1 = np.maximum(x1[i], x1[order[1:]])
-            yy1 = np.maximum(y1[i], y1[order[1:]])
-            xx2 = np.minimum(x2[i], x2[order[1:]])
-            yy2 = np.minimum(y2[i], y2[order[1:]])
-            inter = np.maximum(0, xx2 - xx1) * np.maximum(0, yy2 - yy1)
-            iou = inter / (areas[i] + areas[order[1:]] - inter)
-            inds = np.where(iou <= iou_threshold)[0]
-            order = order[inds + 1]
-        return keep

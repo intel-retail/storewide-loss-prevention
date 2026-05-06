@@ -5,7 +5,7 @@
 # Model Download Script for Suspicious Activity Detection
 # Downloads and exports:
 #   1. Qwen/Qwen2.5-VL-7B-Instruct VLM (for OVMS)
-#   2. yolo11n-pose (for behavioral analysis)
+#   2. yolo26n-pose (for behavioral analysis)
 
 set -e
 
@@ -15,14 +15,18 @@ MODELS_DIR="${PROJECT_ROOT}/models"
 
 ###############################################
 # CONFIGURATION — load AI-model settings from configs/.env.example
-# (single source of truth for VLM_*/TARGET_DEVICE/YOLO_*/RTMPOSE_*).
+# (single source of truth for VLM_*/TARGET_DEVICE/YOLO_*).
 # Falls back to docker/.env if .env.example is missing.
 # Only AI-model keys are sourced — placeholder keys like SUPASS,
 # CAMERA_NAME, etc. in .env.example are intentionally ignored.
 ###############################################
 ENV_EXAMPLE="${PROJECT_ROOT}/configs/.env.example"
 ENV_FILE="${PROJECT_ROOT}/docker/.env"
+<<<<<<< exit
 AI_KEYS_REGEX='^(VLM_ENABLED|VLM_MODEL_NAME|VLM_PRECISION|TARGET_DEVICE|YOLO_MODEL_NAME|YOLO_DETECT_MODEL|RTMPOSE_MODEL_NAME)='
+=======
+AI_KEYS_REGEX='^(VLM_ENABLED|VLM_MODEL_NAME|VLM_PRECISION|TARGET_DEVICE|YOLO_MODEL_NAME)='
+>>>>>>> dev
 
 SOURCE_FILE=""
 if [ -f "${ENV_EXAMPLE}" ]; then
@@ -47,15 +51,22 @@ fi
 VLM_MODEL_NAME="${VLM_MODEL_NAME:-Qwen/Qwen2.5-VL-7B-Instruct}"
 VLM_PRECISION="${VLM_PRECISION:-int8}"
 TARGET_DEVICE="${TARGET_DEVICE:-GPU}"
+<<<<<<< exit
 YOLO_MODEL_NAME="${YOLO_MODEL_NAME:-yolo11n-pose}"
 YOLO_DETECT_MODEL="${YOLO_DETECT_MODEL:-yolo11s}"
 RTMPOSE_MODEL_NAME="${RTMPOSE_MODEL_NAME:-rtmpose}"
+=======
+YOLO_MODEL_NAME="${YOLO_MODEL_NAME:-yolo26n-pose}"
+>>>>>>> dev
 
 # Where OVMS expects models
 VLM_MODELS_DIR="${MODELS_DIR}/vlm_models"
 YOLO_MODELS_DIR="${MODELS_DIR}/yolo_models"
+<<<<<<< exit
 YOLO_DETECT_DIR="${MODELS_DIR}/yolo_detect_models"
 RTMPOSE_MODELS_DIR="${MODELS_DIR}/rtmpose_models"
+=======
+>>>>>>> dev
 
 POTENTIAL_SOURCE_DIRS=(
     "${HOME}/ovms-vlm/models"
@@ -67,9 +78,13 @@ echo "=========================================="
 echo "Model Setup — Suspicious Activity Detection"
 echo "=========================================="
 echo "  VLM Model:     ${VLM_MODEL_NAME} (${VLM_PRECISION}, ${TARGET_DEVICE})"
+<<<<<<< exit
 echo "  YOLO Pose:     ${YOLO_MODEL_NAME}"
 echo "  YOLO Detect:   ${YOLO_DETECT_MODEL} (FP16)"
 echo "  RTMPose Model: ${RTMPOSE_MODEL_NAME}"
+=======
+echo "  YOLO Model:    ${YOLO_MODEL_NAME}"
+>>>>>>> dev
 echo "  Models Dir:    ${MODELS_DIR}"
 echo ""
 
@@ -93,15 +108,6 @@ check_yolo_model() {
     local target_dir="${YOLO_MODELS_DIR}/${YOLO_MODEL_NAME}"
     if [ -f "${target_dir}/${YOLO_MODEL_NAME}.xml" ] && [ -f "${target_dir}/${YOLO_MODEL_NAME}.bin" ]; then
         echo "  ✓ YOLO model found (OpenVINO IR)"
-        return 0
-    fi
-    return 1
-}
-
-check_rtmpose_model() {
-    local target_dir="${RTMPOSE_MODELS_DIR}/${RTMPOSE_MODEL_NAME}"
-    if [ -f "${target_dir}/${RTMPOSE_MODEL_NAME}.xml" ] && [ -f "${target_dir}/${RTMPOSE_MODEL_NAME}.bin" ]; then
-        echo "  ✓ RTMPOSE model found (OpenVINO IR)"
         return 0
     fi
     return 1
@@ -183,7 +189,7 @@ ensure_python_env() {
 # --- VLM download function ---
 download_vlm() {
 echo "------------------------------------------"
-echo "[1/3] VLM: ${VLM_MODEL_NAME}"
+echo "[1/2] VLM: ${VLM_MODEL_NAME}"
 echo "------------------------------------------"
 
 mkdir -p "${VLM_MODELS_DIR}"
@@ -353,7 +359,11 @@ fi
 download_yolo() {
 echo ""
 echo "------------------------------------------"
+<<<<<<< exit
 echo "[3/4] YOLO Pose: ${YOLO_MODEL_NAME}"
+=======
+echo "[2/2] YOLO: ${YOLO_MODEL_NAME}"
+>>>>>>> dev
 echo "------------------------------------------"
 
 mkdir -p "${YOLO_MODELS_DIR}"
@@ -443,6 +453,7 @@ PYEOF
 fi
 }
 
+<<<<<<< exit
 # --- RTMPOSE download function ---
 download_rtmpose() {
 echo ""
@@ -555,14 +566,20 @@ fi
 }
 
 
+=======
+>>>>>>> dev
 ###############################################
 # RUN DOWNLOADS IN PARALLEL
 ###############################################
 VLM_LOG=$(mktemp)
 YOLO_DETECT_LOG=$(mktemp)
 YOLO_LOG=$(mktemp)
+<<<<<<< exit
 RTMPOSE_LOG=$(mktemp)
 trap 'rm -f "${VLM_LOG}" "${YOLO_DETECT_LOG}" "${YOLO_LOG}" "${RTMPOSE_LOG}"' EXIT
+=======
+trap 'rm -f "${VLM_LOG}" "${YOLO_LOG}"' EXIT
+>>>>>>> dev
 
 download_vlm > "${VLM_LOG}" 2>&1 &
 VLM_PID=$!
@@ -573,6 +590,7 @@ YOLO_DETECT_PID=$!
 download_yolo > "${YOLO_LOG}" 2>&1 &
 YOLO_PID=$!
 
+<<<<<<< exit
 download_rtmpose > "${RTMPOSE_LOG}" 2>&1 &
 RTMPOSE_PID=$!
 
@@ -581,17 +599,20 @@ echo "  VLM PID:         ${VLM_PID}"
 echo "  YOLO Detect PID: ${YOLO_DETECT_PID}"
 echo "  YOLO Pose PID:   ${YOLO_PID}"
 echo "  RTMPOSE PID:     ${RTMPOSE_PID}"
+=======
+echo "Downloading VLM and YOLO models in parallel..."
+echo "  VLM PID:     ${VLM_PID}"
+echo "  YOLO PID:    ${YOLO_PID}"
+>>>>>>> dev
 echo ""
 
 # Show progress while waiting
 VLM_DONE=0
 YOLO_DETECT_DONE=0
 YOLO_DONE=0
-RTMPOSE_DONE=0
 VLM_LINES=0
 YOLO_DETECT_LINES=0
 YOLO_LINES=0
-RTMPOSE_LINES=0
 while true; do
     # Check if processes finished
     if [ ${VLM_DONE} -eq 0 ] && ! kill -0 ${VLM_PID} 2>/dev/null; then
@@ -608,11 +629,6 @@ while true; do
         wait ${YOLO_PID}
         YOLO_RC=$?
         YOLO_DONE=1
-    fi
-    if [ ${RTMPOSE_DONE} -eq 0 ] && ! kill -0 ${RTMPOSE_PID} 2>/dev/null; then
-        wait ${RTMPOSE_PID}
-        RTMPOSE_RC=$?
-        RTMPOSE_DONE=1
     fi
 
     # Stream new lines from VLM log
@@ -636,15 +652,12 @@ while true; do
         YOLO_LINES=${NEW_YOLO}
     fi
 
-    # Stream new lines from RTMPOSE log
-    NEW_RTMPOSE=$(wc -l < "${RTMPOSE_LOG}")
-    if [ "${NEW_RTMPOSE}" -gt "${RTMPOSE_LINES}" ]; then
-        sed -n "$((RTMPOSE_LINES + 1)),${NEW_RTMPOSE}p" "${RTMPOSE_LOG}" | sed 's/^/  [RTMPOSE] /'
-        RTMPOSE_LINES=${NEW_RTMPOSE}
-    fi
-
     # All done? Break.
+<<<<<<< exit
     if [ ${VLM_DONE} -eq 1 ] && [ ${YOLO_DETECT_DONE} -eq 1 ] && [ ${YOLO_DONE} -eq 1 ] && [ ${RTMPOSE_DONE} -eq 1 ]; then
+=======
+    if [ ${VLM_DONE} -eq 1 ] && [ ${YOLO_DONE} -eq 1 ]; then
+>>>>>>> dev
         break
     fi
 
@@ -668,11 +681,6 @@ if [ ${YOLO_RC} -ne 0 ]; then
     FAILED=1
 fi
 
-if [ ${RTMPOSE_RC} -ne 0 ]; then
-    echo "  ✗ RTMPOSE download/export failed (exit code ${RTMPOSE_RC})"
-    FAILED=1
-fi
-
 if [ ${FAILED} -ne 0 ]; then
     echo "One or more downloads failed."
     exit 1
@@ -682,8 +690,13 @@ echo ""
 echo "=========================================="
 echo "✓ All Model Setup Complete!"
 echo "=========================================="
+<<<<<<< exit
 echo "  VLM:         ${VLM_MODELS_DIR}/${VLM_MODEL_NAME}"
 echo "  YOLO Detect: ${YOLO_DETECT_DIR}/${YOLO_DETECT_MODEL} (FP16)"
 echo "  YOLO Pose:   ${YOLO_MODELS_DIR}/${YOLO_MODEL_NAME}"
 echo "  RTMPOSE:     ${RTMPOSE_MODELS_DIR}/${RTMPOSE_MODEL_NAME}"
+=======
+echo "  VLM:     ${VLM_MODELS_DIR}/${VLM_MODEL_NAME}"
+echo "  YOLO:    ${YOLO_MODELS_DIR}/${YOLO_MODEL_NAME}"
+>>>>>>> dev
 echo "=========================================="

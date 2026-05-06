@@ -44,8 +44,7 @@ make download-models
 This downloads:
 
 - `Qwen/Qwen2.5-VL-7B-Instruct` (VLM weights for behavioral analysis).
-- RTMPose pose-estimation model.
-- YOLO person-detection models.
+- YOLO pose-estimation and person-detection models.
 
 Models are written to the `suspicious-activity-detection/models/` directory
 on the host (for example,
@@ -56,7 +55,6 @@ and shared with each container via a Docker volume. Expected layout:
 suspicious-activity-detection/models/
 ├── vlm_models/
 │   └── Qwen/Qwen2.5-VL-7B-Instruct/
-├── rtmpose_models/
 └── yolo_models/
 ```
 
