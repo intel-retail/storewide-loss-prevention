@@ -1,31 +1,39 @@
 # Copyright (C) 2026 Intel Corporation
 # SPDX-License-Identifier: Apache-2.0
 #
-# Behavioral Analysis Pattern Configuration
+# Behavioral Analysis — Pattern Configuration
 #
-# This file defines the activity patterns to detect.
-# Each pattern has:
-#   - Pose-based rules (keypoint matching)
-#   - VLM prompt for visual confirmation
-#   - Response schema the VLM must follow
+# Define activity patterns using declarative pose rules.
+# No code changes required — add new patterns here and restart.
 #
-# The service is generic -- add new patterns here without code changes.
+# See config/README.md for the full authoring guide.
 
 patterns:
   shelf_to_waist:
-    description: "Hand moves from shelf/above-chest level to waist/pocket area"
+    description: "Hand moves from shelf level to waist/pocket area"
     enabled: true
+    alert_type: CONCEALMENT
 
-    # Pose-based detection parameters
     pose:
-      min_hand_raised_frames: 2      # Frames with hand above waist level in early window
-      min_hand_at_waist_frames: 2    # Frames with hand near waist in late window
-      waist_proximity_ratio: 0.6     # Max wrist-waist dist as fraction of torso length
+      per_side: true
+      phases:
+        - name: hand_raised
+          min_frames: 2
+          conditions:
+            - subject: wrist
+              relation: above
+              reference: waist_midpoint
 
-    # VLM confirmation (sent after pose match)
+        - name: hand_at_waist
+          min_frames: 2
+          conditions:
+            - subject: wrist
+              relation: near
+              reference: waist_midpoint
+              threshold: 0.6
+
     vlm:
       enabled: true
-      # Number of frames to send to VLM (evenly sampled from sequence)
       num_frames: 4
       prompt: |
         You are a retail loss-prevention analyst reviewing CCTV evidence.
@@ -64,19 +72,26 @@ patterns:
           "confidence": 0.0,
           "reasoning": "one short sentence citing the specific frames and cues you observed"
         }
-      # Expected fields in VLM JSON response
       response_fields:
-        - suspicious    # bool
-        - confidence    # float
-        - reasoning     # str
+        - suspicious
+        - confidence
+        - reasoning
 
   loitering:
     description: "Person remains stationary in a restricted area for too long"
     enabled: false
+    alert_type: LOITERING
 
     pose:
-      min_stationary_frames: 15
-      movement_threshold: 0.05
+      per_side: false
+      window_size: 15
+      phases:
+        - name: stationary
+          min_frames: 15
+          conditions:
+            - subject: left_hip
+              relation: stationary
+              threshold: 0.05
 
     vlm:
       enabled: true

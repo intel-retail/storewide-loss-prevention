@@ -20,3 +20,6 @@ suspicious-activity-detection/docker/docker-compose.cameras.yaml
 
 # Copied by init.sh for scene-import container
 scenescape/webserver/stream_density.py
+
+# Performance metrics results
+suspicious-activity-detection/results/

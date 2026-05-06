@@ -4,8 +4,7 @@
 Pose Analyzer
 
 Detects suspicious activity patterns from pose sequences.
-Pose extraction is handled by the GStreamer DL Streamer pipeline
-(gvadetect + gvainference + gvapython with pose_logger_rtmpose.py).
+Pose extraction is handled by the YOLO pose pipeline.
 When a pose pattern matches, optionally sends frames to VLM for confirmation.
 The service is generic — patterns and prompts are loaded from config.
 """
@@ -16,6 +15,7 @@ from typing import Any, Optional
 
 import numpy as np
 
+from pose_rule_engine import PoseRuleEngine
 from vlm_client import VLMClient
 
 logger = logging.getLogger(__name__)
@@ -108,6 +108,7 @@ class PatternResult:
     key_frames: list[int] = field(default_factory=list)
     vlm_result: Optional[dict[str, Any]] = None
     vlm_confirmed: Optional[bool] = None
+    vlm_metrics: Optional[dict[str, Any]] = None
 
 
 class PoseAnalyzer:
@@ -129,6 +130,7 @@ class PoseAnalyzer:
         self.confidence_threshold = confidence_threshold
         self.vlm_client = vlm_client
         self.pattern_config = pattern_config or {}
+        self.rule_engine = PoseRuleEngine(min_confidence=confidence_threshold)
         logger.info("PoseAnalyzer initialized (pattern detection + VLM confirmation)")
 
     def is_loaded(self) -> bool:
@@ -160,19 +162,33 @@ class PoseAnalyzer:
                 description=f"Pattern '{pattern_id}' is disabled",
             )
 
-        if pattern_id == "shelf_to_waist":
+        if pattern_id == "shelf_to_waist" and "phases" not in pattern_cfg.get("pose", {}):
+            # Legacy hard-coded implementation (used when no declarative phases defined)
             return self._detect_shelf_to_waist(pose_sequence, pattern_cfg)
-        else:
-            logger.warning(
-                "Pattern '%s' is configured but has no implementation — skipping",
-                pattern_id,
+
+        # Generic declarative rule engine
+        pose_cfg = pattern_cfg.get("pose", {})
+        if "phases" in pose_cfg:
+            engine_result = self.rule_engine.evaluate(
+                pose_sequence, pattern_cfg, min_frames=self.min_frames
             )
             return PatternResult(
-                matched=False,
-                confidence=0.0,
+                matched=engine_result.matched,
+                confidence=engine_result.confidence,
                 pattern_id=pattern_id,
-                description=f"Pattern '{pattern_id}' not implemented",
+                description=engine_result.description,
             )
+
+        logger.warning(
+            "Pattern '%s' has no phases defined and no built-in implementation — skipping",
+            pattern_id,
+        )
+        return PatternResult(
+            matched=False,
+            confidence=0.0,
+            pattern_id=pattern_id,
+            description=f"Pattern '{pattern_id}' has no phases defined",
+        )
 
     def detect_all_patterns(
         self,
@@ -259,6 +275,7 @@ class PoseAnalyzer:
 
         parsed = vlm_result.parsed
         pose_result.vlm_result = parsed
+        pose_result.vlm_metrics = vlm_result.metrics
 
         # Check if VLM confirms the suspicious behavior
         vlm_suspicious = parsed.get("suspicious", False) if parsed else False

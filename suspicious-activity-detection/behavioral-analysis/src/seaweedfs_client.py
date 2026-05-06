@@ -6,7 +6,7 @@ SeaweedFS Client — reads and deletes behavioral-analysis frames.
 
 import logging
 from typing import Optional
-from datetime import datetime, timedelta
+from datetime import datetime
 
 import aioboto3
 from botocore import UNSIGNED
@@ -40,13 +40,11 @@ class SeaweedFSClient:
         bucket: str = "behavioral-frames",
         access_key: str = "",
         secret_key: str = "",
-        max_frame_age_seconds: int = 30,
     ):
         self.endpoint = endpoint
         self.bucket = bucket
         self.access_key = access_key or None
         self.secret_key = secret_key or None
-        self.max_frame_age_seconds = max_frame_age_seconds
         self._anonymous = not self.access_key
 
         self.session = aioboto3.Session()
@@ -111,7 +109,7 @@ class SeaweedFSClient:
         self,
         entity_id: str,
         max_frames: int = 20,
-        max_age_seconds: Optional[int] = None,
+        last_frame_ts: Optional[str] = None,
         region_id: Optional[str] = None,
         entry_timestamp: Optional[str] = None,
         scene_id: Optional[str] = None,
@@ -122,7 +120,8 @@ class SeaweedFSClient:
         Args:
             entity_id: Entity identifier
             max_frames: Maximum number of frames to return
-            max_age_seconds: Only return frames newer than this age
+            last_frame_ts: Only return frames with timestamp <= this ISO
+                           timestamp (e.g. "2026-04-30T06:53:16.387Z")
             region_id: Region/zone identifier
             entry_timestamp: Zone entry timestamp (compact ISO format)
             scene_id: Scene UUID prefix
@@ -130,8 +129,15 @@ class SeaweedFSClient:
         Returns:
             List of (frame_image, timestamp) tuples
         """
-        if max_age_seconds is None:
-            max_age_seconds = self.max_frame_age_seconds
+        # Parse last_frame_ts to epoch ms for comparison with frame filenames
+        cutoff_ms: Optional[int] = None
+        if last_frame_ts:
+            try:
+                dt = datetime.fromisoformat(last_frame_ts.replace("Z", "+00:00"))
+                cutoff_ms = int(dt.timestamp() * 1000)
+            except (ValueError, TypeError):
+                logger.warning(f"Invalid last_frame_ts '{last_frame_ts}', ignoring")
+                cutoff_ms = None
 
         # Build prefix: {scene_id}/{entity_id}/{region_id}/{entry_timestamp}/frames/
         base = f"{scene_id}/{entity_id}" if scene_id else entity_id
@@ -154,14 +160,6 @@ class SeaweedFSClient:
                     return []
 
                 # Filter and sort by timestamp
-                if max_age_seconds > 0:
-                    cutoff_time = int(
-                        (datetime.utcnow() - timedelta(seconds=max_age_seconds)).timestamp()
-                        * 1000
-                    )
-                else:
-                    cutoff_time = 0
-
                 frame_keys = []
                 for obj in response["Contents"]:
                     key = obj["Key"]
@@ -170,7 +168,7 @@ class SeaweedFSClient:
                         filename = key.split("/")[-1]
                         timestamp = int(filename.replace(".jpg", ""))
 
-                        if timestamp >= cutoff_time:
+                        if cutoff_ms is None or timestamp <= cutoff_ms:
                             frame_keys.append((key, timestamp))
                     except ValueError:
                         continue
