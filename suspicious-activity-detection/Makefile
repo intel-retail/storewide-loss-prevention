@@ -25,8 +25,8 @@ init:
 
 # ---- Full Stack (SceneScape + LP) ----
 
-.PHONY: demo
-demo:
+.PHONY: up
+up:
 	@$(MAKE) -C $(SCENESCAPE_DIR) APP_DIR=$(CURDIR) init init-sample-data download-models init-volumes
 	@mkdir -p $(RESULTS_PATH)
 	@echo ""

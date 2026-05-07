@@ -13,7 +13,7 @@ import paho.mqtt.client as mqtt
 # Use Docker service name for container-to-container communication
 LP_BASE_URL = os.environ.get("LP_BASE_URL", "http://storewide-loss-prevention:8082")
 ZONES_API = f"{LP_BASE_URL}/api/v1/lp/zones"
-SESSIONS_API = f"{LP_BASE_URL}/api/v1/lp/sessions"
+SESSIONS_API = f"{LP_BASE_URL}/api/v1/lp/sessions?include_pending=true"
 ALERTS_API = f"{LP_BASE_URL}/api/v1/lp/alerts"
 ZONE_CONFIG = os.environ.get("ZONE_CONFIG", "/app/zone_config.json")
 
