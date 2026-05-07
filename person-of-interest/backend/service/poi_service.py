@@ -13,19 +13,10 @@ from backend.domain.entities.poi import POI
 from backend.domain.interfaces.repository import EmbeddingMappingRepository, EmbeddingRepository, POIRepository
 from backend.factory.factories import EmbeddingModelFactory
 from backend.utils.builder import POIBuilder
-from backend.utils.face_processing import build_poi_embedding
 
 log = logging.getLogger("poi.service.poi")
 
 UPLOAD_DIR = Path(os.getenv("UPLOAD_DIR", "/data/uploads"))
-
-# Enrollment face crop settings — keep at 0 for DLStreamer parity,
-# set to 0.10–0.15 if enrollment images are very different from runtime.
-ENROLL_PADDING = float(os.getenv("ENROLL_FACE_PADDING", "0.0"))
-ENROLL_SQUARE = os.getenv("ENROLL_FACE_SQUARE", "false").lower() == "true"
-# "mean" → average all reference embeddings into one FAISS vector
-# "all"  → store each reference as a separate FAISS vector
-ENROLL_STRATEGY = os.getenv("ENROLL_EMBEDDING_STRATEGY", "mean")
 
 
 class POIService:
@@ -51,54 +42,25 @@ class POIService:
         builder = POIBuilder().with_id(poi_id).with_severity(severity).with_notes(notes)
         model = EmbeddingModelFactory.create()
 
-        raw_embeddings = []
+        embeddings = []
         for idx, img_bytes in enumerate(images):
-            # Save debug crop alongside reference image
-            img_dir = UPLOAD_DIR / poi_id
-            img_dir.mkdir(parents=True, exist_ok=True)
-            crop_debug_path = str(img_dir / f"ref_{idx}_crop128.jpg")
-
-            result = model.generate_from_bytes(
-                img_bytes,
-                padding=ENROLL_PADDING,
-                make_square=ENROLL_SQUARE,
-                save_crop_path=crop_debug_path,
-            )
+            result = model.generate_from_bytes(img_bytes)
             if "error" in result:
                 log.warning("Image %d failed: %s", idx, result["error"])
                 continue
 
             emb_id = f"emb-{poi_id}-ref-{idx:02d}"
-            # Save original image to disk
+            # Save image to disk
+            img_dir = UPLOAD_DIR / poi_id
+            img_dir.mkdir(parents=True, exist_ok=True)
             img_path = img_dir / f"ref_{idx}.jpg"
             img_path.write_bytes(img_bytes)
 
             builder.add_image(emb_id, f"/uploads/{poi_id}/ref_{idx}.jpg")
-            emb = np.array(result["embedding"], dtype=np.float32)
-            raw_embeddings.append(emb)
-            log.info(
-                "Ref image %d: bbox=%s conf=%.3f norm=%.6f face_size=%s",
-                idx, result.get("face_bbox"), result.get("confidence"),
-                result.get("embedding_norm", 0.0), result.get("face_size"),
-            )
+            embeddings.append(np.array(result["embedding"], dtype=np.float32))
 
-        if not raw_embeddings:
+        if not embeddings:
             return {"error": "No faces detected in any uploaded image"}
-
-        # Build final embeddings using the configured strategy
-        if ENROLL_STRATEGY == "mean" and len(raw_embeddings) > 1:
-            mean_vec = build_poi_embedding(raw_embeddings, strategy="mean")
-            embeddings = [mean_vec]
-            log.info(
-                "POI %s: averaged %d reference embeddings into 1 (strategy=%s)",
-                poi_id, len(raw_embeddings), ENROLL_STRATEGY,
-            )
-        else:
-            embeddings = raw_embeddings
-            log.info(
-                "POI %s: storing %d individual embeddings (strategy=%s)",
-                poi_id, len(embeddings), ENROLL_STRATEGY,
-            )
 
         poi = builder.build()
 

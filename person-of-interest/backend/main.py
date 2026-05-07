@@ -115,7 +115,7 @@ async def lifespan(app: FastAPI):
     # ── Inject services into API routes ──
     poi_routes.init(poi_service)
     search_routes.init(
-        EmbeddingModelFactory.create(), detection_index, event_repo, faiss_repo
+        EmbeddingModelFactory.create(), detection_index, event_repo
     )
     camera_routes.init(scenescape)
     thumbnail_routes.init(event_repo, detection_index)

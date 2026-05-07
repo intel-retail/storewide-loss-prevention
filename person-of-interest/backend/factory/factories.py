@@ -8,11 +8,6 @@ from typing import Optional
 import numpy as np
 
 from backend.core.config import get_config
-from backend.utils.face_processing import (
-    crop_face,
-    embedding_norm,
-    preprocess_face,
-)
 
 log = logging.getLogger("poi.factory")
 
@@ -21,8 +16,6 @@ class EmbeddingModelFactory:
     """Factory Pattern — Creates embedding model instances based on config.
 
     Lazy-loads OpenVINO models to generate face embeddings from uploaded images.
-    Uses the unified face processing functions from ``face_processing.py`` to
-    ensure preprocessing parity with the DLStreamer runtime pipeline.
     """
 
     _instance: Optional[EmbeddingModelFactory] = None
@@ -58,26 +51,11 @@ class EmbeddingModelFactory:
             log.exception("Failed to load OpenVINO models")
             raise
 
-    def generate_embedding(
-        self,
-        image: np.ndarray,
-        *,
-        padding: float = 0.0,
-        make_square: bool = False,
-        save_crop_path: Optional[str] = None,
-    ) -> dict:
+    def generate_embedding(self, image: np.ndarray) -> dict:
         """Generate 256-d face embedding from a BGR image.
 
-        Args:
-            image: BGR uint8 image (H, W, 3).
-            padding: Fractional bbox expansion (0 = no padding = DLStreamer parity).
-                     Use 0.10–0.15 when enrollment images differ from runtime crops.
-            make_square: Square the bbox before resize to avoid aspect-ratio distortion.
-            save_crop_path: If set, save the preprocessed 128×128 face crop for debugging.
-
-        Returns:
-            Dict with keys: embedding, face_bbox, confidence, embedding_norm
-            or dict with key: error
+        Returns dict with keys: embedding, face_bbox, confidence
+        or dict with key: error
         """
         import cv2
 
@@ -108,63 +86,31 @@ class EmbeddingModelFactory:
         if best_face is None:
             return {"error": "No face detected in image"}
 
-        # 2. Crop face using unified function
-        face_crop = crop_face(image, best_face, padding=padding, make_square=make_square)
+        x1, y1, x2, y2 = best_face
+        face_crop = image[y1:y2, x1:x2]
 
-        face_w = best_face[2] - best_face[0]
-        face_h = best_face[3] - best_face[1]
-        log.info(
-            "Face detected: bbox=(%d,%d,%d,%d) size=%dx%d conf=%.3f",
-            *best_face, face_w, face_h, best_conf,
-        )
+        # Resize to 128x128 — same preprocessing as DLStreamer runtime
+        aligned = cv2.resize(face_crop, (128, 128))
 
-        # Save debug crop if requested
-        if save_crop_path:
-            resized_debug = cv2.resize(face_crop, (128, 128))
-            cv2.imwrite(save_crop_path, resized_debug)
-            log.info("Debug face crop saved to %s", save_crop_path)
-
-        # 3. Preprocess — mirrors DLStreamer's gvainference default:
-        #    resize 128×128 → float32 [0,255] → NCHW (NO /255.0)
-        reid_blob = preprocess_face(face_crop)
-
-        # 4. Inference
-        raw_embedding = self._reid(reid_blob)[self._reid.output(0)][0].flatten()
-        raw_norm = embedding_norm(raw_embedding)
-        embedding = raw_embedding / raw_norm if raw_norm > 0 else raw_embedding
-        final_norm = embedding_norm(embedding)
-
-        log.info(
-            "Embedding generated: raw_norm=%.6f final_norm=%.6f (should be ~1.0)",
-            raw_norm, final_norm,
-        )
+        # 2. Embedding (face-reidentification-retail-0095)
+        reid_blob = aligned.transpose(2, 0, 1).reshape(1, 3, 128, 128).astype(np.float32)
+        embedding = self._reid(reid_blob)[self._reid.output(0)][0].flatten()
+        embedding = embedding / np.linalg.norm(embedding)
 
         return {
             "embedding": embedding.tolist(),
             "face_bbox": list(best_face),
             "confidence": best_conf,
-            "embedding_norm": final_norm,
-            "face_size": (face_w, face_h),
         }
 
-    def generate_from_bytes(
-        self,
-        image_bytes: bytes,
-        *,
-        padding: float = 0.0,
-        make_square: bool = False,
-        save_crop_path: Optional[str] = None,
-    ) -> dict:
+    def generate_from_bytes(self, image_bytes: bytes) -> dict:
         import cv2
 
         arr = np.frombuffer(image_bytes, dtype=np.uint8)
         image = cv2.imdecode(arr, cv2.IMREAD_COLOR)
         if image is None:
             return {"error": "Cannot decode image from bytes"}
-        log.info("Enrollment image decoded: %dx%d", image.shape[1], image.shape[0])
-        return self.generate_embedding(
-            image, padding=padding, make_square=make_square, save_crop_path=save_crop_path,
-        )
+        return self.generate_embedding(image)
 
     @classmethod
     def reset(cls) -> None:

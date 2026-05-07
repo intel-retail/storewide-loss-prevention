@@ -40,7 +40,6 @@ from backend.observer.events import EventBus, MatchFoundEvent
 from backend.service.alert_service import AlertService
 from backend.service.event_service import EventService
 from backend.service.matching_service import MatchingService
-from backend.utils.face_processing import MIN_FACE_SIZE, embedding_norm, is_face_usable
 from backend.utils.thumbnail import grab_frame_now, submit_capture
 
 try:
@@ -195,60 +194,48 @@ class EventConsumer:
 
             for face in obj.get("sub_objects", {}).get("face", []):
                 face_conf = face.get("confidence", 0.0)
-                face_bbox = face.get("bounding_box_px")
-
-                # Compute face dimensions for quality check
-                face_w = face_bbox.get("width", 0) if isinstance(face_bbox, dict) else 0
-                face_h = face_bbox.get("height", 0) if isinstance(face_bbox, dict) else 0
-
-                if not is_face_usable(face_w, face_h, face_conf):
+                if face_conf < FACE_CONFIDENCE_THRESHOLD:
                     log.debug(
-                        "Skipping unusable face: camera=%s person=%s conf=%.3f size=%dx%d",
-                        camera_id, person_int_id, face_conf, face_w, face_h,
+                        "Skipping low-confidence face: camera=%s person=%s conf=%.3f",
+                        camera_id, person_int_id, face_conf,
                     )
                     continue
-
                 raw = face.get("metadata", {}).get("reid", {}).get("embedding_vector", "")
                 vec = _parse_embedding(raw)
                 if vec and face_conf > best_face_conf:
                     embedding_vector = vec
                     best_face_conf = face_conf
-                    best_face_bbox = face_bbox
+                    best_face_bbox = face.get("bounding_box_px")
 
             if not embedding_vector:
                 log.debug("No face embedding for camera=%s person=%s — skipping FAISS", camera_id, person_int_id)
                 continue
 
-            # Log embedding norm — should be ~1.0 for properly L2-normalised vectors
-            import numpy as _np
-            _vec_arr = _np.array(embedding_vector, dtype=_np.float32)
-            _norm = embedding_norm(_vec_arr)
-
             log.info(
-                "Face embedding found: camera=%s person=%s conf=%.3f dim=%d norm=%.6f",
-                camera_id, person_int_id, best_face_conf, len(embedding_vector), _norm,
+                "Face embedding found: camera=%s person=%s conf=%.3f dim=%d",
+                camera_id, person_int_id, best_face_conf, len(embedding_vector),
             )
 
-            # ── Detection index: store up to N embeddings per track ──
-            # Multiple embeddings capture different angles/poses, improving
-            # offline search accuracy.  claim_track() enforces count limit
-            # and minimum time interval between stores.
+            # ── Detection index: store one embedding per unique track (not per frame) ──
             object_id = f"cam:{camera_id}:{person_int_id}"
             new_faiss_id: int = -1
             if self._detection_index is not None:
                 import numpy as _np
                 try:
+                    # claim_track() uses Redis NX — returns True only the FIRST time
+                    # this track_id is seen. Subsequent detections of the same person
+                    # (same tracker track) are skipped — no duplicate embeddings.
                     if self._detection_index.claim_track(object_id):
                         new_faiss_id = self._detection_index.add(
                             vector=_np.array(embedding_vector, dtype=_np.float32),
                             camera_id=camera_id,
                             track_id=object_id,
                             timestamp=timestamp,
-                            bbox=obj.get("bounding_box_px") or best_face_bbox,
+                            bbox=best_face_bbox,
                         )
                         log.info("DetectionIndex: new track stored %s faiss_id=%d", object_id, new_faiss_id)
                     else:
-                        log.debug("DetectionIndex: slot limit or cooldown, skipping %s", object_id)
+                        log.debug("DetectionIndex: track already stored, skipping %s", object_id)
                 except Exception:
                     log.debug("DetectionIndex.add failed for %s", object_id, exc_info=True)
 
@@ -447,16 +434,15 @@ class EventConsumer:
             self._event_repo.set_match_metadata(object_id, match_meta, ttl=3600)
             log.debug("Match metadata written to Redis for uuid=%s", object_id)
 
-        # Capture thumbnail using the timestamp-matched frame from the ring buffer.
-        # The MQTT image subscriber continuously polls getimage, caching frames
-        # keyed by timestamp.  submit_capture looks up the exact frame matching
-        # this detection's timestamp — no SceneScape code changes required.
-        thumbnail_b64 = None
-        if camera_id and self._event_repo:
-            future = submit_capture(camera_id, bounding_box, timestamp)
+        # Capture thumbnail from RTSP — only when we have a valid camera_id
+        thumbnail_path = ""
+        if camera_id and self._event_repo and self._event_repo.claim_thumbnail(object_id, ttl=30):
+            future = submit_capture(camera_id, bounding_box)
             try:
-                thumbnail_b64 = future.result(timeout=6)
-                if thumbnail_b64:
+                b64 = future.result(timeout=6)
+                if b64:
+                    self._event_repo.store_thumbnail(object_id, b64, ttl=3600)
+                    thumbnail_path = f"/api/v1/thumbnail/{object_id}"
                     log.info("Thumbnail captured for uuid=%s camera=%s", object_id, camera_id)
                 else:
                     log.warning("Thumbnail returned no data for uuid=%s camera=%s", object_id, camera_id)
@@ -464,6 +450,8 @@ class EventConsumer:
                 log.warning("Thumbnail timed out or failed for uuid=%s camera=%s", object_id, camera_id)
         elif not camera_id:
             log.warning("No camera_id for uuid=%s — thumbnail skipped (visibility empty)", object_id)
+        elif self._event_repo and self._event_repo.get_thumbnail(object_id):
+            thumbnail_path = f"/api/v1/thumbnail/{object_id}"
 
         alert = self._alerts.create_alert_payload(
             match=match,
@@ -473,17 +461,8 @@ class EventConsumer:
             region_name=display_camera,
             confidence=confidence,
             center_of_mass=bounding_box,
-            thumbnail_path="",  # set below after storing with alert_id
+            thumbnail_path=thumbnail_path,
         )
-
-        # Store thumbnail keyed by alert_id (unique per alert) — prevents
-        # overwriting when the tracker reassigns person_id across video loops.
-        thumbnail_path = ""
-        if thumbnail_b64 and self._event_repo:
-            self._event_repo.store_thumbnail(alert.alert_id, thumbnail_b64, ttl=3600)
-            thumbnail_path = f"/api/v1/thumbnail/{alert.alert_id}"
-            log.info("Thumbnail stored: key=%s camera=%s", alert.alert_id, camera_id)
-        alert.match["thumbnail_path"] = thumbnail_path
 
         # Update movement event with the matched poi_id and thumbnail
         self._events.store_movement(
