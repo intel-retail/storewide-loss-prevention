@@ -263,6 +263,23 @@ class EventConsumer:
                 self._detection_index.store_frame(new_faiss_id, frame_b64)
                 log.info("Detection frame stored: faiss_id=%d track=%s", new_faiss_id, object_id)
 
+            # Always update the rolling exit vector for this track (overwritten each
+            # detection).  When the person leaves, the last value stored here becomes
+            # the effective "exit" embedding — searched at query time via search_exits().
+            if self._detection_index is not None:
+                import numpy as _np2
+                try:
+                    self._detection_index.update_exit(
+                        track_id=object_id,
+                        vector=_np2.array(embedding_vector, dtype=_np2.float32),
+                        camera_id=camera_id,
+                        timestamp=timestamp,
+                        bbox=best_face_bbox,
+                        b64_frame=frame_b64,
+                    )
+                except Exception:
+                    log.debug("update_exit failed for %s", object_id, exc_info=True)
+
             if self._event_repo is not None:
                 self._capture_track_frames(object_id, frame_b64)
 

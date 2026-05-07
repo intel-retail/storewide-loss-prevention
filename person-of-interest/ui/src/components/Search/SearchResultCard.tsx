@@ -80,7 +80,13 @@ const FrameImage = ({ url, label }: { url: string | null; label: string }) => {
 };
 
 const AppearanceCard = ({ appearance, index }: Props) => {
-  const { faiss_id, track_id, camera_id, similarity, timestamp, frame_url, zone_appearances } = appearance;
+  const {
+    faiss_id, track_id, camera_id, similarity,
+    entry_similarity, exit_similarity,
+    entry_timestamp, exit_timestamp,
+    entry_frame_url, exit_frame_url,
+    zone_appearances,
+  } = appearance;
 
   return (
     <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
@@ -94,7 +100,9 @@ const AppearanceCard = ({ appearance, index }: Props) => {
             </span>
             <div>
               <p className="text-sm font-medium text-intel-dark">{camera_id}</p>
-              <p className="text-[10px] text-intel-gray font-mono">{track_id} · id:{faiss_id}</p>
+              <p className="text-[10px] text-intel-gray font-mono">
+                {track_id}{faiss_id != null ? ` · id:${faiss_id}` : ''}
+              </p>
             </div>
           </div>
           <span className={`px-2.5 py-0.5 rounded-full text-xs font-semibold ${similarityColor(similarity)}`}>
@@ -102,15 +110,28 @@ const AppearanceCard = ({ appearance, index }: Props) => {
           </span>
         </div>
 
-        {/* Detection timestamp */}
-        <p className="text-xs text-intel-gray">
-          Detected: <span className="font-medium text-intel-dark">{fmtTime(timestamp)}</span>
-        </p>
-
-        {/* Per-detection frame */}
-        {frame_url && (
+        {/* Entry + Exit frames side by side */}
+        {(entry_frame_url || exit_frame_url) && (
           <div className="flex gap-4">
-            <FrameImage url={frame_url} label="Detection Frame" />
+            <div className="flex flex-col gap-1 items-center">
+              <FrameImage url={entry_frame_url} label="Entry" />
+              {entry_frame_url && (
+                <span className="text-[10px] text-intel-gray">
+                  {(entry_similarity * 100).toFixed(1)}% · {fmtTime(entry_timestamp)}
+                </span>
+              )}
+            </div>
+            <div className="flex flex-col gap-1 items-center">
+              <FrameImage url={exit_frame_url} label="Exit" />
+              {exit_frame_url && exit_similarity != null && (
+                <span className="text-[10px] text-intel-gray">
+                  {(exit_similarity * 100).toFixed(1)}% · {fmtTime(exit_timestamp ?? '')}
+                </span>
+              )}
+              {exit_frame_url == null && (
+                <span className="text-[10px] text-intel-gray/50 italic">No exit frame</span>
+              )}
+            </div>
           </div>
         )}
 

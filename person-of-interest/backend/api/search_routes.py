@@ -111,10 +111,8 @@ async def search_history(
     if not hits:
         return _empty_response(start_time, end_time, query_latency_ms)
 
-    # Each faiss_id is a distinct temporal detection with its own stored frame.
-    # We do NOT group by track_id — the same tracker int ID can be reused for
-    # different people across time windows, so grouping would merge different people.
-    appearances = []
+    # ── Collect best entry hit per track ──
+    best_entry: dict[str, dict] = {}  # track_id → {faiss_id, similarity, meta}
     for faiss_id, similarity in hits:
         if similarity < threshold:
             continue
@@ -126,13 +124,27 @@ async def search_history(
             continue
         if end_time and ts and ts > end_time:
             continue
-        appearance = _build_appearance(faiss_id, similarity, meta)
-        appearances.append(appearance)
+        track_id = meta["track_id"]
+        if track_id not in best_entry or similarity > best_entry[track_id]["similarity"]:
+            best_entry[track_id] = {"faiss_id": faiss_id, "similarity": similarity, "meta": meta}
 
-    if not appearances:
+    if not best_entry:
         return _empty_response(start_time, end_time, query_latency_ms)
 
-    # Sort by similarity descending
+    # ── Check rolling exit vectors for the same tracks ──
+    exit_sims = _detection_index.search_exits(query_vector, list(best_entry.keys()))
+
+    # ── Build one grouped appearance per track (entry + exit on same card) ──
+    appearances = []
+    for track_id, entry in best_entry.items():
+        exit_sim = exit_sims.get(track_id)
+        appearance = _build_grouped_appearance(
+            entry["faiss_id"], entry["similarity"], entry["meta"],
+            exit_sim=exit_sim, track_id=track_id,
+        )
+        appearances.append(appearance)
+
+    # Sort by best similarity (max of entry and exit) descending
     appearances.sort(key=lambda a: a["similarity"], reverse=True)
 
     return {
@@ -145,8 +157,7 @@ async def search_history(
             "search_stage": "detection_index",
             "vectors_searched": _detection_index.total_vectors(),
             "raw_hits": len(hits),
-            "unique_tracks": len({a["track_id"] for a in appearances}),
-            "best_similarity": appearances[0]["similarity"],
+            "unique_tracks": len(appearances),
             "query_latency_ms": round(query_latency_ms, 2),
         },
     }
@@ -273,41 +284,38 @@ def _get_poi_event_appearances(
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
-def _build_appearance(faiss_id: int, similarity: float, meta: dict) -> dict:
-    """Build the appearance dict for one FAISS hit: unique frame + zone dwells."""
-    track_id = meta["track_id"]
+def _build_grouped_appearance(
+    faiss_id: int,
+    entry_sim: float,
+    meta: dict,
+    exit_sim: Optional[float],
+    track_id: str,
+) -> dict:
+    """Build one appearance card grouping entry and exit for the same track."""
     camera_id = meta.get("camera_id", "")
 
-    # Per-faiss_id frame (unique, never overwritten)
-    frame_url = None
-    if _detection_index is not None:
-        frame = _detection_index.get_frame(faiss_id)
-        if frame:
-            frame_url = f"/api/v1/frames/{_encode_key(f'detection:frame:{faiss_id}')}"
-
-    if frame_url is None and _event_repo is not None:
+    # ── Entry frame ──
+    entry_frame_url = None
+    if _detection_index is not None and _detection_index.get_frame(faiss_id):
+        entry_frame_url = f"/api/v1/frames/{_encode_key(f'detection:frame:{faiss_id}')}"
+    if entry_frame_url is None and _event_repo is not None:
         for event_type in ("entry", "last_seen"):
             if _event_repo.track_frame_exists(track_id, event_type):
                 key = _event_repo.get_track_frame_key(track_id, event_type)
-                frame_url = f"/api/v1/frames/{_encode_key(key)}"
+                entry_frame_url = f"/api/v1/frames/{_encode_key(key)}"
                 break
 
-    zone_appearances = _get_zone_appearances(track_id)
+    # ── Exit frame (rolling, only available within track_seen_ttl window) ──
+    exit_frame_url = None
+    exit_timestamp = None
+    if exit_sim is not None and _detection_index is not None:
+        exit_frame_key = _detection_index.get_exit_frame_url_key(track_id)
+        if exit_frame_key:
+            exit_frame_url = f"/api/v1/frames/{_encode_key(exit_frame_key)}"
+        exit_meta = _detection_index.get_exit_meta(track_id) or {}
+        exit_timestamp = exit_meta.get("timestamp")
 
-    return {
-        "faiss_id": faiss_id,
-        "track_id": track_id,
-        "camera_id": camera_id,
-        "similarity": round(float(similarity), 4),
-        "timestamp": meta.get("timestamp", ""),
-        "bbox": meta.get("bbox"),
-        "frame_url": frame_url,
-        "zone_appearances": zone_appearances,
-    }
-
-
-def _get_zone_appearances(track_id: str) -> list[dict]:
-    """Get zone dwell records for a track."""
+    # ── Zone dwells ──
     zone_appearances = []
     if _event_repo is not None:
         dwells = _event_repo.get_region_dwells_for_object(track_id)
@@ -326,9 +334,24 @@ def _get_zone_appearances(track_id: str) -> list[dict]:
             if exit_fk:
                 zone_entry["exit_frame_url"] = f"/api/v1/frames/{_encode_key(exit_fk)}"
             zone_appearances.append(zone_entry)
-
         zone_appearances.sort(key=lambda z: z.get("entry_time") or "")
-    return zone_appearances
+    # Overall similarity = best of entry and exit
+    best_sim = max(entry_sim, exit_sim) if exit_sim is not None else entry_sim
+
+    return {
+        "faiss_id": faiss_id,
+        "track_id": track_id,
+        "camera_id": camera_id,
+        "similarity": round(float(best_sim), 4),
+        "entry_similarity": round(float(entry_sim), 4),
+        "exit_similarity": round(float(exit_sim), 4) if exit_sim is not None else None,
+        "entry_timestamp": meta.get("timestamp", ""),
+        "exit_timestamp": exit_timestamp,
+        "entry_frame_url": entry_frame_url,
+        "exit_frame_url": exit_frame_url,
+        "bbox": meta.get("bbox"),
+        "zone_appearances": zone_appearances,
+    }
 
 
 def _encode_key(redis_key: str) -> str:

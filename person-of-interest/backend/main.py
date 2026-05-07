@@ -120,6 +120,13 @@ async def lifespan(app: FastAPI):
     camera_routes.init(scenescape)
     thumbnail_routes.init(event_repo, detection_index)
 
+    # ── Exit promoter — promotes exit embeddings to FAISS after persons leave ──
+    if detection_index is not None:
+        from backend.infrastructure.faiss.exit_promoter import ExitPromoterThread
+        _exit_promoter = ExitPromoterThread(detection_index, interval_sec=30)
+        _exit_promoter.start()
+        log.info("ExitPromoterThread started")
+
     # Pre-warm RTSP grabbers so frames are cached before first match event
     import os as _os
     _prewarm = [c.strip() for c in _os.getenv("RTSP_PREWARM_CAMERAS", "").split(",") if c.strip()]

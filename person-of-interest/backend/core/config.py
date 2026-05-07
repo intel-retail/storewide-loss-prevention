@@ -40,7 +40,7 @@ class Config:
     # TTL for the per-track dedup gate (claim_track NX key).
     # Must be short so recycled tracker IDs (same int id reused for a new person)
     # are not blocked. 120s covers any realistic single-person dwell time.
-    track_seen_ttl: int = 120
+    track_seen_ttl: int = 600
 
     # Thresholds
     similarity_threshold: float = 0.6
@@ -145,7 +145,7 @@ class Config:
             log_level=os.getenv("LOG_LEVEL", "INFO"),
             object_cache_ttl=int(os.getenv("OBJECT_CACHE_TTL", "300")),
             alert_dedup_ttl=int(os.getenv("ALERT_DEDUP_TTL", "300")),
-            track_seen_ttl=int(os.getenv("TRACK_SEEN_TTL", "120")),
+            track_seen_ttl=int(os.getenv("TRACK_SEEN_TTL", "600")),
             benchmark_latency=os.getenv("BENCHMARK_LATENCY", "false").lower() == "true",
         )
 

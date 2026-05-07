@@ -7,9 +7,13 @@ Unlike the enrolled-POI index (FAISSRepository), this index:
 - Used by POST /api/v1/search to find any person, enrolled or not.
 
 Redis key schema:
-  detection:meta:{faiss_id}  →  JSON {camera_id, track_id, timestamp, bbox}
-  detection:vec:{faiss_id}   →  raw float32 bytes (256 × 4 = 1024 bytes)
-  detection:next_id          →  int counter (persists across restarts for unique IDs)
+  detection:meta:{faiss_id}      →  JSON {camera_id, track_id, timestamp, bbox, role}
+  detection:vec:{faiss_id}       →  raw float32 bytes (256 × 4 = 1024 bytes)
+  detection:frame:{faiss_id}     →  base64 JPEG frame at detection moment
+  detection:next_id              →  int counter (persists across restarts for unique IDs)
+  detection:exit_vec:{track_id}  →  rolling exit embedding (overwritten each detection, track_seen_ttl)
+  detection:exit_meta:{track_id} →  JSON metadata for the rolling exit vector
+  detection:exit_frame:{track_id}→  base64 JPEG frame for the rolling exit
 """
 
 from __future__ import annotations
@@ -31,6 +35,9 @@ log = logging.getLogger("poi.detection_index")
 _REDIS_META_PREFIX = "detection:meta:"
 _REDIS_VEC_PREFIX  = "detection:vec:"
 _REDIS_NEXT_ID_KEY = "detection:next_id"
+_REDIS_EXIT_VEC_PREFIX  = "detection:exit_vec:"
+_REDIS_EXIT_META_PREFIX = "detection:exit_meta:"
+_REDIS_EXIT_FRAME_PREFIX = "detection:exit_frame:"
 
 
 class DetectionIndexRepository(IDetectionIndexRepository):
@@ -43,7 +50,10 @@ class DetectionIndexRepository(IDetectionIndexRepository):
         self._ttl = cfg.appearance_ttl_days * 86400  # days → seconds
         self._lock = threading.Lock()
 
-        self._track_seen_ttl = cfg.track_seen_ttl  # short gate TTL (not data TTL)
+        self._track_seen_ttl = cfg.track_seen_ttl  # gate TTL (not data TTL)
+        # Exit vectors survive gate_ttl + 5 min so the promoter can read them
+        # after the gate expires (confirming person has left) before promoting.
+        self._exit_ttl = cfg.track_seen_ttl + 300
 
         # Inner-product index on L2-normalised vectors == cosine similarity
         base = faiss.IndexFlatIP(self._dim)
@@ -152,6 +162,161 @@ class DetectionIndexRepository(IDetectionIndexRepository):
         if raw is None:
             return None
         return raw.decode() if isinstance(raw, bytes) else raw
+
+    # ── Rolling exit vector (overwritten every detection) ───────────────────
+
+    def update_exit(
+        self,
+        track_id: str,
+        vector: np.ndarray,
+        camera_id: str,
+        timestamp: str,
+        bbox: Optional[list],
+        b64_frame: Optional[str] = None,
+    ) -> None:
+        """Overwrite the rolling exit embedding for this tracker track.
+
+        Called on EVERY detection (not just the first), so the stored vector
+        is always the most recent face seen for this track.  TTL = track_seen_ttl
+        so the exit vector expires when the tracker gate expires — it belongs to
+        exactly one person's appearance window.
+        """
+        vec = _normalize(vector)
+        if vec is None:
+            return
+        meta = {
+            "camera_id": camera_id,
+            "track_id": track_id,
+            "timestamp": timestamp,
+            "bbox": bbox,
+            "role": "exit",
+        }
+        ttl = self._exit_ttl  # gate_ttl + 300s buffer for promoter to read after gate expires
+        pipe = self._r.pipeline()
+        pipe.setex(f"{_REDIS_EXIT_VEC_PREFIX}{track_id}".encode(), ttl,
+                   vec.flatten().astype(np.float32).tobytes())
+        pipe.setex(f"{_REDIS_EXIT_META_PREFIX}{track_id}".encode(), ttl,
+                   json.dumps(meta).encode())
+        if b64_frame:
+            pipe.setex(f"{_REDIS_EXIT_FRAME_PREFIX}{track_id}".encode(), ttl,
+                       b64_frame.encode() if isinstance(b64_frame, str) else b64_frame)
+        pipe.execute()
+
+    def search_exits(
+        self, query_vec: np.ndarray, track_ids: list[str]
+    ) -> dict[str, float]:
+        """Compute cosine similarity of query_vec against exit vectors for the given track_ids.
+
+        Returns {track_id: similarity} for tracks that have an exit vector.
+        Only computes against the small set of track_ids already found by FAISS —
+        so this is always fast regardless of total track count.
+        """
+        vec = _normalize(query_vec)
+        if vec is None:
+            return {}
+        results: dict[str, float] = {}
+        for track_id in track_ids:
+            raw = self._r.get(f"{_REDIS_EXIT_VEC_PREFIX}{track_id}".encode())
+            if raw is None:
+                continue
+            exit_vec = np.frombuffer(raw, dtype=np.float32).reshape(1, -1)
+            norm = np.linalg.norm(exit_vec)
+            if norm < 1e-9:
+                continue
+            exit_vec = exit_vec / norm
+            similarity = float(np.dot(vec, exit_vec.T)[0, 0])
+            results[track_id] = round(similarity, 4)
+        return results
+
+    def get_exit_meta(self, track_id: str) -> Optional[dict]:
+        """Return stored exit metadata for a track_id, or None if expired/missing."""
+        raw = self._r.get(f"{_REDIS_EXIT_META_PREFIX}{track_id}".encode())
+        if raw is None:
+            return None
+        try:
+            text = raw.decode() if isinstance(raw, bytes) else raw
+            return json.loads(text)
+        except (json.JSONDecodeError, ValueError):
+            return None
+
+    def get_exit_frame_url_key(self, track_id: str) -> Optional[str]:
+        """Return the Redis key for the exit frame if it exists, else None."""
+        key = f"{_REDIS_EXIT_FRAME_PREFIX}{track_id}"
+        if self._r.exists(key.encode()):
+            return key
+        return None
+
+    def promote_exits(self) -> int:
+        """Scan all pending exit vectors and promote those whose gate has expired.
+
+        A gate expiry means the person has left (tracker stopped emitting the ID).
+        The exit vector then represents their final face look and is added to FAISS
+        permanently with role='exit', giving a second embedding per appearance.
+
+        Uses a Redis NX key `detection:exit_promoted:{track_id}` (same exit_ttl) to
+        prevent double-promotion if the promoter runs multiple times before the
+        exit_vec itself expires.
+
+        Returns the number of new exit embeddings promoted.
+        """
+        promoted = 0
+        exit_keys = self._r.keys(f"{_REDIS_EXIT_VEC_PREFIX}*".encode())
+        for key in exit_keys:
+            key_str = key.decode() if isinstance(key, bytes) else key
+            track_id = key_str[len(_REDIS_EXIT_VEC_PREFIX):]
+
+            # Skip if gate still alive — person is still in frame
+            gate_key = f"detection:track:seen:{track_id}".encode()
+            if self._r.exists(gate_key):
+                continue
+
+            # Skip if already promoted in this window
+            promoted_key = f"detection:exit_promoted:{track_id}".encode()
+            if not self._r.set(promoted_key, b"1", ex=self._exit_ttl, nx=True):
+                continue
+
+            # Read the exit vector
+            raw_vec = self._r.get(key)
+            if raw_vec is None:
+                continue
+            vec = np.frombuffer(raw_vec, dtype=np.float32).copy()
+            vec = _normalize(vec.reshape(1, -1))
+            if vec is None:
+                continue
+
+            # Read exit metadata
+            meta_raw = self._r.get(f"{_REDIS_EXIT_META_PREFIX}{track_id}".encode())
+            if meta_raw is None:
+                continue
+            try:
+                meta = json.loads(meta_raw.decode() if isinstance(meta_raw, bytes) else meta_raw)
+            except (json.JSONDecodeError, ValueError):
+                continue
+
+            # Add to FAISS with role='exit' in metadata
+            with self._lock:
+                faiss_id = self._next_id
+                self._next_id += 1
+                self._index.add_with_ids(vec, np.array([faiss_id], dtype=np.int64))
+
+            self._r.set(_REDIS_NEXT_ID_KEY.encode(), self._next_id)
+
+            meta["role"] = "exit"
+            pipe = self._r.pipeline()
+            pipe.setex(f"{_REDIS_META_PREFIX}{faiss_id}".encode(), self._ttl,
+                       json.dumps(meta).encode())
+            pipe.setex(f"{_REDIS_VEC_PREFIX}{faiss_id}".encode(), self._ttl,
+                       vec.flatten().astype(np.float32).tobytes())
+            # Copy exit frame to a permanent per-faiss_id frame key
+            frame_raw = self._r.get(f"{_REDIS_EXIT_FRAME_PREFIX}{track_id}".encode())
+            if frame_raw:
+                pipe.setex(f"detection:frame:{faiss_id}".encode(), self._ttl, frame_raw)
+            pipe.execute()
+
+            promoted += 1
+            log.info("Promoted exit embedding: track=%s faiss_id=%d", track_id, faiss_id)
+
+        return promoted
 
     def claim_track(self, track_id: str, ttl: Optional[int] = None) -> bool:
         """Allow up to N embeddings per track, with minimum time between stores.

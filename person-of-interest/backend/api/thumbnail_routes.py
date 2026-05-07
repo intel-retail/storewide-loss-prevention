@@ -61,7 +61,7 @@ def get_frame(encoded_key: str):
     except Exception:
         raise HTTPException(status_code=400, detail="Invalid frame key encoding")
 
-    # Support zone frames, track frames, and per-faiss_id detection frames
+    # Support zone frames, track frames, per-faiss_id detection frames, and rolling exit frames
     if redis_key.startswith("zone:frame:"):
         b64 = _event_repo.get_zone_frame(redis_key)
     elif redis_key.startswith("track:frame:"):
@@ -73,6 +73,13 @@ def get_frame(encoded_key: str):
             b64 = _detection_index.get_frame(faiss_id) if _detection_index else None
         except (ValueError, IndexError):
             raise HTTPException(status_code=400, detail="Invalid detection frame key")
+    elif redis_key.startswith("detection:exit_frame:"):
+        track_id = redis_key[len("detection:exit_frame:"):]
+        if _detection_index is not None:
+            raw = _detection_index._r.get(redis_key.encode())
+            b64 = raw.decode() if isinstance(raw, bytes) else raw
+        else:
+            b64 = None
     else:
         raise HTTPException(status_code=400, detail="Unknown frame key type")
 
