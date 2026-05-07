@@ -361,6 +361,9 @@ help:
 	@echo "    make coverage        - Run tests with coverage"
 	@echo "    make coverage-html   - Generate HTML coverage report"
 	@echo "    make log-alert       - Tail alert-service logs"
+	@echo "    make clean-redis     - Flush all Redis data (detections, POI metadata)"
+	@echo "    make clean-faiss     - Remove FAISS index files"
+	@echo "    make clean-data      - Flush Redis + remove FAISS (full data reset)"
 	@echo "    make update-submodules - Update git submodules from remote"
 	@echo "    make help            - Show this help message"
 
@@ -450,6 +453,23 @@ coverage-html:
 .PHONY: log-alert
 log-alert:
 	$(COMPOSE_POI) logs -f alert-service
+
+.PHONY: clean-redis
+clean-redis: ## Flush all Redis data (POI metadata, detections, caches)
+	@echo "$(BLUE)=== Flushing Redis ===$(NC)"
+	$(COMPOSE_POI) exec -T redis redis-cli FLUSHALL
+	@echo "$(GREEN)Redis flushed.$(NC)"
+
+.PHONY: clean-faiss
+clean-faiss: ## Remove FAISS index files and reset detection counter
+	@echo "$(BLUE)=== Cleaning FAISS indexes ===$(NC)"
+	$(COMPOSE_POI) exec -T poi-backend rm -f /data/faiss/poi.index /data/faiss/id_map.json
+	@echo "$(GREEN)FAISS indexes removed. Restart poi-backend to take effect.$(NC)"
+
+.PHONY: clean-data
+clean-data: clean-redis clean-faiss ## Flush Redis + remove FAISS (full data reset)
+	@echo ""
+	@echo "$(GREEN)All POI data cleared. Run 'make restart' to reinitialise.$(NC)"
 
 .PHONY: update-submodules
 update-submodules:
