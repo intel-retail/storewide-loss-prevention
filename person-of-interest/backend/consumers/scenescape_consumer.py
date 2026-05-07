@@ -74,6 +74,33 @@ class ScenescapeRegionConsumer:
 
         current_ids: set = set()
 
+        # ── Build UUID → camera_bounds mapping for bbox-based track resolution ──
+        # The regulated scene provides camera_bounds for each UUID, enabling the
+        # camera topic handler to map camera-local integer IDs to global UUIDs.
+        if self._event_repo:
+            cam_uuid_bounds: dict[str, dict[str, dict]] = {}  # camera_id → {uuid → bbox}
+            for obj in persons:
+                uid = obj.get("id", "")
+                cam_bounds = obj.get("camera_bounds", {})
+                for cam_id, bbox in cam_bounds.items():
+                    if cam_id not in cam_uuid_bounds:
+                        cam_uuid_bounds[cam_id] = {}
+                    cam_uuid_bounds[cam_id][uid] = bbox
+            if cam_uuid_bounds:
+                for cam_id, uuid_bounds in cam_uuid_bounds.items():
+                    try:
+                        self._event_repo.store_uuid_camera_bounds(cam_id, uuid_bounds)
+                    except Exception:
+                        log.debug("Failed to store UUID camera bounds for %s", cam_id, exc_info=True)
+                # Log at most once per eviction interval to avoid flooding
+                now = time.monotonic()
+                if now - getattr(self, "_last_uuid_log", 0) > self._EVICTION_INTERVAL:
+                    self._last_uuid_log = now
+                    log.info(
+                        "UUID camera bounds updated: %s",
+                        {c: len(u) for c, u in cam_uuid_bounds.items()},
+                    )
+
         for obj in persons:
             object_id = obj.get("id", "")
             if not object_id:

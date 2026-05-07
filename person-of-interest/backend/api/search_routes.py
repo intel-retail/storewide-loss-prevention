@@ -9,6 +9,8 @@ from typing import Optional
 import numpy as np
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 
+from backend.core.config import get_config
+
 log = logging.getLogger("poi.api.search")
 
 router = APIRouter(prefix="/search", tags=["Search"])
@@ -60,9 +62,13 @@ async def search_history(
     if not hits:
         return _empty_response(start_time, end_time, query_latency_ms)
 
-    # ── Collect best entry hit per track ──
+    # ── Collect best entry hit per track (above similarity threshold) ──
+    cfg = get_config()
+    threshold = cfg.similarity_threshold
     best_entry: dict[str, dict] = {}  # track_id → {faiss_id, similarity, meta}
     for faiss_id, similarity in hits:
+        if similarity < threshold:
+            continue
         meta = _detection_index.get_metadata(faiss_id)
         if meta is None:
             continue

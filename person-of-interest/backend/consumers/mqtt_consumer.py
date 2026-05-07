@@ -6,18 +6,20 @@ Primary topic: scenescape/data/camera/{camera_id}
   face-reid embeddings from face-reidentification-retail-0095 — the SAME model used
   during POI enrollment.  Only face sub_object embeddings are used for FAISS matching.
 
-  Dedup key: f"cam:{camera_id}:{person_int_id}" with object_cache_ttl (default 60s).
-  This camera-local track key is stable for the lifetime of the GStreamer tracker track
-  and gives reliable per-person dedup within a camera view without depending on the
-  external topic's global UUID.
+  Track key resolution:
+    1. The regulated scene topic (processed by ScenescapeRegionConsumer) publishes
+       global UUIDs with per-camera bounding boxes (camera_bounds).
+    2. On each camera detection, we look up the SceneScape UUID whose camera_bounds
+       best overlaps with the detected person's bounding box (IoU matching).
+    3. If a UUID is found (IoU ≥ 0.3), it becomes the track key.  UUIDs are unique
+       per physical person across all cameras and never recycled.
+    4. Fallback: if no UUID match is found, we use f"cam:{camera_id}:{person_int_id}"
+       (camera-local integer, may be recycled by the tracker).
 
 Secondary topic (monitoring only): scenescape/external/{scene_id}/person
   Carries global UUIDs, reid_state, and body-reid embeddings (person-reidentification-
   retail-0277).  Body embeddings are a DIFFERENT embedding space from the face model
   and must NOT be used for FAISS comparison against face-enrolled POIs.
-  External topic is subscribed to solely for reid:meta observability (MCP tools) and
-  movement event recording.  It no longer controls a gate on FAISS execution — face
-  detections on the camera topic always proceed to FAISS regardless of reid_state.
 
 Embedding space alignment:
   Enrollment (EmbeddingModelFactory):  face-reidentification-retail-0095, 256-dim,
@@ -216,15 +218,41 @@ class EventConsumer:
                 camera_id, person_int_id, best_face_conf, len(embedding_vector),
             )
 
+            # ── Resolve global UUID from SceneScape regulated scene ──────────
+            # The regulated scene topic provides a UUID→camera_bounds mapping
+            # (stored in Redis by ScenescapeRegionConsumer).  We match the camera
+            # person's bounding box against those bounds via IoU to find the
+            # global UUID for this person.  UUIDs are unique per physical person
+            # across all cameras and never get recycled — solving the tracker ID
+            # recycling problem (camera-local ints like 1,2,3 get reused).
+            person_bbox = obj.get("bounding_box_px") or best_face_bbox
+            resolved_uuid: Optional[str] = None
+            if self._event_repo and person_bbox:
+                try:
+                    resolved_uuid = self._event_repo.get_uuid_for_camera_bbox(
+                        camera_id, person_bbox, iou_threshold=0.3,
+                    )
+                except Exception:
+                    log.debug("UUID lookup failed for camera=%s", camera_id, exc_info=True)
+
+            # Use UUID as track key if resolved; otherwise fall back to camera-local ID.
+            if resolved_uuid:
+                object_id = resolved_uuid
+                log.info(
+                    "Resolved UUID: camera=%s person=%s → uuid=%s",
+                    camera_id, person_int_id, resolved_uuid,
+                )
+            else:
+                object_id = f"cam:{camera_id}:{person_int_id}"
+                log.debug(
+                    "No UUID resolved for camera=%s person=%s — using camera-local ID %s",
+                    camera_id, person_int_id, object_id,
+                )
             # ── Detection index: store one embedding per unique track (not per frame) ──
-            object_id = f"cam:{camera_id}:{person_int_id}"
             new_faiss_id: int = -1
             if self._detection_index is not None:
                 import numpy as _np
                 try:
-                    # claim_track() uses Redis NX — returns True only the FIRST time
-                    # this track_id is seen. Subsequent detections of the same person
-                    # (same tracker track) are skipped — no duplicate embeddings.
                     if self._detection_index.claim_track(object_id):
                         new_faiss_id = self._detection_index.add(
                             vector=_np.array(embedding_vector, dtype=_np.float32),
@@ -239,19 +267,7 @@ class EventConsumer:
                 except Exception:
                     log.debug("DetectionIndex.add failed for %s", object_id, exc_info=True)
 
-            # Use a stable camera-local track key for dedup.
-            # MatchingService cache-aside handles alert suppression (object_cache_ttl).
-            # The external topic global UUID is NOT used here — per-camera tracking
-            # is both correct and avoids the multi-person / timing-race problems of
-            # a camera→UUID map.
-            # NOTE: object_id is already set above for the detection index tap.
-
-            # For thumbnail: use person bbox (wider) rather than face bbox to tolerate
-            # timing drift between MQTT detection frame and RTSP grabber frame.
-            # Face bbox is only ~30-50px and any movement causes a miss-crop.
-            person_bbox = obj.get("bounding_box_px") or best_face_bbox
-
-            # ── Track-level entry / last-seen frames (no-zone fallback) ──────
+            # ── Track-level entry / last-seen frames ──────────────────────────
             # Grab the frame synchronously RIGHT NOW — the MQTTAdapter already cached
             # the image for this camera (image topic message arrives BEFORE the
             # detection message on the same connection because sscape_adapter publishes

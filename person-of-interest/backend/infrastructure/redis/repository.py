@@ -300,6 +300,55 @@ class RedisEventRepository(EventRepository):
         """Store reid metadata for a global UUID (for MCP tool observability)."""
         self._r.setex(f"reid:meta:{global_uuid}", ttl, json.dumps(metadata))
 
+    # ── UUID ↔ camera bbox mapping (populated from regulated scene topic) ──
+
+    def store_uuid_camera_bounds(
+        self, camera_id: str, uuid_bounds: dict[str, dict], ttl: int = 5,
+    ) -> None:
+        """Store all UUID→bbox mappings for a camera as a single Redis hash.
+
+        uuid_bounds: {uuid: {"x": int, "y": int, "width": int, "height": int}}
+        Short TTL (5s) because the regulated scene topic refreshes at ~3Hz.
+        """
+        key = f"uuid:cam_bounds:{camera_id}"
+        pipe = self._r.pipeline()
+        pipe.delete(key)
+        if uuid_bounds:
+            mapping = {uid: json.dumps(bbox) for uid, bbox in uuid_bounds.items()}
+            pipe.hset(key, mapping=mapping)
+            pipe.expire(key, ttl)
+        pipe.execute()
+
+    def get_uuid_for_camera_bbox(
+        self, camera_id: str, bbox: dict, iou_threshold: float = 0.3,
+    ) -> Optional[str]:
+        """Find the SceneScape global UUID whose camera_bounds best overlaps with bbox.
+
+        Returns the UUID with highest IoU above iou_threshold, or None.
+        """
+        key = f"uuid:cam_bounds:{camera_id}"
+        raw_map = self._r.hgetall(key)
+        if not raw_map:
+            return None
+
+        best_uuid: Optional[str] = None
+        best_iou = 0.0
+
+        for uid_bytes, bbox_bytes in raw_map.items():
+            uid = uid_bytes.decode() if isinstance(uid_bytes, bytes) else uid_bytes
+            try:
+                ref = json.loads(bbox_bytes)
+            except (json.JSONDecodeError, ValueError):
+                continue
+            iou = _compute_iou(bbox, ref)
+            if iou > best_iou:
+                best_iou = iou
+                best_uuid = uid
+
+        if best_iou >= iou_threshold:
+            return best_uuid
+        return None
+
     def get_region_dwells_for_object(self, object_id: str, date_filter: Optional[str] = None) -> list[dict]:
         """Return region dwell records for an object, optionally filtered by date.
 
@@ -389,3 +438,34 @@ class RedisEmbeddingMappingRepository(EmbeddingMappingRepository):
             pipe.delete(f"faiss2poi:{fid}")
         pipe.delete(f"poi2faiss:{poi_id}")
         pipe.execute()
+
+
+# ── Module-level helpers ────────────────────────────────────────────────────
+
+
+def _compute_iou(a: dict, b: dict) -> float:
+    """Compute Intersection-over-Union for two bounding boxes.
+
+    Each bbox is a dict with keys: x, y, width, height.
+    """
+    ax1 = a.get("x", 0)
+    ay1 = a.get("y", 0)
+    ax2 = ax1 + a.get("width", 0)
+    ay2 = ay1 + a.get("height", 0)
+
+    bx1 = b.get("x", 0)
+    by1 = b.get("y", 0)
+    bx2 = bx1 + b.get("width", 0)
+    by2 = by1 + b.get("height", 0)
+
+    ix1 = max(ax1, bx1)
+    iy1 = max(ay1, by1)
+    ix2 = min(ax2, bx2)
+    iy2 = min(ay2, by2)
+
+    inter = max(0, ix2 - ix1) * max(0, iy2 - iy1)
+    area_a = max(0, ax2 - ax1) * max(0, ay2 - ay1)
+    area_b = max(0, bx2 - bx1) * max(0, by2 - by1)
+    union = area_a + area_b - inter
+
+    return inter / union if union > 0 else 0.0
