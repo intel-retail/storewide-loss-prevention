@@ -3,7 +3,7 @@
   "scene_name": "conference room",
   "camera_name": "Camera_01",
   "camera_name_2": "Camera_02",
-  "scene_zip": "",
+  "scene_zip": "conference-room.zip",
   "video_file": "Camera_01.mp4",
   "video_file_2": "Camera_02.mp4",
   "models": "person-detection-retail-0013,person-reidentification-retail-0277,face-detection-retail-0004,face-reidentification-retail-0095",
