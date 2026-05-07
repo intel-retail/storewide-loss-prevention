@@ -26,7 +26,7 @@ COPY rule-engine/ /tmp/rule-engine/
 RUN uv sync && uv pip install /tmp/rule-engine/ && rm -rf /tmp/rule-engine/
 
 # Install performance-tools for metrics logging
-RUN uv pip install git+https://github.com/sumanaga/performance-tools.git@user_log_time#subdirectory=benchmark-scripts
+RUN uv pip install git+https://github.com/intel-retail/performance-tools.git@main#subdirectory=benchmark-scripts
 
 # Create non-root user
 RUN useradd -m -u 1000 lpuser && \

@@ -59,7 +59,6 @@ class RuleEngineAdapter:
 
         rules_cfg = config.get_rules_config()
         self._loiter_threshold = float(rules_cfg.get("loiter_threshold_seconds", 20))
-        self._pending_cleanups: set[str] = set()  # "{object_id}:{region_id}"
 
         # Config-driven session flags: {flag_name: {trigger, zone_type, ...}}
         self._session_flag_defs = config.get_session_flag_defs()
@@ -371,94 +370,29 @@ class RuleEngineAdapter:
                 out[key] = value
         return out
 
-    # ---- Deferred frame cleanup on HIGH_VALUE zone exit ----------------------
-
-    async def _deferred_frame_cleanup(
-        self,
-        object_id: str,
-        region_id: str,
-        region_name: str,
-        dwell: float,
-        scene_id: str | None = None,
-        entry_timestamp: str | None = None,
-    ) -> None:
-        """Wait `exit_retention_seconds`, then drop this visit's frames
-        from the behavioral-frames bucket.
-
-        Per-visit scope: only the prefix for this specific
-        ``(scene_id, object_id, region_id, entry_timestamp)`` is removed.
-        Other concurrent / later visits by the same person are untouched
-        so the BA service can keep processing them.
-
-        The retention delay gives any in-flight alert path time to grab
-        evidence keys via `frame_mgr.get_person_frame_keys`.
-        """
-        cleanup_key = f"{object_id}:{region_id}:{entry_timestamp or ''}"
-        try:
-            if not self._frame_mgr:
-                logger.info(
-                    "HIGH_VALUE zone exited — no frame_mgr, skip cleanup",
-                    object_id=object_id,
-                    region=region_name,
-                    dwell=dwell,
-                )
-                return
-            if not entry_timestamp:
-                logger.info(
-                    "HIGH_VALUE zone exited — no entry_timestamp, skip cleanup",
-                    object_id=object_id,
-                    region=region_name,
-                )
-                return
-
-            retention = float(
-                getattr(self._frame_mgr, "exit_retention_seconds", 60)
-            )
-            logger.info(
-                "HIGH_VALUE zone exited — cleanup scheduled",
-                object_id=object_id,
-                scene_id=scene_id,
-                region_id=region_id,
-                region=region_name,
-                dwell=dwell,
-                entry_timestamp=entry_timestamp,
-                retention_seconds=retention,
-            )
-            await asyncio.sleep(retention)
-
-            # MinIO/S3 calls are blocking; push them off the event loop.
-            await asyncio.to_thread(
-                self._frame_mgr.cleanup_visit,
-                object_id,
-                region_id,
-                entry_timestamp,
-                scene_id,
-            )
-            logger.info(
-                "HIGH_VALUE zone exit cleanup complete",
-                object_id=object_id,
-                scene_id=scene_id,
-                region_id=region_id,
-                region=region_name,
-                entry_timestamp=entry_timestamp,
-            )
-        except Exception:
-            logger.exception(
-                "Frame cleanup failed",
-                object_id=object_id,
-                region_id=region_id,
-                entry_timestamp=entry_timestamp,
-            )
-        finally:
-            self._pending_cleanups.discard(cleanup_key)
-
     # ---- PERSON_LOST handler -------------------------------------------------
 
     async def _on_person_lost(self, event: RegionEvent) -> None:
-        """Cancel any active escalation service tasks for this person."""
+        """Cancel active escalation tasks and clean up all resources for this person."""
         for svc in self._service_registry.values():
             svc.stop_all(event.object_id)
-        logger.info("Person lost — escalation tasks cancelled", object_id=event.object_id)
+
+        # Clean up SeaweedFS frames and in-memory key tracking.
+        if self._frame_mgr:
+            try:
+                self._frame_mgr.cleanup_person(event.object_id, scene_id=event.scene_id)
+            except Exception:
+                logger.exception(
+                    "cleanup_person failed on PERSON_LOST",
+                    object_id=event.object_id,
+                )
+
+        # Evict all visit-tracker entries for this person so alerted visits
+        # don't leak memory indefinitely.
+        if self._visit_tracker is not None:
+            self._visit_tracker.forget_person(event.object_id)
+
+        logger.info("Person lost — resources cleaned up", object_id=event.object_id)
 
     # ---- visit-tracker driven cleanup ---------------------------------------
 

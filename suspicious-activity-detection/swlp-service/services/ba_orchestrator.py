@@ -239,4 +239,8 @@ class BehavioralAnalysisOrchestrator:
                 object_id=object_id, region_id=region_id,
             )
         finally:
+            # Clean up stale frame-tracker entries so they don't leak memory
+            # after the visit is over.
+            if self._frame_tracker is not None:
+                self._frame_tracker.clear(scene_id, object_id, region_id)
             self._tasks.pop(self._key(scene_id, object_id, region_id), None)

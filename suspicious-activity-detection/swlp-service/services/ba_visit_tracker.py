@@ -31,7 +31,8 @@ last result arrived before EXIT was processed.
 from __future__ import annotations
 
 import threading
-from dataclasses import dataclass
+import time
+from dataclasses import dataclass, field
 from typing import Dict, Optional, Tuple
 
 import structlog
@@ -48,10 +49,14 @@ class _VisitState:
     results_received: int = 0
     exited: bool = False
     alerted: bool = False
+    created_at: float = field(default_factory=time.monotonic)
 
 
 class BAVisitTracker:
     """Thread-safe per-visit counters."""
+
+    # Visits older than this (seconds) are evicted regardless of state.
+    _VISIT_TTL_SECONDS: float = 300.0  # 5 minutes
 
     def __init__(self) -> None:
         self._visits: Dict[VisitKey, _VisitState] = {}
@@ -124,3 +129,34 @@ class BAVisitTracker:
                 exited=state.exited,
                 alerted=state.alerted,
             )
+
+    # ---- lifecycle -------------------------------------------------------
+
+    def forget_person(self, person_id: str) -> int:
+        """Remove all visit entries for a given person_id (index 1 of the key tuple)."""
+        with self._lock:
+            stale = [k for k in self._visits if k[1] == person_id]
+            for k in stale:
+                del self._visits[k]
+            return len(stale)
+
+    def purge_stale(self) -> int:
+        """Evict visits older than _VISIT_TTL_SECONDS that are fully settled.
+
+        A visit is eligible for eviction if it is either:
+          - exited (normal completion, alerted or not), OR
+          - older than TTL (catch-all for orphaned entries).
+        Returns the number of entries evicted.
+        """
+        now = time.monotonic()
+        cutoff = now - self._VISIT_TTL_SECONDS
+        with self._lock:
+            stale = [
+                k for k, v in self._visits.items()
+                if v.created_at < cutoff and v.exited
+            ]
+            for k in stale:
+                del self._visits[k]
+        if stale:
+            logger.debug("BAVisitTracker purged stale entries", count=len(stale))
+        return len(stale)

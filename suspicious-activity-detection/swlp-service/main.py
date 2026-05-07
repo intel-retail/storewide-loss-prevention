@@ -225,6 +225,15 @@ async def lifespan(app: FastAPI):
     mqtt_task = asyncio.create_task(mqtt_svc.start())
     expiry_task = asyncio.create_task(session_mgr.run_expiry_loop())
 
+    # Periodic purge of stale visit-tracker entries (alerted visits that
+    # would otherwise leak memory indefinitely).
+    async def _visit_tracker_purge_loop():
+        while True:
+            await asyncio.sleep(30)
+            visit_tracker.purge_stale()
+
+    purge_task = asyncio.create_task(_visit_tracker_purge_loop())
+
     logger.info(
         "Store-wide Loss Prevention started",
         store_id=config.get_store_id(),
@@ -238,6 +247,7 @@ async def lifespan(app: FastAPI):
     logger.info("Shutting down Store-wide Loss Prevention")
     await mqtt_svc.stop()
     expiry_task.cancel()
+    purge_task.cancel()
     mqtt_task.cancel()
 
 

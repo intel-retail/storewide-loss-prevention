@@ -14,7 +14,7 @@ RUN mkdir -p src/behavioral_analysis && touch src/behavioral_analysis/__init__.p
 RUN pip install --no-cache-dir --break-system-packages --ignore-installed .
 
 # Install performance-tools for metrics logging
-RUN pip install --no-cache-dir --break-system-packages git+https://github.com/sumanaga/performance-tools.git@user_log_time#subdirectory=benchmark-scripts
+RUN pip install --no-cache-dir --break-system-packages git+https://github.com/intel-retail/performance-tools.git@main#subdirectory=benchmark-scripts
 
 # Now copy actual source and config
 COPY src/ ./src/
