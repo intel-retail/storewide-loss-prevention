@@ -12,11 +12,13 @@ log = logging.getLogger("poi.api.thumbnail")
 
 router = APIRouter()
 _event_repo = None
+_detection_index = None
 
 
-def init(event_repo) -> None:
-    global _event_repo
+def init(event_repo, detection_index=None) -> None:
+    global _event_repo, _detection_index
     _event_repo = event_repo
+    _detection_index = detection_index
 
 
 @router.get("/thumbnail/{object_id:path}", response_class=Response)
@@ -59,12 +61,18 @@ def get_frame(encoded_key: str):
     except Exception:
         raise HTTPException(status_code=400, detail="Invalid frame key encoding")
 
-    # Support both zone frames and track frames
+    # Support zone frames, track frames, and per-faiss_id detection frames
     if redis_key.startswith("zone:frame:"):
         b64 = _event_repo.get_zone_frame(redis_key)
     elif redis_key.startswith("track:frame:"):
         raw = _event_repo._r.get(redis_key)
         b64 = raw.decode() if isinstance(raw, bytes) else raw
+    elif redis_key.startswith("detection:frame:"):
+        try:
+            faiss_id = int(redis_key.split(":")[-1])
+            b64 = _detection_index.get_frame(faiss_id) if _detection_index else None
+        except (ValueError, IndexError):
+            raise HTTPException(status_code=400, detail="Invalid detection frame key")
     else:
         raise HTTPException(status_code=400, detail="Unknown frame key type")
 

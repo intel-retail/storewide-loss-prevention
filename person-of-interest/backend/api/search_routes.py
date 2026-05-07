@@ -3,12 +3,12 @@
 Two-stage search:
   Stage 1: Match query against enrolled POI index (same embedding space as
            online pipeline).  If a POI is identified, return recorded events.
-  Stage 2: Search the detection index (all faces ever seen).  With multiple
-           embeddings per track, the best embedding for each person will
-           produce higher similarity.  Applies threshold + margin check.
+  Stage 2: Search the detection index (all faces ever seen).  Each FAISS hit
+           is a unique detection with its own stored frame.  Applies threshold
+           filtering.
 
-Both stages run in sequence.  Results are merged: POI match enriched with
-detection index appearances, or detection-only results for non-enrolled persons.
+POI-matched searches skip detection index merge to avoid cross-domain false
+positives (EmbeddingModelFactory vs DLStreamer embedding gap).
 """
 
 from __future__ import annotations
@@ -77,7 +77,6 @@ async def search_history(
 
     total_latency_ms = (time.perf_counter() - t_start) * 1000
 
-    # ── Merge results ──
     if poi_match is not None:
         # POI identified — return only verified POI event appearances
         poi_id = poi_match["poi_id"]
@@ -102,32 +101,58 @@ async def search_history(
         }
 
     # ── Stage 2: detection index (only for non-enrolled persons) ──
-    detection_appearances = _search_detection_index(
-        query_vector, cfg, top_k, start_time, end_time,
-    )
-
-    total_latency_ms = (time.perf_counter() - t_start) * 1000
-
-    # No POI match — return detection index results only
-    if not detection_appearances:
+    if _detection_index is None or _detection_index.total_vectors() == 0:
         return _empty_response(start_time, end_time, total_latency_ms)
+
+    threshold = cfg.similarity_threshold
+    hits = _detection_index.search(query_vector, top_k=top_k)
+    query_latency_ms = (time.perf_counter() - t_start) * 1000
+
+    if not hits:
+        return _empty_response(start_time, end_time, query_latency_ms)
+
+    # Each faiss_id is a distinct temporal detection with its own stored frame.
+    # We do NOT group by track_id — the same tracker int ID can be reused for
+    # different people across time windows, so grouping would merge different people.
+    appearances = []
+    for faiss_id, similarity in hits:
+        if similarity < threshold:
+            continue
+        meta = _detection_index.get_metadata(faiss_id)
+        if meta is None:
+            continue
+        ts = meta.get("timestamp", "")
+        if start_time and ts and ts < start_time:
+            continue
+        if end_time and ts and ts > end_time:
+            continue
+        appearance = _build_appearance(faiss_id, similarity, meta)
+        appearances.append(appearance)
+
+    if not appearances:
+        return _empty_response(start_time, end_time, query_latency_ms)
+
+    # Sort by similarity descending
+    appearances.sort(key=lambda a: a["similarity"], reverse=True)
 
     return {
         "event_type": "offline_search_result",
         "query_range": {"start": start_time, "end": end_time},
         "query_timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-        "total_appearances": len(detection_appearances),
-        "appearances": detection_appearances,
+        "total_appearances": len(appearances),
+        "appearances": appearances,
         "search_stats": {
             "search_stage": "detection_index",
-            "vectors_searched": _detection_index.total_vectors() if _detection_index else 0,
-            "best_similarity": detection_appearances[0]["similarity"],
-            "query_latency_ms": round(total_latency_ms, 2),
+            "vectors_searched": _detection_index.total_vectors(),
+            "raw_hits": len(hits),
+            "unique_tracks": len({a["track_id"] for a in appearances}),
+            "best_similarity": appearances[0]["similarity"],
+            "query_latency_ms": round(query_latency_ms, 2),
         },
     }
 
 
-# ── Stage 1 helper ───────────────────────────────────────────────────────────
+# ── Stage 1 helpers ──────────────────────────────────────────────────────────
 
 def _match_poi_index(
     query_vector: np.ndarray,
@@ -213,13 +238,29 @@ def _get_poi_event_appearances(
 
         track_events.sort(key=lambda e: e.get("timestamp", ""))
         first = track_events[0]
-        appearance = _build_appearance(track_id, {
+
+        # Build appearance with track-level frames
+        entry_frame_url = None
+        last_seen_frame_url = None
+        if _event_repo is not None:
+            if _event_repo.track_frame_exists(track_id, "entry"):
+                key = _event_repo.get_track_frame_key(track_id, "entry")
+                entry_frame_url = f"/api/v1/frames/{_encode_key(key)}"
+            if _event_repo.track_frame_exists(track_id, "last_seen"):
+                key = _event_repo.get_track_frame_key(track_id, "last_seen")
+                last_seen_frame_url = f"/api/v1/frames/{_encode_key(key)}"
+
+        zone_appearances = _get_zone_appearances(track_id)
+
+        appearance: dict = {
             "track_id": track_id,
             "camera_id": first.get("camera_id", ""),
-            "best_timestamp": first.get("timestamp", ""),
             "similarity": round(poi_sim, 4),
-            "bbox": None,
-        })
+            "best_match_time": first.get("timestamp", ""),
+            "entry_frame_url": entry_frame_url,
+            "last_seen_frame_url": last_seen_frame_url,
+            "zone_appearances": zone_appearances,
+        }
         for evt in track_events:
             tp = evt.get("thumbnail_path", "")
             if tp:
@@ -230,96 +271,43 @@ def _get_poi_event_appearances(
     return appearances
 
 
-# ── Stage 2 helper ───────────────────────────────────────────────────────────
-
-def _search_detection_index(
-    query_vector: np.ndarray,
-    cfg,
-    top_k: int,
-    start_time: str,
-    end_time: str,
-) -> list[dict]:
-    """Search detection index and return filtered appearances list."""
-    if _detection_index is None or _detection_index.total_vectors() == 0:
-        return []
-
-    hits = _detection_index.search(query_vector, top_k=top_k)
-    if not hits:
-        return []
-
-    threshold = cfg.similarity_threshold
-    best_per_track: dict[str, dict] = {}
-    for faiss_id, similarity in hits:
-        if similarity < threshold:
-            continue
-        meta = _detection_index.get_metadata(faiss_id)
-        if meta is None:
-            continue
-        ts = meta.get("timestamp", "")
-        if start_time and ts and ts < start_time:
-            continue
-        if end_time and ts and ts > end_time:
-            continue
-        track_id = meta["track_id"]
-        if track_id not in best_per_track or similarity > best_per_track[track_id]["similarity"]:
-            best_per_track[track_id] = {
-                "track_id": track_id,
-                "camera_id": meta.get("camera_id", ""),
-                "best_timestamp": ts,
-                "similarity": round(float(similarity), 4),
-                "bbox": meta.get("bbox"),
-            }
-
-    if not best_per_track:
-        return []
-
-    ranked = sorted(best_per_track.values(), key=lambda t: t["similarity"], reverse=True)
-    best = ranked[0]
-    second_best_sim = ranked[1]["similarity"] if len(ranked) > 1 else 0.0
-    margin = best["similarity"] - second_best_sim
-
-    log.info(
-        "Detection index: best=%s sim=%.4f margin=%.4f",
-        best["track_id"], best["similarity"], margin,
-    )
-
-    if len(ranked) > 1 and margin < _SEARCH_MARGIN:
-        log.warning("Detection index rejected: ambiguous (margin %.4f)", margin)
-        return []
-
-    # Return only the best match
-    return [_build_appearance(best["track_id"], best)]
-
-
-def _deduplicate_appearances(appearances: list[dict]) -> list[dict]:
-    """Keep the highest-similarity entry per track_id."""
-    best: dict[str, dict] = {}
-    for app in appearances:
-        tid = app["track_id"]
-        if tid not in best or app["similarity"] > best[tid]["similarity"]:
-            best[tid] = app
-    return list(best.values())
-
-
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
-def _build_appearance(track_id: str, track: dict) -> dict:
-    """Build the appearance dict for one track: frames + zone dwells."""
-    camera_id = track["camera_id"]
+def _build_appearance(faiss_id: int, similarity: float, meta: dict) -> dict:
+    """Build the appearance dict for one FAISS hit: unique frame + zone dwells."""
+    track_id = meta["track_id"]
+    camera_id = meta.get("camera_id", "")
 
-    # ── Frame URLs ──
-    entry_frame_url = None
-    last_seen_frame_url = None
+    # Per-faiss_id frame (unique, never overwritten)
+    frame_url = None
+    if _detection_index is not None:
+        frame = _detection_index.get_frame(faiss_id)
+        if frame:
+            frame_url = f"/api/v1/frames/{_encode_key(f'detection:frame:{faiss_id}')}"
 
-    if _event_repo is not None:
-        if _event_repo.track_frame_exists(track_id, "entry"):
-            key = _event_repo.get_track_frame_key(track_id, "entry")
-            entry_frame_url = f"/api/v1/frames/{_encode_key(key)}"
-        if _event_repo.track_frame_exists(track_id, "last_seen"):
-            key = _event_repo.get_track_frame_key(track_id, "last_seen")
-            last_seen_frame_url = f"/api/v1/frames/{_encode_key(key)}"
+    if frame_url is None and _event_repo is not None:
+        for event_type in ("entry", "last_seen"):
+            if _event_repo.track_frame_exists(track_id, event_type):
+                key = _event_repo.get_track_frame_key(track_id, event_type)
+                frame_url = f"/api/v1/frames/{_encode_key(key)}"
+                break
 
-    # ── Zone dwells (available when zones are configured) ──
+    zone_appearances = _get_zone_appearances(track_id)
+
+    return {
+        "faiss_id": faiss_id,
+        "track_id": track_id,
+        "camera_id": camera_id,
+        "similarity": round(float(similarity), 4),
+        "timestamp": meta.get("timestamp", ""),
+        "bbox": meta.get("bbox"),
+        "frame_url": frame_url,
+        "zone_appearances": zone_appearances,
+    }
+
+
+def _get_zone_appearances(track_id: str) -> list[dict]:
+    """Get zone dwell records for a track."""
     zone_appearances = []
     if _event_repo is not None:
         dwells = _event_repo.get_region_dwells_for_object(track_id)
@@ -331,7 +319,6 @@ def _build_appearance(track_id: str, track: dict) -> dict:
                 "exit_time": dwell.get("exit_time", ""),
                 "dwell_seconds": dwell.get("dwell_sec"),
             }
-            # Attach zone entry/exit frame URLs if they exist
             entry_fk = dwell.get("entry_frame_key", "")
             exit_fk = dwell.get("exit_frame_key", "")
             if entry_fk:
@@ -341,16 +328,7 @@ def _build_appearance(track_id: str, track: dict) -> dict:
             zone_appearances.append(zone_entry)
 
         zone_appearances.sort(key=lambda z: z.get("entry_time") or "")
-
-    return {
-        "track_id": track_id,
-        "camera_id": camera_id,
-        "similarity": track["similarity"],
-        "best_match_time": track["best_timestamp"],
-        "entry_frame_url": entry_frame_url,
-        "last_seen_frame_url": last_seen_frame_url,
-        "zone_appearances": zone_appearances,
-    }
+    return zone_appearances
 
 
 def _encode_key(redis_key: str) -> str:

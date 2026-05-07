@@ -106,12 +106,13 @@ export interface ZoneAppearance {
 }
 
 export interface Appearance {
+  faiss_id: number;
   track_id: string;
   camera_id: string;
   similarity: number;
-  best_match_time: string;
-  entry_frame_url: string | null;
-  last_seen_frame_url: string | null;
+  timestamp: string;
+  bbox: { x: number; y: number; width: number; height: number } | null;
+  frame_url: string | null;
   zone_appearances: ZoneAppearance[];
 }
 

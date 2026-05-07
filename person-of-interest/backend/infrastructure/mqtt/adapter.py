@@ -29,6 +29,12 @@ _EXTERNAL_TOPIC = "scenescape/external/+/person"
 _REGULATED_TOPIC_RE = re.compile(r"scenescape/regulated/scene/[^/]+$")
 _REGULATED_TOPIC = "scenescape/regulated/scene/+"
 
+# Image topic: scenescape/image/camera/{camera_id}
+# Published by sscape_adapter on every getimage command — same processFrame() call as
+# the detection, so the image message arrives BEFORE the detection on this same connection.
+_IMAGE_TOPIC_RE = re.compile(r"scenescape/image/camera/(?P<camera_id>[^/]+)$")
+_IMAGE_TOPIC = "scenescape/image/camera/+"
+
 
 class MQTTAdapter:
     """Adapter Pattern — wraps paho-mqtt to subscribe to SceneScape events."""
@@ -84,6 +90,13 @@ class MQTTAdapter:
             if self._on_region_event is not None:
                 client.subscribe(_REGULATED_TOPIC)
                 log.info("MQTT subscribed to regulated scene topic: %s", _REGULATED_TOPIC)
+
+            # Subscribe to image topic — same connection as detections so images
+            # arrive BEFORE the corresponding detection message (in-order delivery).
+            # The frame is cached in thumbnail._inline_cache and grabbed synchronously
+            # by the consumer when it processes the detection — zero timing gap.
+            client.subscribe(_IMAGE_TOPIC)
+            log.info("MQTT subscribed to image topic: %s", _IMAGE_TOPIC)
         else:
             log.error("MQTT connection failed: rc=%s", rc)
 
@@ -92,6 +105,20 @@ class MQTTAdapter:
             return
         try:
             payload = json.loads(msg.payload)
+
+            # Image topic: cache the frame so the detection handler can grab it
+            # synchronously.  The image is published by sscape_adapter BEFORE the
+            # detection for the same frame (same processFrame() call, same connection),
+            # so by the time the detection message arrives here the frame is cached.
+            m = _IMAGE_TOPIC_RE.match(msg.topic)
+            if m:
+                b64 = payload.get("image")
+                ts  = payload.get("timestamp", "")
+                if b64:
+                    from backend.utils.thumbnail import notify_frame
+                    notify_frame(m.group("camera_id"), ts, b64)
+                return  # image messages are not forwarded to event handlers
+
             if self._on_region_event is not None and _REGULATED_TOPIC_RE.match(msg.topic):
                 self._on_region_event(msg.topic, payload)
             elif _EXTERNAL_TOPIC_RE.match(msg.topic) or _CAMERA_TOPIC_RE.match(msg.topic):

@@ -1,3 +1,4 @@
+import { useState, useEffect } from 'react';
 import type { Appearance } from '../../types';
 
 interface Props {
@@ -25,24 +26,61 @@ const similarityColor = (s: number) => {
   return 'bg-red-100 text-red-700';
 };
 
-const FrameImage = ({ url, label }: { url: string | null; label: string }) => {
-  if (!url) return null;
+// ── Lightbox ──────────────────────────────────────────────────────────────────
+const Lightbox = ({ src, label, onClose }: { src: string; label: string; onClose: () => void }) => {
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [onClose]);
   return (
-    <div className="flex flex-col items-center gap-1">
+  <div
+    className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm"
+    onClick={onClose}
+  >
+    <div className="relative max-w-4xl max-h-[90vh] flex flex-col items-center gap-2" onClick={e => e.stopPropagation()}>
       <img
-        src={`${API_BASE}${url}`}
+        src={src}
         alt={label}
-        className="h-40 w-28 object-cover rounded-lg border border-gray-200 bg-gray-100"
-        onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
+        className="max-h-[80vh] max-w-full rounded-xl shadow-2xl object-contain"
       />
-      <span className="text-[10px] text-intel-gray">{label}</span>
+      <span className="text-white/70 text-sm">{label}</span>
+      <button
+        className="absolute -top-3 -right-3 w-8 h-8 rounded-full bg-white/20 hover:bg-white/40 text-white flex items-center justify-center text-lg font-bold transition-colors"
+        onClick={onClose}
+        aria-label="Close"
+      >
+        ×
+      </button>
     </div>
+  </div>
+  );
+};
+
+// ── FrameImage ────────────────────────────────────────────────────────────────
+const FrameImage = ({ url, label }: { url: string | null; label: string }) => {
+  const [lightbox, setLightbox] = useState(false);
+  if (!url) return null;
+  const fullSrc = `${API_BASE}${url}`;
+  return (
+    <>
+      <div className="flex flex-col items-center gap-1">
+        <img
+          src={fullSrc}
+          alt={label}
+          className="h-40 w-28 object-cover rounded-lg border border-gray-200 bg-gray-100 cursor-zoom-in hover:opacity-90 transition-opacity"
+          onClick={() => setLightbox(true)}
+          onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
+        />
+        <span className="text-[10px] text-intel-gray">{label}</span>
+      </div>
+      {lightbox && <Lightbox src={fullSrc} label={label} onClose={() => setLightbox(false)} />}
+    </>
   );
 };
 
 const AppearanceCard = ({ appearance, index }: Props) => {
-  const { track_id, camera_id, similarity, best_match_time, entry_frame_url, last_seen_frame_url, zone_appearances } = appearance;
-  const hasFrames = entry_frame_url || last_seen_frame_url;
+  const { faiss_id, track_id, camera_id, similarity, timestamp, frame_url, zone_appearances } = appearance;
 
   return (
     <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
@@ -56,7 +94,7 @@ const AppearanceCard = ({ appearance, index }: Props) => {
             </span>
             <div>
               <p className="text-sm font-medium text-intel-dark">{camera_id}</p>
-              <p className="text-[10px] text-intel-gray font-mono">{track_id}</p>
+              <p className="text-[10px] text-intel-gray font-mono">{track_id} · id:{faiss_id}</p>
             </div>
           </div>
           <span className={`px-2.5 py-0.5 rounded-full text-xs font-semibold ${similarityColor(similarity)}`}>
@@ -64,16 +102,15 @@ const AppearanceCard = ({ appearance, index }: Props) => {
           </span>
         </div>
 
-        {/* Best match time */}
+        {/* Detection timestamp */}
         <p className="text-xs text-intel-gray">
-          Best match: <span className="font-medium text-intel-dark">{fmtTime(best_match_time)}</span>
+          Detected: <span className="font-medium text-intel-dark">{fmtTime(timestamp)}</span>
         </p>
 
-        {/* Entry / Last-seen frames */}
-        {hasFrames && (
+        {/* Per-detection frame */}
+        {frame_url && (
           <div className="flex gap-4">
-            <FrameImage url={entry_frame_url} label="Entry" />
-            <FrameImage url={last_seen_frame_url} label="Last Seen" />
+            <FrameImage url={frame_url} label="Detection Frame" />
           </div>
         )}
 

@@ -43,6 +43,8 @@ class DetectionIndexRepository(IDetectionIndexRepository):
         self._ttl = cfg.appearance_ttl_days * 86400  # days → seconds
         self._lock = threading.Lock()
 
+        self._track_seen_ttl = cfg.track_seen_ttl  # short gate TTL (not data TTL)
+
         # Inner-product index on L2-normalised vectors == cosine similarity
         base = faiss.IndexFlatIP(self._dim)
         self._index = faiss.IndexIDMap(base)
@@ -53,8 +55,8 @@ class DetectionIndexRepository(IDetectionIndexRepository):
 
         rebuilt = self._rebuild_from_redis()
         log.info(
-            "DetectionIndexRepository initialised: dim=%d ttl_days=%d next_id=%d rebuilt=%d",
-            self._dim, cfg.appearance_ttl_days, self._next_id, rebuilt,
+            "DetectionIndexRepository initialised: dim=%d ttl_days=%d track_seen_ttl=%ds next_id=%d rebuilt=%d",
+            self._dim, cfg.appearance_ttl_days, self._track_seen_ttl, self._next_id, rebuilt,
         )
 
     # ── Public API ──────────────────────────────────────────────────────────
@@ -139,16 +141,32 @@ class DetectionIndexRepository(IDetectionIndexRepository):
         with self._lock:
             return self._index.ntotal
 
+    def store_frame(self, faiss_id: int, b64_jpeg: str) -> None:
+        """Store a base64 JPEG frame keyed by faiss_id with 7-day TTL."""
+        key = f"detection:frame:{faiss_id}".encode()
+        self._r.setex(key, self._ttl, b64_jpeg.encode() if isinstance(b64_jpeg, str) else b64_jpeg)
+
+    def get_frame(self, faiss_id: int) -> Optional[str]:
+        """Return the stored base64 JPEG for a faiss_id, or None if expired/missing."""
+        raw = self._r.get(f"detection:frame:{faiss_id}".encode())
+        if raw is None:
+            return None
+        return raw.decode() if isinstance(raw, bytes) else raw
+
     def claim_track(self, track_id: str, ttl: Optional[int] = None) -> bool:
         """Allow up to N embeddings per track, with minimum time between stores.
 
         Returns True if a new embedding slot is available (count < max and
         cooldown expired), False otherwise.
+
+        Uses track_seen_ttl (default 120s) for the dedup gate, NOT the 7-day
+        data TTL — so that when the SceneScape tracker recycles an integer ID
+        for a new person, the gate expires in time and the new person is stored.
         """
         cfg = get_config()
         max_per_track = cfg.detection_embeddings_per_track
         interval = cfg.detection_embedding_interval
-        effective_ttl = ttl if ttl is not None else self._ttl
+        effective_ttl = ttl if ttl is not None else cfg.track_seen_ttl
 
         # Check embedding count for this track
         count_key = f"detection:track:count:{track_id}".encode()
@@ -162,7 +180,7 @@ class DetectionIndexRepository(IDetectionIndexRepository):
         if not self._r.set(cooldown_key, b"1", ex=interval, nx=True):
             return False  # too soon since last store
 
-        # Increment counter with same TTL as the embeddings
+        # Increment counter with same TTL as the dedup gate
         pipe = self._r.pipeline()
         pipe.incr(count_key)
         pipe.expire(count_key, effective_ttl)

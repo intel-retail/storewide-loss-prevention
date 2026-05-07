@@ -266,12 +266,14 @@ class RedisEventRepository(EventRepository):
         val = self._r.get(frame_key)
         return val.decode() if isinstance(val, bytes) else val
 
-    def claim_track_entry(self, object_id: str, ttl: int = 86400 * 7) -> bool:
+    def claim_track_entry(self, object_id: str, ttl: int = 120) -> bool:
         """Atomically claim the entry frame slot for a track (NX).
 
-        Returns True only the first time this track_id is seen — used to
-        trigger entry frame capture without zones.  TTL matches detection
-        retention so the marker expires with the rest of the track data.
+        Returns True only the first time this track_id is seen within the TTL
+        window — used to capture the entry frame once per tracker track lifetime.
+        TTL must match track_seen_ttl (default 120s), NOT the 7-day data TTL,
+        so that when the tracker recycles an integer ID the new person's entry
+        frame is not blocked by a stale key from a previous occupant.
         """
         return bool(self._r.set(f"track:entry:claimed:{object_id}", "1", ex=ttl, nx=True))
 

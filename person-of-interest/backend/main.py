@@ -118,7 +118,7 @@ async def lifespan(app: FastAPI):
         EmbeddingModelFactory.create(), detection_index, event_repo, faiss_repo
     )
     camera_routes.init(scenescape)
-    thumbnail_routes.init(event_repo)
+    thumbnail_routes.init(event_repo, detection_index)
 
     # Pre-warm RTSP grabbers so frames are cached before first match event
     import os as _os

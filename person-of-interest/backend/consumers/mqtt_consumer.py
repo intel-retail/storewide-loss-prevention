@@ -41,7 +41,7 @@ from backend.service.alert_service import AlertService
 from backend.service.event_service import EventService
 from backend.service.matching_service import MatchingService
 from backend.utils.face_processing import MIN_FACE_SIZE, embedding_norm, is_face_usable
-from backend.utils.thumbnail import submit_capture
+from backend.utils.thumbnail import grab_frame_now, submit_capture
 
 log = logging.getLogger("poi.consumer")
 
@@ -218,18 +218,19 @@ class EventConsumer:
             # offline search accuracy.  claim_track() enforces count limit
             # and minimum time interval between stores.
             object_id = f"cam:{camera_id}:{person_int_id}"
+            new_faiss_id: int = -1
             if self._detection_index is not None:
                 import numpy as _np
                 try:
                     if self._detection_index.claim_track(object_id):
-                        self._detection_index.add(
+                        new_faiss_id = self._detection_index.add(
                             vector=_np.array(embedding_vector, dtype=_np.float32),
                             camera_id=camera_id,
                             track_id=object_id,
                             timestamp=timestamp,
                             bbox=obj.get("bounding_box_px") or best_face_bbox,
                         )
-                        log.info("DetectionIndex: embedding stored for %s", object_id)
+                        log.info("DetectionIndex: new track stored %s faiss_id=%d", object_id, new_faiss_id)
                     else:
                         log.debug("DetectionIndex: slot limit or cooldown, skipping %s", object_id)
                 except Exception:
@@ -248,10 +249,22 @@ class EventConsumer:
             person_bbox = obj.get("bounding_box_px") or best_face_bbox
 
             # ── Track-level entry / last-seen frames (no-zone fallback) ──────
-            # Entry:     captured once per track lifetime via atomic Redis NX claim.
-            # Last-seen: always overwritten; acts as the exit frame when track stops.
+            # Grab the frame synchronously RIGHT NOW — the MQTTAdapter already cached
+            # the image for this camera (image topic message arrives BEFORE the
+            # detection message on the same connection because sscape_adapter publishes
+            # them in that order in the same processFrame() call).
+            # grab_frame_now() is O(1) and never blocks the consumer thread.
+            frame_b64: Optional[str] = grab_frame_now(camera_id, timestamp)
+            if not frame_b64:
+                log.debug("No frame available for camera=%s at ts=%s", camera_id, timestamp)
+
+            # Store frame keyed by faiss_id (unique per detection, never overwritten).
+            if new_faiss_id >= 0 and frame_b64 and self._detection_index is not None:
+                self._detection_index.store_frame(new_faiss_id, frame_b64)
+                log.info("Detection frame stored: faiss_id=%d track=%s", new_faiss_id, object_id)
+
             if self._event_repo is not None:
-                self._capture_track_frames(object_id, camera_id, person_bbox, timestamp)
+                self._capture_track_frames(object_id, frame_b64)
 
             self._run_matching(
                 object_id=object_id,
@@ -264,34 +277,28 @@ class EventConsumer:
 
     # ── Secondary: external topic (monitoring / UUID tracking only) ──────────
 
-    def _capture_track_frames(self, object_id: str, camera_id: str, bbox, timestamp: str = "") -> None:
-        """Capture entry frame (first detection) and update last-seen frame.
+    def _capture_track_frames(self, object_id: str, frame_b64: Optional[str]) -> None:
+        """Store a pre-fetched frame as entry (first time) and last_seen (always).
 
-        Uses the detection timestamp to retrieve the buffered MQTT image frame
-        whose pipeline timestamp is closest to the detection — this guarantees
-        the stored frame shows the same scene as the detection event, not a
-        later frame where the person may have moved.
-
-        The person bounding box is passed through so the stored thumbnail is
-        cropped to the detected person, not the full camera frame.
+        frame_b64 was grabbed synchronously in _handle_camera_event, so it is
+        guaranteed to be from the detection moment.  This method only performs
+        Redis writes — fast, no network capture, no thread pool needed.
         """
+        if not frame_b64:
+            return
+        from backend.core.config import get_config
+        track_ttl = get_config().track_seen_ttl
         try:
-            if self._event_repo.claim_track_entry(object_id):
-                future = submit_capture(camera_id, bbox, timestamp)
-                b64 = future.result(timeout=4)
-                if b64:
-                    self._event_repo.store_track_frame(object_id, "entry", b64)
-                    log.info("Track entry frame captured: %s", object_id)
+            if self._event_repo.claim_track_entry(object_id, ttl=track_ttl):
+                self._event_repo.store_track_frame(object_id, "entry", frame_b64)
+                log.info("Track entry frame stored: %s", object_id)
         except Exception:
-            log.debug("Track entry frame failed for %s", object_id, exc_info=True)
+            log.debug("Track entry frame store failed for %s", object_id, exc_info=True)
 
         try:
-            future = submit_capture(camera_id, bbox, timestamp)
-            b64 = future.result(timeout=2)
-            if b64:
-                self._event_repo.store_track_frame(object_id, "last_seen", b64)
+            self._event_repo.store_track_frame(object_id, "last_seen", frame_b64)
         except Exception:
-            log.debug("Track last-seen frame failed for %s", object_id, exc_info=True)
+            log.debug("Track last-seen frame store failed for %s", object_id, exc_info=True)
 
     def _handle_external_event(self, topic: str, payload: dict) -> None:
         """Process scenescape/external/{scene_id}/person messages.
