@@ -55,6 +55,10 @@ run-scenescape:
 down-scenescape:
 	@$(MAKE) -C $(SCENESCAPE_DIR) APP_DIR=$(CURDIR) down
 
+.PHONY: export-scene
+export-scene:
+	@$(MAKE) -C $(SCENESCAPE_DIR) APP_DIR=$(CURDIR) export-scene
+
 .PHONY: logs
 logs:
 	$(COMPOSE_ALL) logs -f

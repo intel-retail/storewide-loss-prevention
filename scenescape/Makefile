@@ -111,3 +111,10 @@ logs:
 .PHONY: status
 status:
 	$(COMPOSE_SCENESCAPE) ps
+
+# ---- Export Scene ----
+
+.PHONY: export-scene
+export-scene:
+	@chmod +x $(SCENESCAPE_DIR)/scripts/export-scene.sh
+	@$(SCENESCAPE_DIR)/scripts/export-scene.sh $(APP_DIR)

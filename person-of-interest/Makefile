@@ -55,6 +55,10 @@ run-scenescape:
 down-scenescape:
 	@$(MAKE) -C $(SCENESCAPE_DIR) APP_DIR=$(CURDIR) down
 
+.PHONY: export-scene
+export-scene:
+	@$(MAKE) -C $(SCENESCAPE_DIR) APP_DIR=$(CURDIR) export-scene
+
 .PHONY: lp-logs
 lp-logs:
 	$(COMPOSE_ALL) logs -f
@@ -110,6 +114,7 @@ help:
 	@echo "    make run-scenescape  - Single command: init + models + start"
 	@echo "    make demo            - Initialize and start everything"
 	@echo "    make download-models - Download OpenVINO AI models"
+	@echo "    make export-scene    - Export scene config from running SceneScape"
 	@echo "    make lp-down         - Stop all LP services"
 	@echo "    make down-scenescape - Stop SceneScape only"
 	@echo "    make lp-logs         - Follow LP logs"
