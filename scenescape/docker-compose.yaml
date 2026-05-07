@@ -422,11 +422,11 @@ configs:
   mosquitto-secure:
     file: ../scenescape/mosquitto/mosquitto-secure.conf
   tracker-config:
-    file: ../scenescape/controller/tracker-config.json
+    file: ${TRACKER_CONFIG:-../scenescape/controller/tracker-config.json}
   tracker-config-time-chunking:
-    file: ../scenescape/controller/tracker-config-time-chunking.json
+    file: ${TRACKER_CONFIG_TIME_CHUNKING:-../scenescape/controller/tracker-config-time-chunking.json}
   reid-config:
-    file: ../scenescape/controller/reid-config.json
+    file: ${REID_CONFIG:-../scenescape/controller/reid-config.json}
   lp-config:
     file: ${PIPELINE_CONFIG:-../scenescape/dlstreamer-pipeline-server/config.json}
   lp-config-2:

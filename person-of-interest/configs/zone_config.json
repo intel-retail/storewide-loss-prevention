@@ -6,6 +6,7 @@
   "scene_zip": "",
   "video_file": "Camera_01.mp4",
   "video_file_2": "Camera_02.mp4",
+  "models": "person-detection-retail-0013,person-reidentification-retail-0277,face-detection-retail-0004,face-reidentification-retail-0095",
   "scenescape_api": {
     "base_url": "https://web.scenescape.intel.com",
     "auth_path": "/api/v1/auth",
