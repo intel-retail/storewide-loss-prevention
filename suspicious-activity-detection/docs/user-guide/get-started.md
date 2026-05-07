@@ -21,7 +21,15 @@ git clone https://github.com/intel-retail/storewide-loss-prevention.git
 cd storewide-loss-prevention/suspicious-activity-detection
 ```
 
-## 2. Provide Required Assets
+## 2. Initialize Submodules
+
+Clone the required submodules (for example, `performance-tools`):
+
+```bash
+make update-submodules
+```
+
+## 3. Provide Required Assets
 
 Before starting, ensure these files are in place:
 
@@ -33,7 +41,7 @@ Before starting, ensure these files are in place:
 | `../scenescape/webserver/storewide-loss-prevention.zip` | Scene map + zone definitions imported into SceneScape |
 | `../scenescape/sample_data/lp-camera1.mp4` | Sample video used by the camera replay |
 
-## 3. Download AI Models
+## 4. Download AI Models
 
 The first run requires downloading the OpenVINO and VLM models:
 
@@ -58,15 +66,15 @@ suspicious-activity-detection/models/
 └── yolo_models/
 ```
 
-## 4. Run the Sample
+## 5. Run the Sample
 
 ### Run Everything (SceneScape + LP)
 
 ```bash
-make demo
+make up
 ```
 
-`make demo` performs the following steps automatically:
+`make up` performs the following steps automatically:
 
 1. Generates TLS certificates, SceneScape secrets, and `docker/.env`.
 2. Copies the sample video into the Docker volume.
@@ -77,7 +85,7 @@ make demo
 7. Tails LP logs to `application.log`.
 
 
-## 5 Stop Services
+## 6. Stop Services
 
 ```bash
 # Stop everything
@@ -85,13 +93,13 @@ make down
 
 ```
 
-## 6. Access the UI
+## 7. Access the UI
 
 Once running:
 
 | Service | URL | Credentials |
 |---------|-----|-------------|
-| SceneScape UI | https://localhost | `admin` / password printed by `make demo` |
+| SceneScape UI | https://localhost | `admin` / password printed by `make up` |
 | Gradio Dashboard | http://localhost:7860 | — |
 | LP REST API | http://localhost:8082 | — |
 | LP logs | `application.log` | `tail -f application.log` |
@@ -99,7 +107,7 @@ Once running:
 From the Gradio dashboard you can observe live alerts, evidence frames, and
 session state across all configured cameras.
 
-## 7. Inspect Alerts and Sessions via REST
+## 8. Inspect Alerts and Sessions via REST
 
 ```bash
 # Health check
@@ -115,7 +123,7 @@ curl http://localhost:8082/api/v1/lp/sessions
 curl http://localhost:8082/api/v1/lp/status
 ```
 
-## 8. Tune Detection Behavior
+## 9. Tune Detection Behavior
 
 Detection thresholds, dedup scope, and severity escalation are defined
 declaratively in `configs/rules.yaml`. Edit the file and restart the
