@@ -44,6 +44,7 @@ class Config:
 
     # Thresholds
     similarity_threshold: float = 0.6
+    search_similarity_threshold: float = 0.70
     search_top_k: int = 10
 
     # Embedding / OpenVINO
@@ -120,6 +121,7 @@ class Config:
             detection_embeddings_per_track=int(os.getenv("DETECTION_EMBEDDINGS_PER_TRACK", "5")),
             detection_embedding_interval=int(os.getenv("DETECTION_EMBEDDING_INTERVAL", "10")),
             similarity_threshold=float(os.getenv("SIMILARITY_THRESHOLD", "0.6")),
+            search_similarity_threshold=float(os.getenv("SEARCH_SIMILARITY_THRESHOLD", "0.70")),
             search_top_k=int(os.getenv("SEARCH_TOP_K", "10")),
             model_base=model_base,
             det_model=os.getenv(
