@@ -105,6 +105,15 @@ demo-lp:
 down-lp:
 	$(COMPOSE_LP) down
 
+# ---- Submodules ----
+
+.PHONY: update-submodules
+update-submodules:
+	@echo "Cloning performance tool repositories"
+	cd .. && git submodule deinit -f .
+	cd .. && git submodule update --init --recursive
+	@echo "Submodules updated (if any present)."
+
 # ---- Models ----
 
 .PHONY: download-models
@@ -114,7 +123,7 @@ download-models:
 
 # ---- Stream Density ----
 
-PERF_TOOLS_DIR := performance-tools/benchmark-scripts
+PERF_TOOLS_DIR := ../performance-tools/benchmark-scripts
 SAD_STREAM_DENSITY := $(PERF_TOOLS_DIR)/sad_stream_density.py
 
 .PHONY: stream-density
