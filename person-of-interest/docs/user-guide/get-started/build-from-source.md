@@ -25,10 +25,11 @@ cd storewide-loss-prevention-retail/person-of-interest
 ## Step 2: Initialize Environment
 
 ```bash
-make init-env
+make init
 ```
 
-Edit the generated `.env` file with your SceneScape connection details. See
+Use `make init` to generate `.env` and pipeline configs from `zone_config.json`. If you
+only need to create `.env` from `.env.example`, run `make init-env` instead. See
 [Get Started](../get-started.md#step-2-initialize-environment) for required variables.
 
 ## Step 3: Build the Docker Images
@@ -95,13 +96,24 @@ make status
 | `make restart`               | Restart all services                             |
 | `make logs`                  | Follow logs from all POI services                |
 | `make log-alert`             | Follow alert service logs                        |
+| `make init`                  | Generate .env and pipeline configs from zone_config.json |
 | `make init-env`              | Create `.env` from `.env.example`                |
+| `make demo`                  | All-in-one: init + models + build + start        |
+| `make run-scenescape`        | Start SceneScape only                            |
+| `make down-scenescape`       | Stop SceneScape only                             |
+| `make export-scene`          | Export scene config from running SceneScape       |
+| `make download-models`       | Download OpenVINO AI models                      |
+| `make benchmark`             | Single-scene latency benchmark                   |
+| `make benchmark-stream-density` | Iterative stream density benchmark            |
+| `make consolidate-metrics`   | Consolidate benchmark metrics to CSV             |
 | `make test`                  | Run backend unit tests                           |
 | `make coverage`              | Run tests with coverage report                   |
 | `make coverage-html`         | Generate HTML coverage report                    |
-| `make benchmark`             | Run end-to-end latency benchmark                 |
-| `make benchmark-stream-density` | Run stream density benchmark                  |
 | `make update-submodules`     | Update git submodules from remote                |
+| `make clean`                 | Stop and remove containers + volumes             |
+| `make clean-secrets`         | Remove generated secrets and .env                |
+| `make clean-images`          | Remove LP Docker images                          |
+| `make clean-all`             | Clean everything including videos                |
 | `make status`                | Show service status                              |
 | `make help`                  | Show all available targets                       |
 

@@ -43,6 +43,54 @@ The POI (Person of Interest) system performs **real-time face re-identification*
 
 ---
 
+## Offline Search Architecture
+
+The historical search API (`POST /api/v1/search`) uses a two-stage search pipeline:
+
+### Stage 1: Enrolled POI Index
+Searches the enrolled POI FAISS index (`FAISSRepository`) using the query embedding.
+- Uses cosine similarity (IndexFlatIP on L2-normalized vectors)
+- Applies configurable threshold (`similarity_threshold`, default 0.6)
+- Groups hits by POI ID, takes best similarity per POI
+- Applies margin check: rejects if `best - second_best < 0.05` (ambiguous match)
+- If a POI is identified, returns all recorded events for that POI
+
+### Stage 2: Detection Index (fallback)
+If no POI match is found, searches the all-detections index (`DetectionIndexRepository`):
+- Contains all face embeddings ever seen by DLStreamer (7-day TTL)
+- Groups results by track ID, keeping best entry hit per track
+- Searches exit vectors for matched tracks (rolling exit embeddings)
+- Builds grouped appearance cards with entry + exit frames and zone dwells
+- Returns sorted by overall similarity (max of entry and exit)
+
+### Track Purity Filter
+DLStreamer reuses integer track IDs across different physical persons. To prevent
+false positives from track ID reuse:
+- For each track, counts events per POI from Redis
+- Computes purity = our_count / total_count
+- Skips tracks with purity < 40% (clearly dominated by another person)
+
+### Multi-Embedding Detection Index
+Each tracked person stores up to 5 face embeddings (spaced 10 seconds apart) for
+more robust matching. The detection index uses a counter + cooldown approach in
+`claim_track()` to avoid storing too many embeddings from the same moment.
+
+## Entry/Exit Frame Architecture
+
+The system captures and stores frames at key moments:
+
+- **Entry frame**: Stored per FAISS ID when a face is first indexed in the detection
+  index. Uses key `detection:frame:{faiss_id}`. Immutable — never overwritten.
+- **Exit frame**: Rolling frame updated as a tracked person continues to be detected.
+  Uses key pattern `track:exit:frame:{track_id}`. Overwritten on each new detection.
+- **Track-level frames**: Stored in Redis at `track:frame:{track_id}:entry` and
+  `track:frame:{track_id}:last_seen` by the MQTT consumer.
+- **Zone frames**: Entry and exit frames per zone dwell, stored alongside region dwell
+  records.
+
+The `exit_promoter.py` module handles promoting exit vectors and frames when tracks
+are finalized.
+
 ## 2. Enrollment Flow
 
 ### Sequence

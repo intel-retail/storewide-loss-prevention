@@ -65,27 +65,58 @@ cd storewide-loss-prevention-retail/person-of-interest
 
 ### Step 2: Initialize Environment
 
-```bash
-# Create .env from the example template
-make init-env
-```
-
-Edit `.env` with your SceneScape connection details:
+All application configuration is centralized in `configs/zone_config.json`. Edit that file
+first, then run `make init` to generate `docker/.env`, secrets, and per-camera pipeline
+configuration automatically.
 
 ```bash
-# SceneScape MQTT connection
-MQTT_HOST=<scenescape-mqtt-host>
-MQTT_PORT=1883
+# Edit the configuration file with your camera and scene details
+nano configs/zone_config.json
 
-# SceneScape API (for camera list)
-SCENESCAPE_API_URL=https://<scenescape-host>
-SCENESCAPE_API_TOKEN=<your-api-token>
-
-# Proxy (if required)
-HTTP_PROXY=<http-proxy>
-HTTPS_PROXY=<https-proxy>
-NO_PROXY=localhost,127.0.0.1
+# Initialize environment (generates docker/.env, secrets, pipeline configs)
+make init
 ```
+
+Minimal `configs/zone_config.json` example:
+
+```json
+{
+  "scene_name": "conference room",
+  "scene_zip": "conference-room.zip",
+  "cameras": [
+    { "name": "Camera_01", "video": "Camera_01.mp4" }
+  ],
+  "models": "person-detection-retail-0013,face-detection-retail-0004,face-reidentification-retail-0095",
+  "scenescape": {
+    "registry": "",
+    "version": "latest",
+    "controller_image": "scenescape-controller",
+    "manager_image": "scenescape-manager"
+  },
+  "store": {
+    "name": "Retail",
+    "id": "store_001"
+  },
+  "services": {
+    "lp_service_port": 8082,
+    "log_level": "INFO"
+  },
+  "benchmark": {
+    "target_latency_ms": 2000,
+    "latency_metric": "avg"
+  }
+}
+```
+
+The `zone_config.json` file defines:
+
+- `scene_name`, `scene_zip` for SceneScape scene setup
+- `cameras[]` as an array of `{name, video}` camera entries
+- `models` as the comma-separated OpenVINO model list
+- `scenescape{}` for registry, version, and controller/manager images
+- `store{}` for store name and ID
+- `services{}` for ports, log level, and SeaweedFS settings
+- `benchmark{}` for stream-density benchmark parameters
 
 ### Step 3: Build the Application
 
@@ -94,11 +125,24 @@ NO_PROXY=localhost,127.0.0.1
 make build REGISTRY=false
 ```
 
+> **Tip:** For first-time setup, `make demo` handles initialization, model download, image
+> build, and startup in one command.
+
 ### Step 4: Launch the Application
 
 ```bash
-# Start all services
+# All-in-one: init + download models + build + start
+make demo
+```
+
+For later runs, you can use:
+
+```bash
+# Start the POI stack after initial setup
 make up
+
+# Start SceneScape only
+make run-scenescape
 ```
 
 This launches the following containers:
@@ -110,8 +154,10 @@ This launches the following containers:
 | `poi-redis`          | `redis:8.6.2`                | 6379  |
 | `poi-alert-service`  | `intel/alert-service:0.0.1`  | 8001  |
 
-> **Note:** `make up` also starts SceneScape services if not already running.
-> To also start the MCP server, run `docker compose up -d mcp-server` separately.
+> **Note:** Use `make up` for subsequent POI stack starts after the initial setup. If
+> SceneScape is not already running, the command brings it up without recreating existing
+> services. To manage SceneScape separately, use `make run-scenescape`. To also start the
+> MCP server, run `docker compose up -d mcp-server` separately.
 
 ### Step 5: Access the Interface
 
@@ -138,26 +184,25 @@ make down
 
 ### Environment Variables
 
-The complete list of environment variables is available in `.env.example`. Key configuration
-groups:
+All values in `docker/.env` are auto-generated from `configs/zone_config.json` by
+`make init` (`scenescape/scripts/init.sh`). Do **not** edit `docker/.env` directly; update
+`configs/zone_config.json` and re-run `make init` instead.
 
-| Variable                | `.env.example` Default      | Compose Override | Description                           |
-| ----------------------- | --------------------------- | ---------------- | ------------------------------------- |
-| `MQTT_HOST`             | `broker.scenescape.intel.com` | —              | SceneScape MQTT broker host          |
-| `MQTT_PORT`             | `1883`                      | —                | MQTT broker port                      |
-| `SIMILARITY_THRESHOLD`  | `0.6`                       | `0.68`           | FAISS cosine similarity threshold     |
-| `SEARCH_TOP_K`          | `10`                        | —                | Number of FAISS search results        |
-| `OBJECT_CACHE_TTL`      | `300`                       | `5`              | Cache-Aside TTL (seconds)             |
-| `ALERT_DEDUP_TTL`       | `300`                       | `60`             | Alert dedup window (seconds)          |
-| `DELIVERY_HANDLERS`     | `log,mqtt,websocket`        | `log,alert_service` | Alert delivery strategies          |
-| `FAISS_DIMENSION`       | `256`                       | —                | Embedding vector dimension            |
-| `INFERENCE_DEVICE`      | `CPU`                       | —                | OpenVINO inference device             |
-| `LOG_LEVEL`             | `INFO`                      | —                | Logging level                         |
-| `BENCHMARK_LATENCY`     | `false`                     | —                | Enable FAISS latency logging          |
+| `zone_config.json` Key | Generated `docker/.env` Values | Description |
+| ---------------------- | ------------------------------ | ----------- |
+| `scene_name`, `scene_zip` | `SCENE_NAME`, `SCENE_ZIP` | Scene name and scene archive used by SceneScape |
+| `cameras[]` | `CAMERA_NAME`, `VIDEO_FILE`, `CAMERA_NAME_2`, `VIDEO_FILE_2` | Camera names and input videos for generated pipelines |
+| `models`, `model_precision` | `MODELS`, `MODEL_PRECISION` | OpenVINO model list and precision |
+| `scenescape{}` | `SCENESCAPE_REGISTRY`, `SCENESCAPE_VERSION`, image settings | SceneScape image source and version selection |
+| `store{}` | `STORE_NAME`, `STORE_ID` | Store metadata used by the stack |
+| `services{}` | `LP_SERVICE_PORT`, `LOG_LEVEL`, `SEAWEEDFS_*` | Service ports, logging, and SeaweedFS settings |
+| `benchmark{}` | `BENCHMARK_*`, `RESULTS_PATH` | Stream-density benchmark configuration |
 
-> **Important:** The `docker-compose.yml` overrides several `.env.example` defaults at
-> runtime (shown in the "Compose Override" column). The compose values are the effective
-> production defaults. Edit `.env` only for variables not overridden in compose.
+`make init` also injects generated secrets, user IDs, and pipeline-config paths into
+`docker/.env`.
+
+> **Note:** Benchmark-related environment variables are configured in the `benchmark`
+> section of `configs/zone_config.json` and written into `docker/.env` during initialization.
 
 ### Running Tests and Generating Coverage Report
 
@@ -191,6 +236,15 @@ make build
 ```
 
 See [Build from Source](./get-started/build-from-source.md) for detailed build options.
+
+## SceneScape Configuration
+
+- Use `make export-scene` to export scene configuration from a running SceneScape instance.
+- Store scene zip files referenced by `scene_zip` in the repository's `scenescape/webserver/`
+  directory.
+- `make init` generates DLStreamer pipeline configuration files per camera from
+  `configs/pipeline-config.json` and writes them into
+  `scenescape/dlstreamer-pipeline-server/`.
 
 ## Next Steps
 

@@ -69,8 +69,13 @@ Upload a suspect's image and find all appearances across cameras within a time r
 
 - **Image-Based Query**: Upload a face image to search against stored movement events
 - **Time Range Filter**: Specify start and end timestamps to narrow results
+- **Two-Stage Search**: First searches enrolled POI index, then falls back to the
+  all-detections index for non-enrolled persons
 - **Movement Timeline**: Returns a chronological list of cameras and regions visited
-- **Region Dwell Times**: Shows how long the person spent in each store zone
+- **Entry/Exit Frames**: Each appearance shows entry and exit frames for visual verification
+- **Track Grouping**: Results are grouped by track with best entry/exit similarity scores
+- **Zone Dwell Tracking**: Shows zone-level entry/exit times and dwell durations with frame
+  evidence
 - **Thumbnail Evidence**: Captured thumbnails from matched detections
 
 **How to Perform a Historical Search:**
@@ -79,7 +84,8 @@ Upload a suspect's image and find all appearances across cameras within a time r
 2. Upload a clear face image of the person to investigate
 3. Set the desired time range (start and end timestamps)
 4. Click "Search" — the system generates an embedding and searches the event store
-5. Review the timeline of appearances, camera IDs, regions, and dwell times
+5. Review the timeline of appearances with entry/exit frames, camera IDs, zone dwells,
+   and similarity scores
 
 #### 4. **Camera Management**
 

@@ -229,6 +229,34 @@ VALUE:
 }
 ```
 
+### 7. Detection Index — `detection:*`
+
+Stores per-detection data for the all-detections FAISS index.
+
+```
+KEY:  detection:meta:{faiss_id}     → JSON metadata (track_id, camera_id, timestamp, bbox)
+KEY:  detection:frame:{faiss_id}    → JPEG binary (entry frame)   TTL=7 days
+KEY:  detection:track_count:{track} → integer (embedding count for track)
+KEY:  detection:track_last:{track}  → timestamp (last embedding stored)
+```
+
+### 8. Track Exit Frames — `track:exit:*`
+
+Rolling exit data, updated on each new detection for an active track.
+
+```
+KEY:  track:exit:vector:{track_id}   → float32 bytes (latest exit embedding)
+KEY:  track:exit:frame:{track_id}    → JPEG binary (latest exit frame)
+KEY:  track:exit:meta:{track_id}     → JSON (timestamp, camera_id, bbox)
+```
+
+### 9. Track Frames — `track:frame:*`
+
+```
+KEY:  track:frame:{track_id}:entry      → JPEG binary (first frame seen)
+KEY:  track:frame:{track_id}:last_seen  → JPEG binary (most recent frame)
+```
+
 ---
 
 ## End-to-End Data Flow
@@ -294,3 +322,10 @@ SceneScape Scene Controller
 | `alert:sent:{obj_id}` | string | 300s | Dedup flag: alert already fired |
 | `region:presence:{scene}:{region}:{obj}` | string (JSON) | 1h | Region entry timestamp |
 | `region:dwell:{obj}:{scene}:{region}:{date}` | string (JSON) | 7 days | Completed region visit with dwell time |
+| `detection:meta:{faiss_id}` | string (JSON) | 7 days | Detection metadata (track, camera, bbox) |
+| `detection:frame:{faiss_id}` | binary (JPEG) | 7 days | Entry frame per detection |
+| `detection:track_count:{track}` | integer | 7 days | Embedding count per track |
+| `track:exit:vector:{track_id}` | binary | 7 days | Latest exit embedding |
+| `track:exit:frame:{track_id}` | binary (JPEG) | 7 days | Latest exit frame |
+| `track:frame:{track_id}:entry` | binary (JPEG) | 7 days | Track entry frame |
+| `track:frame:{track_id}:last_seen` | binary (JPEG) | 7 days | Track last-seen frame |

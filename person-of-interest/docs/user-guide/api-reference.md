@@ -104,58 +104,113 @@ first (authoritative source), then FAISS vectors, then embedding mappings.
 POST /api/v1/search
 ```
 
-Upload a face image and find all appearances across cameras within a time range. The
-backend generates a 256-d face embedding from the query image, searches FAISS for matching
-POIs, and returns a timeline of visits grouped by date with region dwell information.
+Upload a face image and find appearances across cameras within a time range. The search
+uses a two-stage approach:
+
+1. **Stage 1**: Search the enrolled POI index. If a POI match is found, the response returns
+   that POI's event appearances.
+2. **Stage 2**: If no POI match is found, search the all-detections index and return matching
+   detection tracks.
 
 **Request** (multipart/form-data):
 
-| Field        | Type   | Required | Description                              |
-| ------------ | ------ | -------- | ---------------------------------------- |
-| `image`      | File   | Yes      | Face image of person to search (JPEG/PNG) |
-| `start_time` | string | No       | ISO 8601 timestamp (e.g., `2026-01-01T00:00:00Z`) |
-| `end_time`   | string | No       | ISO 8601 timestamp                       |
+| Field        | Type   | Required | Description                                              |
+| ------------ | ------ | -------- | -------------------------------------------------------- |
+| `image`      | File   | Yes      | Face image of person to search (JPEG/PNG)                |
+| `start_time` | string | No       | ISO 8601 timestamp (e.g., `2026-01-01T00:00:00Z`)       |
+| `end_time`   | string | No       | ISO 8601 timestamp                                       |
+| `top_k`      | integer | No       | Maximum candidate matches to evaluate per search stage (default: `20`) |
 
-**Response** (200 OK):
+**Response** (200 OK, Stage 1 — POI matched):
 
 ```json
 {
-  "event_type": "poi_history_result",
-  "poi_id": "poi-a3f2c1b0",
+  "event_type": "offline_search_result",
   "query_range": {
     "start": "2026-01-01T00:00:00Z",
     "end": "2026-12-31T23:59:59Z"
   },
-  "visits": [
+  "query_timestamp": "2026-01-20T10:00:00Z",
+  "matched_poi_id": "poi-a3f2c1b0",
+  "total_appearances": 2,
+  "appearances": [
     {
-      "date": "2026-01-15",
-      "entry_time": "2026-01-15T14:30:00Z",
-      "exit_time": "2026-01-15T14:35:00Z",
-      "cameras_visited": ["Camera_01"],
-      "regions": ["entrance-zone"],
-      "region_name": "entrance-zone",
-      "duration_sec": 300.0,
-      "region_dwells": [
+      "track_id": "cam:Camera_01:5",
+      "camera_id": "Camera_01",
+      "similarity": 0.8721,
+      "best_match_time": "2026-01-15T14:30:00Z",
+      "entry_frame_url": "/api/v1/frames/...",
+      "last_seen_frame_url": "/api/v1/frames/...",
+      "zone_appearances": [
         {
-          "region_name": "entrance-zone",
+          "zone": "entrance-zone",
+          "scene_id": "db68a737-...",
           "entry_time": "2026-01-15T14:30:00Z",
           "exit_time": "2026-01-15T14:35:00Z",
-          "dwell_sec": 300.0,
-          "camera_id": "Camera_01"
+          "dwell_seconds": 300.0,
+          "entry_frame_url": "/api/v1/frames/...",
+          "exit_frame_url": "/api/v1/frames/..."
         }
       ],
-      "thumbnail": "/api/v1/thumbnail/cam:Camera_01:5",
-      "alert_id": ""
+      "thumbnail_url": "/api/v1/thumbnail/cam:Camera_01:5"
     }
   ],
-  "total_visits": 1,
   "search_stats": {
-    "vectors_searched": 12,
-    "query_latency_ms": 1.23
-  },
-  "query_timestamp": "2026-01-20T10:00:00Z"
+    "search_stage": "poi_index",
+    "poi_similarity": 0.8721,
+    "query_latency_ms": 12.5
+  }
 }
 ```
+
+**Response** (200 OK, Stage 2 — detection index fallback):
+
+```json
+{
+  "event_type": "offline_search_result",
+  "query_range": {
+    "start": "2026-01-01T00:00:00Z",
+    "end": "2026-12-31T23:59:59Z"
+  },
+  "query_timestamp": "2026-01-20T10:00:00Z",
+  "total_appearances": 1,
+  "appearances": [
+    {
+      "faiss_id": 42,
+      "track_id": "cam:Camera_02:3",
+      "camera_id": "Camera_02",
+      "similarity": 0.7532,
+      "entry_similarity": 0.7532,
+      "exit_similarity": 0.6891,
+      "entry_timestamp": "2026-01-15T15:00:00Z",
+      "exit_timestamp": "2026-01-15T15:05:00Z",
+      "entry_frame_url": "/api/v1/frames/...",
+      "exit_frame_url": "/api/v1/frames/...",
+      "bbox": [200, 150, 280, 380],
+      "zone_appearances": []
+    }
+  ],
+  "search_stats": {
+    "search_stage": "detection_index",
+    "vectors_searched": 5000,
+    "raw_hits": 20,
+    "unique_tracks": 1,
+    "query_latency_ms": 45.2
+  }
+}
+```
+
+#### Frames
+
+```text
+GET /api/v1/frames/{encoded_key}
+```
+
+Serves a captured frame image (JPEG) from Redis. The `encoded_key` is a base64url-encoded
+Redis key. Frame URLs are returned in search results (`entry_frame_url`, `exit_frame_url`,
+`last_seen_frame_url`).
+
+**Response** (200 OK): JPEG image binary
 
 ---
 

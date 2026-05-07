@@ -1,8 +1,51 @@
 # Release Notes
 
+- [Version 1.1.0](#version-110)
 - [Version 1.0.0](#version-100)
 
 ## Current Release
+
+### Version 1.1.0
+
+**Release Date**: May 2026
+
+**New Features**:
+
+- **Two-stage offline search**: Historical search now uses a two-stage pipeline — first
+  searches enrolled POI index, then falls back to the all-detections index for non-enrolled
+  persons
+- **Multi-embedding detection index**: Stores up to 5 face embeddings per tracked person
+  (spaced 10 seconds apart) for more robust matching
+- **Entry/exit frame capture**: Search results include entry and exit frames per track,
+  with zone-level entry/exit frames for dwell records
+- **Track purity filter**: Prevents false positives from DLStreamer track ID reuse by
+  checking per-POI event counts and filtering tracks with < 40% purity
+- **Dynamic SceneScape configuration**: All environment variables are now auto-generated
+  from `configs/zone_config.json` via `make init` — eliminates manual `.env` editing
+- **Scene export script**: `make export-scene` exports scene config from a running
+  SceneScape instance as an importable zip file
+- **Per-camera pipeline configs**: DLStreamer pipeline configs are generated dynamically
+  per camera from zone_config.json
+- **Stream density benchmarking**: Integrated performance-tools submodule with `make benchmark`,
+  `make benchmark-stream-density`, `make consolidate-metrics` targets
+- **App-specific controller configs**: Tracker and reid configs moved from SceneScape to
+  each app's `configs/` directory (POI: cosine/0.97, SAD: L2/30)
+
+**Bug Fixes**:
+
+- Fixed offline search returning false positives due to missing similarity threshold
+- Fixed UI crash on search results when accessing removed `search_stats` fields
+- Fixed non-enrolled persons not found in search (cross-domain embedding gap between
+  OpenVINO enrollment and DLStreamer runtime)
+- Resolved merge conflicts from suryam/poi branch (entry/exit grouped tracks)
+
+**Breaking Changes**:
+
+- Search API response format changed: `visits[]` → `appearances[]` with entry/exit
+  similarity and frame URLs
+- Environment setup: `make init-env` replaced by `make init` (generates .env from
+  zone_config.json)
+- Benchmark targets now use performance-tools submodule instead of backend benchmarks
 
 ### Version 1.0.0
 

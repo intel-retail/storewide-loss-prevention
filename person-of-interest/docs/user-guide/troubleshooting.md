@@ -79,7 +79,38 @@ If you encounter any problems not addressed here, check the
   - Increase `FACE_CONFIDENCE_THRESHOLD` in the MQTT consumer (default: `0.80`)
   - Enroll multiple reference images per POI for more robust matching
 
-### 7. FAISS Index Corruption
+### 8. Search Returns Wrong Person (Track ID Reuse)
+
+- **Issue**: Historical search returns appearances of a different person mixed with the correct one.
+- **Solution**:
+  - This is caused by DLStreamer reusing integer track IDs across different physical persons
+  - The track purity filter (enabled by default) should catch this — it filters tracks where
+    < 40% of events belong to the queried POI
+  - If false positives persist, check that the `detection_embeddings_per_track` config is
+    set to 5 (more embeddings per track improves matching)
+  - Verify face quality: poor lighting or angles produce weak embeddings
+
+### 9. Non-Enrolled Person Not Found in Search
+
+- **Issue**: Searching for a person who is NOT enrolled as a POI returns no results, even
+  though the person appears in video.
+- **Solution**:
+  - Ensure the detection index is populated — check `GET /api/v1/status` for detection
+    vector count
+  - The detection index stores embeddings from DLStreamer runtime, which uses different
+    preprocessing than enrollment. Similarity scores may be lower (0.3-0.5 range)
+  - Lower `SIMILARITY_THRESHOLD` if needed (default is 0.6)
+  - The system uses a two-stage search: Stage 1 (POI index) uses the same model as
+    enrollment and works well. Stage 2 (detection index) has a cross-domain gap
+
+### 10. UI Crashes on Search Results
+
+- **Issue**: The UI crashes with `TypeError: undefined.toLocaleString()` when viewing search results.
+- **Solution**:
+  - Update to the latest UI code which includes null-safe rendering for search stats
+  - Rebuild the UI: `docker compose build ui && docker compose up -d ui`
+
+### 11. FAISS Index Corruption
 
 - **Issue**: Backend crashes on startup with FAISS errors.
 - **Solution**:
