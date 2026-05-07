@@ -14,7 +14,25 @@ import yaml
 try:
     from stream_density import expand_scene_configs
 except ImportError:
-    expand_scene_configs = None
+    def expand_scene_configs(base_scene: dict, density: int) -> list:
+        """Inline fallback when stream_density module is not installed."""
+        if density <= 1:
+            return [base_scene]
+        configs = []
+        base_name = base_scene.get("scene_name", "scene")
+        base_cams = base_scene.get("cameras", [base_scene.get("camera_name", "camera")])
+        base_camera = base_cams[0] if isinstance(base_cams, list) else base_cams
+        for i in range(1, density + 1):
+            suffix = "" if i == 1 else f"-{i}"
+            scene = dict(base_scene)
+            scene["scene_name"] = f"{base_name}{suffix}"
+            cam_name = f"{base_camera}{suffix}"
+            if "cameras" in scene and isinstance(scene["cameras"], list):
+                scene["cameras"] = [cam_name]
+            else:
+                scene["camera_name"] = cam_name
+            configs.append(scene)
+        return configs
 
 logger = structlog.get_logger(__name__)
 
