@@ -274,7 +274,7 @@ services:
       - storewide-lp
     depends_on:
       - mediaserver
-    restart: "no"
+    restart: always
     pids_limit: 1000
 
   # ---- DLStreamer Pipeline Server (inference + MQTT publishing) ----
