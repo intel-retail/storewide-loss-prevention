@@ -4,8 +4,9 @@
 
 | # | Topic | Source Consumer | Purpose |
 |---|-------|-----------------|---------|
-| 1 | `scenescape/data/camera/+` | `EventConsumer` | Person detection + reid embeddings |
+| 1 | `scenescape/data/camera/+` | `EventConsumer` | Person detection + face reid embeddings (PRIMARY — used for FAISS matching) |
 | 2 | `scenescape/regulated/scene/+` | `ScenescapeRegionConsumer` | Scene tracking + region entry/exit |
+| 3 | `scenescape/external/+/person` | `EventConsumer` | Global UUID observability + movement event storage (monitoring only — NOT used for FAISS) |
 
 ---
 
@@ -51,13 +52,21 @@
 **What we extract:**
 1. `camera_id` — from the MQTT topic itself
 2. `person[].id` — SceneScape tracking ID
-3. `person[].sub_objects.face[].metadata.reid.embedding_vector` ← **preferred** (face embedding)
-4. `person[].metadata.reid.embedding_vector` ← **fallback** (full-body reid)
-5. Embedding decode: `base64.b64decode(str)` → 1024 bytes → `struct.unpack("256f", raw)` → **256-dim float vector**
+3. `person[].sub_objects.face[].metadata.reid.embedding_vector` ← **face embedding (only source used for FAISS)**
+4. Embedding decode: `base64.b64decode(str)` → 1024 bytes → `struct.unpack("256f", raw)` → **256-dim float vector**
+
+> **Important:** Body-level embeddings (`person[].metadata.reid.embedding_vector`) come from
+> `person-reidentification-retail-0277` — a DIFFERENT embedding space from the face model.
+> They are **not** used for FAISS matching. Only face sub-object embeddings from
+> `face-reidentification-retail-0095` are sent to FAISS.
 
 **What we do with it:**
 ```
-embedding vector → FAISS.search(top_k=10, threshold=0.6)
+embedding vector → DetectionIndex.claim_track(track_id, vector, frame)
+                   ├── if first time (SETNX gate)
+                   │     → store entry in FAISS + detection:frame:{faiss_id}
+                   └── always → update rolling exit vector + frame
+                → FAISS POI search (top_k=10, threshold=SIMILARITY_THRESHOLD)
                 → if match found → create alert → store in Redis
                 → always → store MovementEvent in Redis
 ```
@@ -170,23 +179,31 @@ KEY:  poi2faiss:{poi_id}         → SET{0, 1, ...}   (POI ID → all its FAISS 
 ### 4. Alert Cache & Dedup
 
 ```
-KEY:  alert:sent:{object_id}     → "1"    TTL=300s  (dedup: 1 alert per 5 min per person)
-KEY:  alert:{alert_id}           → full alert JSON   TTL=7 days
-KEY:  alerts:recent              → LIST of last 1000 alert JSONs  (no TTL)
+KEY:  alert:sent:{object_id}:{poi_id}  → "1"    TTL=configurable  (dedup: 1 alert per window per person+POI pair)
+KEY:  alert:{alert_id}                 → full alert JSON   TTL=7 days
+KEY:  alerts:recent                    → LIST of last 1000 alert JSONs  (no TTL)
 
 VALUE of alert:{alert_id}:
 {
+  "event_type": "poi_match_alert",
   "alert_id": "alert-uuid",
-  "event_type": "poi_match",
   "timestamp": "2026-04-27T08:05:12Z",
   "poi_id": "poi-a3f2c1b0",
-  "object_id": 1,
-  "camera_id": "Camera_02",
-  "region_name": "Camera_02",
-  "confidence": 0.87,
   "severity": "high",
-  "notes": "Shoplifter suspect",
-  "bounding_box": [200, 150, 280, 380]
+  "status": "New",
+  "match": {
+    "camera_id": "Camera_02",
+    "confidence": 0.91,
+    "similarity_score": 0.87,
+    "bbox": [200, 150, 280, 380],
+    "frame_number": 0,
+    "thumbnail_path": "/api/v1/thumbnail/cam:Camera_02:1"
+  },
+  "poi_metadata": {
+    "notes": "Shoplifter suspect",
+    "enrollment_date": "2026-04-20T08:00:00Z",
+    "total_previous_matches": 3
+  }
 }
 ```
 
@@ -197,10 +214,11 @@ VALUE of alert:{alert_id}:
 Cache-Aside pattern: avoids hitting FAISS on every video frame for the same tracked person.
 
 ```
-KEY:  object:{object_id}  → "poi-a3f2c1b0"   TTL=300s (5 minutes)
+KEY:  object:{object_id}  → JSON {"poi_id": "poi-a3f2c1b0", "similarity": 0.87}   TTL=configurable
 ```
 
-Once matched, subsequent frames for the same `object_id` skip FAISS entirely for 5 minutes.
+Once matched, subsequent frames for the same `object_id` skip FAISS entirely for the cache
+TTL period (compose default: 5 seconds).
 
 ---
 
@@ -277,17 +295,17 @@ DLStreamer Pipeline Server
               ▼
        poi-backend: EventConsumer
        ├── decode base64 → 256-dim float vector
-       │     (prefer face sub_object → fallback to person reid)
+       │     (face sub_object embedding only — body reid is NOT used for FAISS)
        ├── MatchingService.match_object(object_id, vector)
        │     ├── Cache hit (object:N)?  → skip FAISS, return cached poi_id
-       │     └── Cache miss → FAISS.search(top_k=10, threshold=0.6)
+       │     └── Cache miss → FAISS.search(top_k=10, threshold=SIMILARITY_THRESHOLD)
        │                         │
        │                    match found?
        │                    ├── YES → AlertService
-       │                    │           ├── dispatch to strategies (log/webhook/MQTT)
+       │                    │           ├── dispatch to ALL strategies (must all succeed)
        │                    │           ├── store  alert:{id}  in Redis
        │                    │           ├── push   alerts:recent list
-       │                    │           └── set    alert:sent:{obj_id}  TTL=300s
+       │                    │           └── set    alert:sent:{obj_id}:{poi_id}  TTL=configurable
        │                    └── NO  → nothing
        └── store event:{object_id}:{timestamp} in Redis  (always, TTL=7d)
 
@@ -316,10 +334,10 @@ SceneScape Scene Controller
 | `poi:index` | SET | none | All registered POI IDs |
 | `faiss2poi:{int}` | string | none | FAISS index → POI ID mapping |
 | `poi2faiss:{poi_id}` | SET | none | POI ID → FAISS indices |
-| `object:{obj_id}` | string | 300s | Cache-Aside: tracking ID → matched POI |
+| `object:{obj_id}` | string (JSON) | configurable | Cache-Aside: tracking ID → matched POI + similarity |
 | `alert:{alert_id}` | string (JSON) | 7 days | Full alert record |
 | `alerts:recent` | LIST | none | Last 1000 alerts (ring buffer) |
-| `alert:sent:{obj_id}` | string | 300s | Dedup flag: alert already fired |
+| `alert:sent:{obj_id}:{poi_id}` | string | configurable | Dedup flag: alert already fired for this person+POI pair |
 | `region:presence:{scene}:{region}:{obj}` | string (JSON) | 1h | Region entry timestamp |
 | `region:dwell:{obj}:{scene}:{region}:{date}` | string (JSON) | 7 days | Completed region visit with dwell time |
 | `detection:meta:{faiss_id}` | string (JSON) | 7 days | Detection metadata (track, camera, bbox) |

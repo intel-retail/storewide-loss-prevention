@@ -125,25 +125,45 @@ The `zone_config.json` file defines:
 make build REGISTRY=false
 ```
 
-> **Tip:** For first-time setup, `make demo` handles initialization, model download, image
-> build, and startup in one command.
+### Step 4: Download Models
 
-### Step 4: Launch the Application
+The OpenVINO face detection and re-identification models are required for both enrollment
+and DLStreamer inference:
 
 ```bash
-# All-in-one: init + download models + build + start
+make download-models
+```
+
+This downloads `face-detection-retail-0004`, `face-reidentification-retail-0095`,
+`person-detection-retail-0013`, and `person-reidentification-retail-0277` into the
+`models/` directory.
+
+### Step 5: Launch the Application
+
+The POI system connects to SceneScape via a shared Docker network. Create it if it
+doesn't exist:
+
+```bash
+docker network create storewide-lp 2>/dev/null || true
+```
+
+Then start the services:
+
+```bash
+# Start SceneScape + POI stack
+make up
+```
+
+For a complete first-time setup (init + models + build + start all services including
+the Storewide LP pipeline), you can use:
+
+```bash
 make demo
 ```
 
-For later runs, you can use:
-
-```bash
-# Start the POI stack after initial setup
-make up
-
-# Start SceneScape only
-make run-scenescape
-```
+> **Note:** `make demo` starts the full Storewide LP stack (swlp-service,
+> behavioral-analysis, gradio-ui) in addition to SceneScape. For the POI system only,
+> use `make build REGISTRY=false && make up`.
 
 This launches the following containers:
 
@@ -154,12 +174,11 @@ This launches the following containers:
 | `poi-redis`          | `redis:8.6.2`                | 6379  |
 | `poi-alert-service`  | `intel/alert-service:0.0.1`  | 8001  |
 
-> **Note:** Use `make up` for subsequent POI stack starts after the initial setup. If
-> SceneScape is not already running, the command brings it up without recreating existing
-> services. To manage SceneScape separately, use `make run-scenescape`. To also start the
-> MCP server, run `docker compose up -d mcp-server` separately.
+> **Note:** Use `make up` for subsequent starts after the initial build. SceneScape must
+> be running (either started by `make up` automatically, or via `make run-scenescape`
+> separately). To start the MCP server, run `docker compose up -d mcp-server` separately.
 
-### Step 5: Access the Interface
+### Step 6: Access the Interface
 
 Open your browser and navigate to:
 
@@ -173,7 +192,7 @@ The POI Backend API is available at:
 http://<host-ip>:8000/docs
 ```
 
-### Step 6: Stop Services
+### Step 7: Stop Services
 
 ```bash
 # Stop all services

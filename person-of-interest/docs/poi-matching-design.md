@@ -45,35 +45,26 @@ The POI (Person of Interest) system performs **real-time face re-identification*
 
 ## Offline Search Architecture
 
-The historical search API (`POST /api/v1/search`) uses a two-stage search pipeline:
+The historical search API (`POST /api/v1/search`) searches the all-detections index:
 
-### Stage 1: Enrolled POI Index
-Searches the enrolled POI FAISS index (`FAISSRepository`) using the query embedding.
+### Detection Index Search
+Searches the `DetectionIndexRepository` (every face seen by DLStreamer, 7-day retention):
+- Generates a query embedding from the uploaded image via OpenVINO
 - Uses cosine similarity (IndexFlatIP on L2-normalized vectors)
-- Applies configurable threshold (`similarity_threshold`, default 0.6)
-- Groups hits by POI ID, takes best similarity per POI
-- Applies margin check: rejects if `best - second_best < 0.05` (ambiguous match)
-- If a POI is identified, returns all recorded events for that POI
-
-### Stage 2: Detection Index (fallback)
-If no POI match is found, searches the all-detections index (`DetectionIndexRepository`):
-- Contains all face embeddings ever seen by DLStreamer (7-day TTL)
-- Groups results by track ID, keeping best entry hit per track
+- Applies configurable threshold (`SEARCH_SIMILARITY_THRESHOLD`, default 0.65)
+- Groups results by track/appearance ID, keeping best entry hit per track
+- Filters by time range if specified (start_time / end_time)
 - Searches exit vectors for matched tracks (rolling exit embeddings)
 - Builds grouped appearance cards with entry + exit frames and zone dwells
 - Returns sorted by overall similarity (max of entry and exit)
 
-### Track Purity Filter
-DLStreamer reuses integer track IDs across different physical persons. To prevent
-false positives from track ID reuse:
-- For each track, counts events per POI from Redis
-- Computes purity = our_count / total_count
-- Skips tracks with purity < 40% (clearly dominated by another person)
+> See **§10. Offline Search Pipeline** for the full low-level design.
 
-### Multi-Embedding Detection Index
-Each tracked person stores up to 5 face embeddings (spaced 10 seconds apart) for
-more robust matching. The detection index uses a counter + cooldown approach in
-`claim_track()` to avoid storing too many embeddings from the same moment.
+### Detection Index Lifecycle
+Each tracked person stores one entry embedding (on first detection) with additional
+embeddings stored up to `DETECTION_EMBEDDINGS_PER_TRACK` (default 5), spaced by
+`DETECTION_EMBEDDING_INTERVAL` seconds (default 10). The `claim_track()` SETNX gate
+prevents the same appearance from being stored repeatedly.
 
 ## Entry/Exit Frame Architecture
 
@@ -111,7 +102,7 @@ POIService.create_poi()
   │   │   └─ Select highest-confidence face
   │   ├─ Crop face region
   │   ├─ Resize to 128×128
-  │   ├─ Normalize: float32, /255.0  ← pixel values to [0,1]
+  │   ├─ Convert to float32 (raw [0,255] — NO /255 scaling)
   │   ├─ Face Re-ID inference (face-reidentification-retail-0095)
   │   │   └─ Output: 256-d float32 vector
   │   ├─ L2-normalize embedding (unit vector)
@@ -150,7 +141,7 @@ threshold: 0.5
 
 # Face Re-Identification
 model: face-reidentification-retail-0095 (FP32)
-input: [1, 3, 128, 128] BGR, float32, /255.0
+input: [1, 3, 128, 128] BGR, float32 (raw pixel values [0,255] — no /255 scaling)
 output: [1, 256] — 256-dimensional embedding
 post-processing: L2-normalize → unit vector
 ```
@@ -496,12 +487,216 @@ Thumbnail: MQTT getimage → ring buffer lookup → bbox crop → Redis store
 
 | Parameter | Env Var | Default | Description |
 |-----------|---------|---------|-------------|
-| Similarity threshold | `SIMILARITY_THRESHOLD` | 0.6 | Minimum cosine similarity for match |
+| Similarity threshold | `SIMILARITY_THRESHOLD` | 0.6 | Minimum cosine similarity for online match |
+| Search threshold | `SEARCH_SIMILARITY_THRESHOLD` | 0.65 | Minimum cosine similarity for offline search |
 | Face confidence filter | (hardcoded) | 0.80 | Minimum DLStreamer face detection confidence |
 | Object cache TTL | `OBJECT_CACHE_TTL` | 300s | Cache matched object_id → poi_id |
 | Alert dedup TTL | `ALERT_DEDUP_TTL` | 300s | Suppress duplicate alerts |
 | Alert-service dedup window | config.yaml | 60s | Field-hash dedup at alert-service |
 | FAISS dimension | (hardcoded) | 256 | face-reidentification-retail-0095 output |
-| FAISS top_k | `SEARCH_TOP_K` | 10 | Max candidates from FAISS search |
+| FAISS top_k (online) | `SEARCH_TOP_K` | 10 | Max candidates from POI FAISS search |
+| FAISS top_k (offline) | `DETECTION_INDEX_TOP_K` | 20 | Max candidates from detection index |
+| Track seen TTL | `TRACK_SEEN_TTL` | 600s | Dedup gate for detection index per track |
+| Embeddings per track | `DETECTION_EMBEDDINGS_PER_TRACK` | 5 | Max stored embeddings per appearance |
+| Embedding interval | `DETECTION_EMBEDDING_INTERVAL` | 10s | Min seconds between stored embeddings |
 | Thumbnail buffer | (hardcoded) | 60 frames | Ring buffer for MQTT image frames |
 | Thumbnail poll interval | (hardcoded) | 0.08s | getimage command frequency |
+
+---
+
+## 10. Offline Search Pipeline (Historical Investigation)
+
+The offline search API (`POST /api/v1/search`) provides historical person lookup.
+Unlike online matching which compares against enrolled POIs only, offline search queries
+the **detection index** — a FAISS index containing every face ever seen by any camera
+(7-day retention via Redis TTL).
+
+### Architecture
+
+```
+                                   ┌─────────────────────────┐
+User uploads suspect image ────────▶  POST /api/v1/search    │
+                                   └───────────┬─────────────┘
+                                               │
+                                               ▼
+                                   ┌─────────────────────────┐
+                                   │  EmbeddingModelFactory   │
+                                   │  generate_from_bytes()   │
+                                   │  → face detect → crop    │
+                                   │  → resize 128×128        │
+                                   │  → reid model → 256-d    │
+                                   │  → L2-normalize          │
+                                   └───────────┬─────────────┘
+                                               │ query_vector
+                                               ▼
+                              ┌──────────────────────────────────┐
+                              │     DetectionIndexRepository      │
+                              │     (FAISS IndexFlatIP, in-mem)   │
+                              │                                    │
+                              │  .search(query_vector, top_k=20)  │
+                              │  → L2-normalize query              │
+                              │  → Inner Product search            │
+                              │  → filter by Redis existence       │
+                              └───────────────┬──────────────────┘
+                                              │ hits: [(faiss_id, similarity)]
+                                              ▼
+                              ┌──────────────────────────────────┐
+                              │  Group by track_id               │
+                              │  Keep best entry hit per track   │
+                              │  Filter: similarity ≥ threshold  │
+                              │  Filter: timestamp in range      │
+                              └───────────────┬──────────────────┘
+                                              │ best_entry per track
+                                              ▼
+                              ┌──────────────────────────────────┐
+                              │  search_exits(query_vec, tracks) │
+                              │  → load exit vectors from Redis  │
+                              │  → compute cosine similarity     │
+                              │  → return {track_id: exit_sim}   │
+                              └───────────────┬──────────────────┘
+                                              │
+                                              ▼
+                              ┌──────────────────────────────────┐
+                              │  Build grouped appearances       │
+                              │  → entry frame URL               │
+                              │  → exit frame URL                │
+                              │  → zone dwell information        │
+                              │  → sort by max(entry, exit) sim  │
+                              └──────────────────────────────────┘
+```
+
+### Detection Index Lifecycle
+
+The detection index stores embeddings for **every face** seen by DLStreamer cameras,
+providing a searchable history independent of POI enrollment.
+
+```
+Camera detection event (face embedding)
+    │
+    ▼
+EventConsumer._handle_camera_event()
+    │
+    ├── claim_track(object_id) ← Redis SETNX with track_seen_ttl
+    │     │
+    │     ├── First time (NX succeeds):
+    │     │     ├── Create unique appearance_id = "{object_id}@{timestamp}"
+    │     │     ├── set_active_appearance(object_id, appearance_id)
+    │     │     ├── DetectionIndex.add(vector, camera_id, appearance_id, timestamp, bbox)
+    │     │     │     ├── L2-normalize vector
+    │     │     │     ├── Add to in-memory FAISS (IndexIDMap)
+    │     │     │     ├── Persist metadata → detection:meta:{faiss_id}  (7-day TTL)
+    │     │     │     └── Persist vector bytes → detection:vec:{faiss_id}  (7-day TTL)
+    │     │     └── store_frame(faiss_id, b64_jpeg) → detection:frame:{faiss_id}
+    │     │
+    │     └── Already claimed (NX fails):
+    │           └── Retrieve appearance_id from get_active_appearance(object_id)
+    │
+    └── update_exit(appearance_id, vector, camera_id, timestamp, bbox, frame)
+          ├── Overwrite detection:exit_vec:{appearance_id}   (rolling)
+          ├── Overwrite detection:exit_meta:{appearance_id}  (rolling)
+          └── Overwrite detection:exit_frame:{appearance_id} (rolling)
+              TTL = track_seen_ttl + 300s (buffer for promoter)
+```
+
+### Appearance ID vs Object ID
+
+| Concept | Format | Purpose |
+|---------|--------|---------|
+| `object_id` | `uuid` or `cam:{camera}:{int_id}` | Stable within one appearance window |
+| `appearance_id` | `{object_id}@{unix_timestamp}` | Globally unique per appearance — prevents cross-person contamination when tracker IDs are recycled |
+
+The `@timestamp` suffix ensures that if DLStreamer reuses `person_id=1` for a different
+physical person (after the gate expires), the new person gets a new appearance_id.
+
+### Entry vs Exit Vectors
+
+| | Entry | Exit |
+|---|---|---|
+| **When stored** | First detection (claim_track succeeds) | Every detection (rolling overwrite) |
+| **Key pattern** | `detection:vec:{faiss_id}` + FAISS | `detection:exit_vec:{appearance_id}` |
+| **Frame** | `detection:frame:{faiss_id}` | `detection:exit_frame:{appearance_id}` |
+| **In FAISS** | Yes (permanent, 7-day TTL via Redis check) | No (Redis only, queried at search time) |
+| **TTL** | 7 days (appearance_ttl_days × 86400) | track_seen_ttl + 300s |
+| **Search method** | `DetectionIndex.search()` (FAISS inner product) | `search_exits()` (direct cosine computation) |
+
+### Exit Promoter
+
+The `promote_exits()` method is called periodically to move exit vectors into the FAISS
+index after a person has left (gate expired):
+
+```
+Periodic task (every 60s)
+    │
+    ├── Scan all detection:exit_vec:* keys
+    ├── For each track_id:
+    │     ├── Check gate: detection:track:seen:{base_object_id}
+    │     │     ├── Gate alive → skip (person still in frame)
+    │     │     └── Gate expired → person has left
+    │     ├── Check already promoted: detection:exit_promoted:{track_id} (NX key)
+    │     │     ├── Exists → skip (already promoted)
+    │     │     └── Set NX → proceed
+    │     ├── Read exit vector bytes
+    │     ├── Add to FAISS with role='exit' metadata
+    │     └── Copy exit frame to detection:frame:{new_faiss_id}
+    │
+    └── Return count of promoted vectors
+```
+
+This gives the offline search TWO matching opportunities per appearance:
+1. The entry embedding (first seen)
+2. The exit embedding (last seen before leaving)
+
+### Similarity Scoring
+
+```
+For each appearance in search results:
+    entry_similarity = FAISS inner product (query vs entry vector)
+    exit_similarity  = direct cosine (query vs rolling exit vector)
+    overall_similarity = max(entry_similarity, exit_similarity)
+
+Appearances are sorted by overall_similarity descending.
+```
+
+### UUID Resolution for Track Keys
+
+SceneScape regulated scene topic provides global UUIDs for tracked persons across
+cameras. The MQTT consumer resolves these via IoU matching:
+
+```
+ScenescapeRegionConsumer (scenescape/regulated/scene/+)
+    │
+    ├── Extracts per-person camera_bounds from message
+    └── Stores in Redis: uuid_camera_bounds:{camera_id} → {uuid: bbox}
+
+EventConsumer._handle_camera_event()
+    │
+    ├── Gets person bounding_box_px from detection
+    ├── Calls event_repo.get_uuid_for_camera_bbox(camera_id, bbox, iou_threshold=0.3)
+    │     ├── Loads all UUIDs with camera_bounds for this camera
+    │     ├── Computes IoU between detection bbox and each UUID's camera_bounds
+    │     └── Returns UUID with highest IoU (if ≥ 0.3)
+    │
+    ├── UUID found → object_id = uuid (globally unique, never recycled)
+    └── No UUID   → object_id = "cam:{camera_id}:{person_int_id}" (fallback)
+```
+
+---
+
+## 11. Online vs Offline Comparison
+
+| Aspect | Online (Real-Time) | Offline (Historical Search) |
+|--------|-------------------|-----------------------------|
+| **Trigger** | Every MQTT face detection message | User uploads image via API |
+| **FAISS Index** | POI index (enrolled suspects only) | Detection index (all faces, 7-day retention) |
+| **Index type** | Disk-persisted (`IndexFlatIP` + `IndexIDMap`) | In-memory, rebuilt from Redis on restart |
+| **Embedding source** | DLStreamer face sub_object (base64 decoded) | OpenVINO inference on uploaded image |
+| **Normalization** | Both enrollment and query L2-normalized | Both stored vectors and query L2-normalized |
+| **Similarity metric** | Cosine (Inner Product on L2-normed vectors) | Cosine (same) |
+| **Threshold** | `SIMILARITY_THRESHOLD` (default 0.55) | `SEARCH_SIMILARITY_THRESHOLD` (default 0.65) |
+| **Top-K** | `SEARCH_TOP_K` (default 10) | `DETECTION_INDEX_TOP_K` (default 20) |
+| **Caching** | Cache-Aside (object:{id} → poi, TTL=5s) | None (one-shot query) |
+| **Output** | Alert (WebSocket + log) | JSON appearance timeline with frames |
+| **Grouping** | Per POI ID | Per track/appearance ID |
+| **Frame evidence** | Thumbnail capture from MQTT/RTSP | Entry + exit frames from Redis |
+| **Model** | face-reidentification-retail-0095 (256-d) | face-reidentification-retail-0095 (256-d) |
+| **Preprocessing** | DLStreamer resize (128×128, raw float32) | OpenVINO resize (128×128, raw float32) |

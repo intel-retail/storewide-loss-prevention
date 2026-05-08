@@ -63,11 +63,10 @@
 **What we do with it:**
 ```
 embedding vector → DetectionIndex.claim_track(track_id, vector, frame)
-                   ├── if track_count < 5 AND cooldown elapsed (10s)
-                   │     → store in FAISS, increment count
-                   │     → store detection:frame:{faiss_id}
-                   └── always → update exit vector + frame
-                → FAISS.search(top_k=10, threshold=0.6)
+                   ├── if first time (SETNX gate)
+                   │     → store entry in FAISS + detection:frame:{faiss_id}
+                   └── always → update rolling exit vector + frame
+                → FAISS POI search (top_k=10, threshold=SIMILARITY_THRESHOLD)
                 → if match found → create alert → store in Redis
                 → always → store MovementEvent in Redis
 ```
@@ -299,7 +298,7 @@ DLStreamer Pipeline Server
        │     (face sub_object embedding only — body reid is NOT used for FAISS)
        ├── MatchingService.match_object(object_id, vector)
        │     ├── Cache hit (object:N)?  → skip FAISS, return cached poi_id
-       │     └── Cache miss → FAISS.search(top_k=10, threshold=0.68)
+       │     └── Cache miss → FAISS.search(top_k=10, threshold=SIMILARITY_THRESHOLD)
        │                         │
        │                    match found?
        │                    ├── YES → AlertService

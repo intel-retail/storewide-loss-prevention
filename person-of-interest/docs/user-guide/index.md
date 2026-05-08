@@ -56,8 +56,87 @@ processing stays local.
 This section provides a high-level architecture view of the POI Re-identification system
 and how it integrates with Intel® SceneScape and DLStreamer pipelines.
 
-<!-- TODO: Add architecture diagram to ./_assets/poi-architecture.png -->
-<!-- ![High-Level System Diagram](./_assets/poi-architecture.png) -->
+### System Architecture
+
+```
+┌───────────────────────────────────────────────────────────────────────────────┐
+│                        Intel® SceneScape Platform                              │
+│                                                                               │
+│  ┌─────────────┐    ┌──────────────────────────────────────────┐              │
+│  │  IP Cameras │───▶│ DLStreamer Pipeline Server                │              │
+│  │  (RTSP)     │    │  ├─ person-detection-retail-0013         │              │
+│  └─────────────┘    │  ├─ face-detection-retail-0004           │              │
+│                     │  ├─ face-reidentification-retail-0095    │              │
+│                     │  ├─ person-reidentification-retail-0277  │              │
+│                     │  └─ gvatrack (short-term-imageless)      │              │
+│                     └────────────────┬─────────────────────────┘              │
+│                                      │ MQTT                                    │
+│  ┌─────────────────┐                 │                                        │
+│  │ Scene Controller │────────────────┼── scenescape/regulated/scene/+         │
+│  │ (UUID tracking)  │                │                                        │
+│  └─────────────────┘                 ├── scenescape/data/camera/+             │
+│                                      │                                        │
+│  ┌─────────────────┐                 │                                        │
+│  │ MQTT Broker     │◀────────────────┘                                        │
+│  │ (Mosquitto)     │                                                          │
+│  └────────┬────────┘                                                          │
+└───────────┼───────────────────────────────────────────────────────────────────┘
+            │
+            │ MQTT (TLS optional)
+            ▼
+┌───────────────────────────────────────────────────────────────────────────────┐
+│                         POI Re-identification System                           │
+│                                                                               │
+│  ┌──────────────────────────────────────────────────────────────────┐         │
+│  │                    poi-backend (FastAPI, :8000)                    │         │
+│  │                                                                    │         │
+│  │  ┌─────────────────┐  ┌────────────────┐  ┌──────────────────┐   │         │
+│  │  │ EventConsumer   │  │ MatchingService │  │ DetectionIndex   │   │         │
+│  │  │ (MQTT → FAISS)  │──▶│ (Cache-Aside)  │  │ (offline search) │   │         │
+│  │  └─────────────────┘  └───────┬────────┘  └────────┬─────────┘   │         │
+│  │                               │                     │              │         │
+│  │  ┌─────────────────┐  ┌──────▼─────────┐  ┌───────▼──────────┐   │         │
+│  │  │ RegionConsumer  │  │ POI FAISS Index │  │ Detection FAISS  │   │         │
+│  │  │ (zone tracking) │  │ (enrolled POIs) │  │ (all faces, 7d)  │   │         │
+│  │  └─────────────────┘  └────────────────┘  └──────────────────┘   │         │
+│  │                                                                    │         │
+│  │  ┌─────────────────┐  ┌────────────────┐  ┌──────────────────┐   │         │
+│  │  │ AlertService    │  │ OpenVINO       │  │ Search API       │   │         │
+│  │  │ (observer, dedup│  │ (enrollment)   │  │ (offline query)  │   │         │
+│  │  └────────┬────────┘  └────────────────┘  └──────────────────┘   │         │
+│  └───────────┼────────────────────────────────────────────────────────┘         │
+│              │ HTTP                                                             │
+│  ┌───────────▼────────┐  ┌────────────────┐  ┌──────────────────┐             │
+│  │ poi-alert-service  │  │ poi-redis      │  │ poi-ui (React)   │             │
+│  │ (:8001)            │  │ (:6379)        │  │ (:3000)          │             │
+│  │ WebSocket → UI     │  │ metadata/cache │  │ operator console │             │
+│  └────────────────────┘  └────────────────┘  └──────────────────┘             │
+└───────────────────────────────────────────────────────────────────────────────┘
+```
+
+### Data Flow: Online (Real-Time POI Detection)
+
+```
+Camera → DLStreamer → MQTT → EventConsumer → FAISS POI Search → AlertService → UI
+```
+
+1. DLStreamer processes camera frames at ~10 FPS, generating face embeddings (256-d).
+2. The MQTT consumer extracts face embeddings from detection messages.
+3. The MatchingService checks the Cache-Aside cache, then performs FAISS cosine search
+   against enrolled POI embeddings.
+4. On match (≥ threshold), an alert is dispatched via the Alert Service to the UI.
+
+### Data Flow: Offline (Historical Search)
+
+```
+User uploads image → OpenVINO → Detection FAISS Search → Group by track → Return timeline
+```
+
+1. User uploads a face image via the Search API.
+2. OpenVINO generates a 256-d query embedding (same model as DLStreamer).
+3. The detection index (all faces seen in last 7 days) is searched.
+4. Results are grouped by track/appearance, with entry and exit frames.
+5. A timeline of appearances is returned, sorted by similarity.
 
 ### Key Components
 
