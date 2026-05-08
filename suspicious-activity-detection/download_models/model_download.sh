@@ -118,10 +118,17 @@ update_graph_pbtxt_device() {
     current_device=$(grep -oP '(?<=device: ")[^"]+' "${graph_file}" || true)
     if [ "${current_device}" = "${TARGET_DEVICE}" ]; then
         echo "  ✓ graph.pbtxt device already set to ${TARGET_DEVICE}"
-        return 0
+    else
+        sed -i "s|device: \"${current_device}\"|device: \"${TARGET_DEVICE}\"|g" "${graph_file}"
+        echo "  ✓ graph.pbtxt device updated: ${current_device} → ${TARGET_DEVICE}"
     fi
-    sed -i "s|device: \"${current_device}\"|device: \"${TARGET_DEVICE}\"|g" "${graph_file}"
-    echo "  ✓ graph.pbtxt device updated: ${current_device} → ${TARGET_DEVICE}"
+    # Ensure max_num_seqs >= 2 to prevent stuck LLMExecutor on cancelled requests
+    local current_seqs
+    current_seqs=$(grep -oP '(?<=max_num_seqs: )\d+' "${graph_file}" || echo "0")
+    if [ "${current_seqs}" -lt 2 ]; then
+        sed -i "s|max_num_seqs: ${current_seqs}|max_num_seqs: 2|g" "${graph_file}"
+        echo "  ✓ graph.pbtxt max_num_seqs updated: ${current_seqs} → 2"
+    fi
 }
 
 ###############################################
@@ -209,14 +216,14 @@ else
             --pipeline_type VLM_CB \
             "${target_device_args[@]}" \
             --cache_size 32 \
-            --max_num_seqs 1 \
+            --max_num_seqs 2 \
             --enable_prefix_caching True \
             --config_file_path "${VLM_MODELS_DIR}/config.json" \
             --model_repository_path "${VLM_MODELS_DIR}" \
             --model_name "${VLM_MODEL_NAME}"
 
         if check_vlm_model "${VLM_TARGET_PATH}"; then
-            patch_graph_pbtxt_paths "${VLM_MODEL_NAME}"
+            update_graph_pbtxt_device "${VLM_MODEL_NAME}"
             echo "  ✓ VLM export successful"
         else
             echo "  ✗ VLM export failed"

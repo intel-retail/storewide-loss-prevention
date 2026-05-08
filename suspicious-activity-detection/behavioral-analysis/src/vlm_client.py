@@ -8,6 +8,7 @@ structured JSON responses. Knows nothing about specific behaviors —
 the prompt and response schema are fully driven by configuration.
 """
 
+import asyncio
 import base64
 import json
 import logging
@@ -37,6 +38,10 @@ class VLMClient:
     """
     Async client for OpenAI-compatible VLM endpoints (OVMS).
 
+    Includes a circuit breaker that opens after consecutive failures,
+    preventing request storms against a broken OVMS instance. The
+    breaker auto-recovers by probing OVMS health after a cooldown.
+
     Usage:
         client = VLMClient(endpoint="http://ovms-vlm:8000", model_name="Qwen/...")
         result = await client.analyze(frames, prompt="Describe what you see.")
@@ -50,6 +55,8 @@ class VLMClient:
         max_tokens: int = 500,
         temperature: float = 0.1,
         max_image_size: int = 512,
+        circuit_breaker_threshold: int = 3,
+        circuit_breaker_cooldown: float = 30.0,
     ):
         self.endpoint = endpoint.rstrip("/")
         self.model_name = model_name
@@ -57,6 +64,13 @@ class VLMClient:
         self.max_tokens = max_tokens
         self.temperature = temperature
         self.max_image_size = max_image_size
+
+        # Circuit breaker state
+        self._consecutive_failures = 0
+        self._circuit_open = False
+        self._circuit_opened_at = 0.0
+        self._cb_threshold = circuit_breaker_threshold
+        self._cb_cooldown = circuit_breaker_cooldown
 
     def _encode_frame(self, frame: np.ndarray) -> str:
         """Resize and encode a frame as base64 JPEG."""
@@ -95,6 +109,78 @@ class VLMClient:
 
         return [{"role": "user", "content": content}]
 
+    async def _check_circuit_breaker(self) -> Optional[VLMResult]:
+        """Check if circuit breaker is open. Returns error result if open, None if closed."""
+        if not self._circuit_open:
+            return None
+
+        elapsed = time.perf_counter() - self._circuit_opened_at
+        if elapsed < self._cb_cooldown:
+            logger.debug(
+                "Circuit breaker OPEN — skipping VLM request (%.0fs remaining)",
+                self._cb_cooldown - elapsed,
+            )
+            return VLMResult(
+                raw_response="",
+                success=False,
+                error=f"Circuit breaker open ({self._cb_cooldown - elapsed:.0f}s remaining)",
+            )
+
+        # Cooldown elapsed — try a health probe before closing circuit
+        logger.info("Circuit breaker cooldown elapsed, probing VLM health...")
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                r = await client.post(
+                    f"{self.endpoint}/v3/chat/completions",
+                    json={
+                        "model": self.model_name,
+                        "messages": [{"role": "user", "content": "hi"}],
+                        "max_tokens": 5,
+                    },
+                )
+                if r.status_code == 200:
+                    self._circuit_open = False
+                    self._consecutive_failures = 0
+                    logger.info("Circuit breaker CLOSED — VLM recovered")
+                    return None
+                else:
+                    # Still broken, reset cooldown
+                    self._circuit_opened_at = time.perf_counter()
+                    logger.warning("VLM still unhealthy (HTTP %s), circuit stays open", r.status_code)
+                    return VLMResult(
+                        raw_response="",
+                        success=False,
+                        error=f"VLM unhealthy after cooldown (HTTP {r.status_code})",
+                    )
+        except Exception as e:
+            self._circuit_opened_at = time.perf_counter()
+            logger.warning("VLM health probe failed: %s, circuit stays open", e)
+            return VLMResult(
+                raw_response="",
+                success=False,
+                error=f"VLM health probe failed: {e}",
+            )
+
+    def _record_success(self):
+        """Record a successful VLM call."""
+        self._consecutive_failures = 0
+        if self._circuit_open:
+            self._circuit_open = False
+            logger.info("Circuit breaker CLOSED after successful response")
+
+    def _record_failure(self, error: str):
+        """Record a failed VLM call and potentially open the circuit."""
+        self._consecutive_failures += 1
+        if self._consecutive_failures >= self._cb_threshold and not self._circuit_open:
+            self._circuit_open = True
+            self._circuit_opened_at = time.perf_counter()
+            logger.error(
+                "Circuit breaker OPENED after %d consecutive failures (cooldown=%.0fs). Last error: %s",
+                self._consecutive_failures,
+                self._cb_cooldown,
+                error,
+            )
+
     async def analyze(
         self,
         frames: list[np.ndarray],
@@ -116,6 +202,11 @@ class VLMClient:
                 success=False,
                 error="No frames provided",
             )
+
+        # Circuit breaker: skip if OVMS is known to be broken
+        cb_result = await self._check_circuit_breaker()
+        if cb_result is not None:
+            return cb_result
 
         messages = self._build_messages(frames, prompt)
 
@@ -153,6 +244,7 @@ class VLMClient:
             # Try to parse as JSON
             parsed = self._parse_json_response(raw_text)
 
+            self._record_success()
             return VLMResult(
                 raw_response=raw_text,
                 parsed=parsed,
@@ -173,6 +265,7 @@ class VLMClient:
                 "VLM request timed out after %.0fms (timeout=%ss, frames=%d)",
                 latency_ms, self.timeout, len(frames),
             )
+            self._record_failure("timeout")
             return VLMResult(
                 raw_response="",
                 success=False,
@@ -184,6 +277,7 @@ class VLMClient:
                 "VLM HTTP error %s after %.0fms",
                 e.response.status_code, latency_ms,
             )
+            self._record_failure(f"HTTP {e.response.status_code}")
             return VLMResult(
                 raw_response="",
                 success=False,
@@ -192,6 +286,7 @@ class VLMClient:
         except Exception as e:
             latency_ms = (time.perf_counter() - t0) * 1000.0
             logger.error("VLM request failed after %.0fms: %s", latency_ms, e)
+            self._record_failure(str(e))
             return VLMResult(
                 raw_response="",
                 success=False,
