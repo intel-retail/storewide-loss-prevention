@@ -395,6 +395,11 @@ endif
 
 .PHONY: up
 up:
+	@docker network create storewide-lp 2>/dev/null || true
+	@if [ ! -f .env ]; then \
+		echo "$(BLUE)=== Creating .env from .env.example ===$(NC)"; \
+		cp .env.example .env; \
+	fi
 	@echo "$(BLUE)=== Starting SceneScape services ===$(NC)"
 	-$(COMPOSE_SCENESCAPE) up -d --no-recreate
 	@echo ""
@@ -407,6 +412,13 @@ up:
 	@echo "  POI UI:          http://localhost:3000"
 	@echo "  Alert Service:   http://localhost:8001"
 	@echo ""
+	@if [ -f docker/.env ]; then \
+		SUPASS=$$(grep '^SUPASS=' docker/.env 2>/dev/null | cut -d= -f2-); \
+		if [ -n "$$SUPASS" ]; then \
+			echo "  SceneScape Login: admin / $$SUPASS"; \
+			echo ""; \
+		fi; \
+	fi
 	@echo "To stop: make down"
 
 .PHONY: down
