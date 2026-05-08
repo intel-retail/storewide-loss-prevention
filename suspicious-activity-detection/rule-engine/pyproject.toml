@@ -1,0 +1,18 @@
+[project]
+name = "rule-engine"
+version = "0.1.0"
+description = "YAML-driven rule evaluation service"
+requires-python = ">=3.11"
+
+dependencies = [
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.30.0",
+    "PyYAML>=6.0",
+    "structlog>=24.1.0",
+]
+
+[tool.setuptools]
+packages = ["rule_engine"]
+
+[tool.setuptools.package-dir]
+rule_engine = "."

@@ -1,9 +1,4 @@
 {
-  "_comment": "scene_name and scene_zip support comma-separated values for multiple scenes",
-  "scene_name": "storewide loss prevention",
-  "camera_name": "lp-camera1",
-  "scene_zip": "storewide-loss-prevention.zip",
-  "video_file": "lp-camera1.mp4",
   "scenescape_api": {
     "base_url": "https://web.scenescape.intel.com",
     "auth_path": "/api/v1/auth",
@@ -11,6 +6,11 @@
     "regions_path": "/api/v1/regions",
     "verify_ssl": false
   },
+  "stream_density": 1,
+  "scene_name": "storewide loss prevention",
+  "scene_zip": "storewide-loss-prevention.zip",
+  "camera_name": "lp-camera1",
+  "video_file": "lp-camera1.mp4",
   "zones": {
     "aisle1": "HIGH_VALUE",
     "aisle2": "CHECKOUT"

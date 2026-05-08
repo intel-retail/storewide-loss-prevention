@@ -1,0 +1,116 @@
+# Copyright (C) 2026 Intel Corporation
+# SPDX-License-Identifier: Apache-2.0
+#
+# Behavioral Analysis — Pattern Configuration
+#
+# Define activity patterns using declarative pose rules.
+# No code changes required — add new patterns here and restart.
+#
+# See config/README.md for the full authoring guide.
+
+patterns:
+  shelf_to_waist:
+    description: "Hand moves from shelf level to waist/pocket area"
+    enabled: true
+    alert_type: CONCEALMENT
+
+    pose:
+      per_side: true
+      phases:
+        - name: hand_raised
+          min_frames: 2
+          conditions:
+            - subject: wrist
+              relation: above
+              reference: waist_midpoint
+
+        - name: hand_at_waist
+          min_frames: 2
+          conditions:
+            - subject: wrist
+              relation: near
+              reference: waist_midpoint
+              threshold: 0.6
+
+    vlm:
+      enabled: true
+      num_frames: 4
+      prompt: |
+        You are a retail loss-prevention analyst reviewing CCTV evidence.
+        You will see 4 surveillance frames of ONE person, in chronological order
+        (frame 1 = earliest, frame 4 = latest).
+
+        TASK: Decide whether this person is performing a CONCEALMENT action
+        (taking merchandise from a shelf/display and moving it toward their body,
+        waist, pocket, bag, or under clothing — i.e. hiding it rather than carrying
+        it openly toward checkout or a basket).
+
+        Evidence to look for (the more present, the higher the confidence):
+        1. Hand/arm reaches toward a shelf, rack, or product display in an early frame.
+        2. Hand returns holding or appearing to hold an object.
+        3. The object/hand is moved toward the waist, pocket, jacket, bag, sleeve,
+           waistband, or under a garment — NOT toward a visible shopping basket,
+           cart, or held openly at side.
+        4. Body posture suggests shielding the action (turning away from camera,
+           hunching, using the other hand to cover).
+
+        Counter-evidence (lower the confidence):
+        - Item is placed openly in a hand-held basket, cart, or kept visible.
+        - Person is just browsing, adjusting clothing/phone/personal item, or
+          putting their own belongings (phone, wallet) away.
+        - No shelf interaction is visible at all.
+        - Hands stay above waist throughout / no downward motion to body.
+
+        Calibration:
+        - confidence >= 0.8 : multiple strong cues, clear shelf-to-body motion.
+        - 0.5 - 0.79        : plausible concealment but some ambiguity.
+        - < 0.5             : weak / inconclusive — set "suspicious": false.
+
+        Respond ONLY with a single JSON object, no prose, no markdown, no code fence:
+        {
+          "suspicious": true | false,
+          "confidence": 0.0,
+          "reasoning": "one short sentence citing the specific frames and cues you observed"
+        }
+      response_fields:
+        - suspicious
+        - confidence
+        - reasoning
+
+  loitering:
+    description: "Person remains stationary in a restricted area for too long"
+    enabled: false
+    alert_type: LOITERING
+
+    pose:
+      per_side: false
+      window_size: 15
+      phases:
+        - name: stationary
+          min_frames: 15
+          conditions:
+            - subject: left_hip
+              relation: stationary
+              threshold: 0.05
+
+    vlm:
+      enabled: true
+      num_frames: 3
+      prompt: |
+        Analyze these sequential frames of a person in a store.
+
+        Determine if the person appears to be loitering:
+        - Are they standing idle in one place for an extended period?
+        - Do they appear to be waiting without a clear purpose?
+        - Are they near high-value merchandise or restricted areas?
+
+        Respond ONLY with valid JSON in this exact format:
+        {
+          "suspicious": true or false,
+          "confidence": 0.0 to 1.0,
+          "reasoning": "brief description of what you observe"
+        }
+      response_fields:
+        - suspicious
+        - confidence
+        - reasoning
