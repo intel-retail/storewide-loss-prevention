@@ -6,9 +6,12 @@ import json
 import os
 import time
 import threading
+import base64
+import io
 from collections import deque
 
 import paho.mqtt.client as mqtt
+from PIL import Image, ImageDraw, ImageFont
 
 # Use Docker service name for container-to-container communication
 LP_BASE_URL = os.environ.get("LP_BASE_URL", "http://storewide-loss-prevention:8082")
@@ -22,6 +25,10 @@ MQTT_HOST = os.environ.get("MQTT_HOST", "broker.scenescape.intel.com")
 MQTT_PORT = int(os.environ.get("MQTT_PORT", "1883"))
 MQTT_ALERT_TOPIC = os.environ.get("MQTT_ALERT_TOPIC", "alerts/#")
 
+# MQTT topics for live video with detections
+MQTT_CAMERA_TOPIC = os.environ.get("MQTT_CAMERA_TOPIC", "scenescape/image/camera/+")
+MQTT_SCENE_TOPIC = os.environ.get("MQTT_SCENE_TOPIC", "scenescape/regulated/scene/+")
+
 MAX_RETRIES = 5
 RETRY_DELAY = 3  # seconds
 
@@ -29,22 +36,43 @@ RETRY_DELAY = 3  # seconds
 _mqtt_alerts: deque = deque(maxlen=500)
 _mqtt_lock = threading.Lock()
 
+# Thread-safe live video frame + detections
+_latest_frame = {}      # {camera_id: base64_jpeg}
+_latest_detections = []  # list of objects from regulated scene data
+_video_lock = threading.Lock()
+
 
 def _on_mqtt_connect(client, userdata, flags, rc):
     if rc == 0:
         client.subscribe(MQTT_ALERT_TOPIC, qos=1)
-        print(f"[MQTT] Subscribed to {MQTT_ALERT_TOPIC}")
+        client.subscribe(MQTT_CAMERA_TOPIC, qos=0)
+        client.subscribe(MQTT_SCENE_TOPIC, qos=0)
+        print(f"[MQTT] Subscribed to {MQTT_ALERT_TOPIC}, {MQTT_CAMERA_TOPIC}, {MQTT_SCENE_TOPIC}")
     else:
         print(f"[MQTT] Connect failed, rc={rc}")
 
 
 def _on_mqtt_message(client, userdata, msg):
     try:
-        alert = json.loads(msg.payload.decode())
-        with _mqtt_lock:
-            _mqtt_alerts.appendleft(alert)
+        payload = json.loads(msg.payload.decode())
     except Exception as e:
-        print(f"[MQTT] Failed to parse message: {e}")
+        print(f"[MQTT] Failed to parse message on {msg.topic}: {e}")
+        return
+
+    if msg.topic.startswith("scenescape/image/camera/"):
+        camera_id = msg.topic.split("/")[-1]
+        with _video_lock:
+            _latest_frame[camera_id] = payload.get("image", "")
+        _render_frame()
+    elif msg.topic.startswith("scenescape/regulated/scene/"):
+        with _video_lock:
+            _latest_detections.clear()
+            for obj in payload.get("objects", []):
+                _latest_detections.append(obj)
+        _render_frame()
+    elif msg.topic.startswith("alerts"):
+        with _mqtt_lock:
+            _mqtt_alerts.appendleft(payload)
 
 
 def _start_mqtt_listener():
@@ -78,6 +106,94 @@ def api_get_with_retry(url, retries=MAX_RETRIES, delay=RETRY_DELAY):
             else:
                 raise
     return resp  # return last response even if not 200
+
+
+# Color palette for tracked objects
+_BBOX_COLORS = [
+    (0, 255, 0), (255, 100, 0), (0, 200, 255), (255, 0, 150),
+    (200, 200, 0), (150, 0, 255), (0, 255, 150), (255, 200, 0),
+]
+
+# Pre-load font once
+try:
+    _FONT = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 16)
+except Exception:
+    _FONT = ImageFont.load_default()
+
+
+def _get_color(obj_id):
+    return _BBOX_COLORS[hash(obj_id) % len(_BBOX_COLORS)]
+
+
+# Pre-render annotated frame in MQTT thread to avoid work during poll
+_rendered_frame = None
+_rendered_lock = threading.Lock()
+
+
+def _render_frame():
+    """Render the latest frame with detections. Called from MQTT thread."""
+    global _rendered_frame
+    with _video_lock:
+        frame_b64 = _latest_frame.get("lp-camera1", "")
+        detections = list(_latest_detections)
+
+    if not frame_b64:
+        return
+
+    try:
+        img = Image.open(io.BytesIO(base64.b64decode(frame_b64)))
+    except Exception:
+        return
+
+
+    # Resize to 640x360 for faster browser transfer
+    img = img.resize((640, 360), Image.LANCZOS)
+    scale_x = 640 / 1920
+    scale_y = 360 / 1080
+
+    draw = ImageDraw.Draw(img)
+
+    for obj in detections:
+        bounds = obj.get("camera_bounds", {}).get("lp-camera1")
+        if not bounds:
+            continue
+
+        x = bounds["x"] * scale_x
+        y = bounds["y"] * scale_y
+        w = bounds["width"] * scale_x
+        h = bounds["height"] * scale_y
+        obj_id = obj.get("id", "")
+        category = obj.get("category", "object")
+        color = _get_color(obj_id)
+
+        # Draw bounding box (2px thick at half res)
+        for t in range(2):
+            draw.rectangle([x - t, y - t, x + w + t, y + h + t], outline=color)
+
+        # Label
+        label = f"{category} {obj_id[:6]}"
+        reid_state = obj.get("reid_state", "")
+        if reid_state:
+            label += f" [{reid_state}]"
+
+        bbox = draw.textbbox((x, y - 18), label, font=_FONT)
+        draw.rectangle([bbox[0] - 1, bbox[1] - 1, bbox[2] + 1, bbox[3] + 1], fill=color)
+        draw.text((x, y - 18), label, fill=(0, 0, 0), font=_FONT)
+
+    with _rendered_lock:
+        _rendered_frame = img
+
+
+def get_annotated_frame(camera_id="lp-camera1"):
+    """Return the pre-rendered annotated frame."""
+    with _rendered_lock:
+        frame = _rendered_frame
+    if frame is not None:
+        return frame
+    img = Image.new("RGB", (640, 360), (30, 30, 30))
+    draw = ImageDraw.Draw(img)
+    draw.text((350, 260), "Waiting for video...", fill=(180, 180, 180))
+    return img
 
 def get_scene_name():
     try:
@@ -198,80 +314,151 @@ def get_alert_summary():
         return pd.DataFrame([{"Error": str(e)}])
 
 def refresh_data():
-    return get_zones(), get_sessions(), get_alerts(), get_alert_summary()
+    return get_annotated_frame(), get_zones(), get_sessions(), get_alerts(), get_alert_summary()
 
 HEADER_HTML = """
 <div style="
-    position: sticky; top: 0; left: 0; right: 0; z-index: 50;
-    background: #0071c5; width: 100%; height: 72px;
-    display: flex; align-items: center; padding: 0 2rem;
-    border-bottom: 1px solid #005a9e;
+    position: fixed; top: 0; left: 0; right: 0; z-index: 100;
+    background: linear-gradient(135deg, #0071c5 0%, #004a8f 100%);
+    width: 100%; height: 52px;
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 0 1.5rem;
+    border-bottom: 2px solid #005a9e;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.15);
 ">
-    <div style="display: flex; align-items: center; gap: 1rem;">
-        <svg width="89" height="40" viewBox="0 0 200 80" xmlns="http://www.w3.org/2000/svg">
-            <text x="10" y="55" font-family="Arial, sans-serif" font-size="48" font-weight="bold" fill="white">intel</text>
+    <div style="display: flex; align-items: center; gap: 0.8rem;">
+        <svg width="64" height="28" viewBox="0 0 200 80" xmlns="http://www.w3.org/2000/svg">
+            <text x="10" y="55" font-family="Arial, sans-serif" font-size="48" font-weight="bold" fill="white">Intel</text>
         </svg>
-        <span style="font-size: 18px; font-weight: 500; color: white; font-family: sans-serif;">
-            Storewide Loss Prevention
+        <span style="font-size: 16px; font-weight: 600; color: white; font-family: 'Segoe UI', sans-serif; letter-spacing: 0.3px;">
+            Suspicious Activity Detection
         </span>
     </div>
+    <span style="font-size: 12px; color: #ffffffaa; font-family: 'Segoe UI', sans-serif;">
+        SCENE_NAME_PLACEHOLDER
+    </span>
 </div>
-"""
+""".replace("SCENE_NAME_PLACEHOLDER", get_scene_name())
 
 FOOTER_HTML = """
 <div style="
-    position: sticky; bottom: 0; left: 0; right: 0; width: 100%;
-    background: #0071c5; color: white; text-align: center;
-    padding: 0 2rem; height: 48px; font-size: 14px; z-index: 10;
-    box-shadow: 0 -2px 8px rgba(0,0,0,0.04); border-top: 1px solid #e6e7e8;
-    display: flex; align-items: center; justify-content: center;
-    font-family: sans-serif; font-weight: 400;
+    position: fixed; bottom: 0; left: 0; right: 0; z-index: 100;
+    background: linear-gradient(135deg, #0071c5 0%, #004a8f 100%);
+    width: 100%; color: #ffffffcc;
+    text-align: center; padding: 0.4rem; font-size: 12px;
+    font-family: 'Segoe UI', sans-serif;
+    border-top: 2px solid #005a9e;
+    box-shadow: 0 -2px 8px rgba(0,0,0,0.15);
 ">
-    <span>&copy; 2026 Intel Corporation. All rights reserved.</span>
+    &copy; 2026 Intel Corporation
 </div>
 """
 
+CUSTOM_CSS = """
+footer, .built-with, .api-link, .settings-link,
+div[class*="footer"], a[href*="gradio.app"] { display: none !important; }
+
+.gradio-container {
+    padding-top: 52px !important;
+    max-width: 100% !important;
+    background: #f0f2f5 !important;
+}
+
+/* Video panel — dark background */
+#video-panel {
+    background: #111 !important;
+    border-radius: 8px;
+    padding: 0.4rem !important;
+}
+#video-panel img {
+    border-radius: 6px;
+    width: 100% !important;
+    height: auto !important;
+}
+
+/* Right sidebar panels */
+.panel-card {
+    background: white; border-radius: 8px;
+    padding: 0.6rem 0.8rem; margin-bottom: 0.5rem;
+    border: 1px solid #e0e3e8;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.06);
+}
+.panel-title {
+    font-size: 13px; font-weight: 700; color: #0071c5;
+    font-family: 'Segoe UI', sans-serif;
+    text-transform: uppercase; letter-spacing: 0.5px;
+    margin-bottom: 0.3rem; padding-bottom: 0.25rem;
+    border-bottom: 2px solid #0071c5;
+}
+.live-badge {
+    display: inline-block; background: #e53935; color: white;
+    font-size: 10px; font-weight: 700; padding: 2px 8px;
+    border-radius: 3px; letter-spacing: 1px;
+    animation: pulse-red 1.5s infinite;
+    margin-bottom: 4px;
+}
+@keyframes pulse-red {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.6; }
+}
+
+/* Compact dataframes */
+.gradio-dataframe { font-size: 12px !important; }
+.gradio-dataframe th { font-size: 11px !important; padding: 4px 6px !important; }
+.gradio-dataframe td { padding: 3px 6px !important; }
+
+/* Alerts section at bottom */
+#alerts-row {
+    margin-top: 0.3rem;
+}
+"""
+
 with gr.Blocks(title="Storewide Loss Prevention Dashboard") as demo:
-    gr.HTML("""<style>
-        footer, .built-with, .api-link, .settings-link,
-        div[class*="footer"], a[href*="gradio.app"] { display: none !important; }
-    </style>""")
     gr.HTML(HEADER_HTML)
 
-    gr.Markdown(f"# Scenes: {get_scene_name()}")
-    gr.Markdown("---")
+    # ── Top row: Live Video (left) | Zones + Sessions (right) ──
+    with gr.Row(equal_height=False):
 
-    with gr.Row():
-        with gr.Column():
-            gr.Markdown("## Zones/Regions")
-            zones_table = gr.Dataframe(interactive=False)
-        with gr.Column():
-            gr.Markdown("## Person Zone Activity")
-            sessions_table = gr.Dataframe(interactive=False)
+        # ── LEFT: Live Video Feed ──
+        with gr.Column(scale=4, elem_id="video-panel"):
+            gr.HTML('<span class="live-badge">&#9679; LIVE</span>')
+            live_video = gr.Image(
+                label=None, type="pil", interactive=False,
+                show_label=False,
+            )
 
-    gr.Markdown("---")
-    gr.Markdown("## Alert Summary (by Type)")
-    alert_summary_table = gr.Dataframe(interactive=False)
+        # ── RIGHT: Zones & Person Activity ──
+        with gr.Column(scale=5, min_width=320):
+            gr.HTML('<div class="panel-card"><div class="panel-title">Zones / Regions</div></div>')
+            zones_table = gr.Dataframe(interactive=False, max_height=180)
 
-    gr.Markdown("---")
-    gr.Markdown("## All Alerts")
-    alerts_table = gr.Dataframe(interactive=False)
+            gr.HTML('<div class="panel-card" style="margin-top:0.3rem"><div class="panel-title">Person Zone Activity</div></div>')
+            sessions_table = gr.Dataframe(interactive=False, max_height=220)
 
-    # Auto-poll every 2 seconds
-    timer = gr.Timer(2)
+    # ── Bottom row: Alert Summary (left) | All Alerts (right) ──
+    with gr.Row(equal_height=False):
+        with gr.Column(scale=3, min_width=280):
+            gr.HTML('<div class="panel-card"><div class="panel-title">Alert Summary</div></div>')
+            alert_summary_table = gr.Dataframe(interactive=False, max_height=200)
+
+        with gr.Column(scale=6, min_width=400):
+            gr.HTML('<div class="panel-card"><div class="panel-title">All Alerts</div></div>')
+            alerts_table = gr.Dataframe(interactive=False, max_height=250)
+
+    # Auto-poll every 1 second
+    timer = gr.Timer(0.05)
     timer.tick(
         fn=refresh_data,
         inputs=[],
-        outputs=[zones_table, sessions_table, alerts_table, alert_summary_table],
+        outputs=[live_video, zones_table, sessions_table, alerts_table, alert_summary_table],
     )
 
-    # Load initial data on page open
     demo.load(
         fn=refresh_data,
         inputs=[],
-        outputs=[zones_table, sessions_table, alerts_table, alert_summary_table],
+        outputs=[live_video, zones_table, sessions_table, alerts_table, alert_summary_table],
     )
 
     gr.HTML(FOOTER_HTML)
 
-demo.launch(server_name="0.0.0.0")
+demo.launch(server_name="0.0.0.0", css=CUSTOM_CSS)

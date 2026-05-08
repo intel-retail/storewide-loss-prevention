@@ -5,7 +5,8 @@ services:
   # ---------- DLStreamer override: app-specific model mounts ----------
   lp-video:
     volumes:
-      - ${MODEL_PATH:-./models}/yolo_detect_models:/home/pipeline-server/models/yolo_detect:ro
+      - ${MODEL_PATH:-./models}/detect_models:/home/pipeline-server/models/detect:ro
+      - ${MODEL_PATH:-./models}/reid_models:/home/pipeline-server/models/reid:ro
 
   # ---------- Gradio UI Service ----------
   gradio-ui:
@@ -143,7 +144,6 @@ services:
       no_proxy: ${no_proxy:-${NO_PROXY:-}},seaweedfs,ovms-vlm,broker.scenescape.intel.com,localhost,127.0.0.1,172.18.0.0/16,10.0.0.0/8
     volumes:
       - ${MODEL_PATH:-./models}:/models:ro
-      - ${OMZ_VOLUME:-storewide-lp_vol-models}:/omz_models:ro
       - ../scenescape/secrets:/app/secrets:ro
       - ${RESULTS_PATH:-./results}:/app/results
     restart: unless-stopped
@@ -232,5 +232,3 @@ networks:
 
 volumes:
   seaweedfs-data:
-  storewide-lp_vol-models:
-    external: true
