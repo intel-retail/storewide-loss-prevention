@@ -45,7 +45,7 @@ cfg = json.load(open('${ZONE_CONFIG}'))
 print(f'SCENE_NAME=\"{cfg.get(\"scene_name\", \"\")}\"')
 print(f'SCENE_ZIP=\"{cfg.get(\"scene_zip\", \"\")}\"')
 api = cfg.get('scenescape_api', {})
-print(f'API_BASE_URL=\"{api.get(\"base_url\", \"https://localhost:8443\")}\"')
+print(f'API_BASE_URL=\"{api.get(\"base_url\", \"https://localhost\")}\"')
 ss = cfg.get('scenescape', {})
 print(f'API_USER=\"{ss.get(\"api_user\", \"admin\")}\"')
 " 2>/dev/null)"

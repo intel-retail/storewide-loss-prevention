@@ -34,7 +34,7 @@
     "seaweedfs_volume_port": 8080
   },
   "scenescape_api": {
-    "base_url": "https://localhost:8443",
+    "base_url": "https://localhost",
     "auth_path": "/api/v1/auth",
     "scenes_path": "/api/v1/scenes",
     "regions_path": "/api/v1/regions",

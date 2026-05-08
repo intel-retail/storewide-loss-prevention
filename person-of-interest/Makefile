@@ -418,7 +418,7 @@ up:
 	$(COMPOSE_POI) up -d poi-backend ui poi-alert-service
 	@echo ""
 	@echo "System running:"
-	@echo "  SceneScape UI:   https://localhost:8443"
+	@echo "  SceneScape UI:   https://localhost"
 	@echo "  Backend API:     http://localhost:8000"
 	@echo "  POI UI:          http://localhost:3000"
 	@echo "  Alert Service:   http://localhost:8001"
