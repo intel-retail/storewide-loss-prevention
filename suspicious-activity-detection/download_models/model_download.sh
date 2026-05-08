@@ -22,7 +22,7 @@ MODELS_DIR="${PROJECT_ROOT}/models"
 ###############################################
 ENV_EXAMPLE="${PROJECT_ROOT}/configs/.env.example"
 ENV_FILE="${PROJECT_ROOT}/docker/.env"
-AI_KEYS_REGEX='^(VLM_ENABLED|VLM_MODEL_NAME|VLM_PRECISION|TARGET_DEVICE|YOLO_MODEL_NAME|YOLO_DETECT_MODEL)='
+AI_KEYS_REGEX='^(VLM_ENABLED|VLM_MODEL_NAME|VLM_PRECISION|TARGET_DEVICE|YOLO_MODEL_NAME|DETECT_MODEL|REID_MODEL)='
 
 SOURCE_FILE=""
 if [ -f "${ENV_EXAMPLE}" ]; then
@@ -48,12 +48,18 @@ VLM_MODEL_NAME="${VLM_MODEL_NAME:-Qwen/Qwen2.5-VL-7B-Instruct}"
 VLM_PRECISION="${VLM_PRECISION:-int8}"
 TARGET_DEVICE="${TARGET_DEVICE:-GPU}"
 YOLO_MODEL_NAME="${YOLO_MODEL_NAME:-yolo11n-pose}"
-YOLO_DETECT_MODEL="${YOLO_DETECT_MODEL:-yolo11s}"
+DETECT_MODEL="${DETECT_MODEL:-yolo11s}"
+REID_MODEL="${REID_MODEL:-person-reidentification-retail-0277}"
 
-# Where OVMS expects models
+# Model directories (unified paths)
 VLM_MODELS_DIR="${MODELS_DIR}/vlm_models"
 YOLO_MODELS_DIR="${MODELS_DIR}/yolo_models"
-YOLO_DETECT_DIR="${MODELS_DIR}/yolo_detect_models"
+DETECT_DIR="${MODELS_DIR}/detect_models"
+REID_DIR="${MODELS_DIR}/reid_models"
+
+# OpenVINO Model Zoo download URL (for non-YOLO models)
+OMZ_BASE_URL="https://storage.openvinotoolkit.org/repositories/open_model_zoo/2023.0/models_bin/1"
+MODEL_PROC_DIR="${PROJECT_ROOT}/../scenescape/dlstreamer-pipeline-server/model-proc-files"
 
 POTENTIAL_SOURCE_DIRS=(
     "${HOME}/ovms-vlm/models"
@@ -66,7 +72,8 @@ echo "Model Setup — Suspicious Activity Detection"
 echo "=========================================="
 echo "  VLM Model:     ${VLM_MODEL_NAME} (${VLM_PRECISION}, ${TARGET_DEVICE})"
 echo "  YOLO Pose:     ${YOLO_MODEL_NAME}"
-echo "  YOLO Detect:   ${YOLO_DETECT_MODEL} (FP16)"
+echo "  Detect Model:  ${DETECT_MODEL}"
+echo "  ReID Model:    ${REID_MODEL}"
 echo "  Models Dir:    ${MODELS_DIR}"
 echo ""
 
@@ -250,51 +257,52 @@ echo "  ✓ config.json written"
 
 }
 
-# --- YOLO detection model download function ---
-download_yolo_detect() {
+# --- Detection model download function (YOLO or OpenVINO) ---
+download_detect() {
 echo ""
 echo "------------------------------------------"
-echo "[2/4] YOLO Detect: ${YOLO_DETECT_MODEL} (FP16)"
+echo "[2/4] Detect Model: ${DETECT_MODEL}"
 echo "------------------------------------------"
 
-mkdir -p "${YOLO_DETECT_DIR}"
+mkdir -p "${DETECT_DIR}"
+local target_dir="${DETECT_DIR}/${DETECT_MODEL}"
 
-local target_dir="${YOLO_DETECT_DIR}/${YOLO_DETECT_MODEL}"
-if [ -f "${target_dir}/${YOLO_DETECT_MODEL}.xml" ] && [ -f "${target_dir}/${YOLO_DETECT_MODEL}.bin" ]; then
-    echo "  ✓ YOLO detection model already exists"
+if [ -f "${target_dir}/${DETECT_MODEL}.xml" ] && [ -f "${target_dir}/${DETECT_MODEL}.bin" ]; then
+    echo "  ✓ Detect model already exists"
 else
-    echo "  Downloading and exporting ${YOLO_DETECT_MODEL} (FP16)..."
+    if [[ "${DETECT_MODEL}" == yolo* ]]; then
+        # --- YOLO model: export via ultralytics ---
+        echo "  Downloading and exporting ${DETECT_MODEL} (YOLO)..."
 
-    if [ ! -d "${SCRIPT_DIR}/yolo-detect-venv" ] || [ ! -f "${SCRIPT_DIR}/yolo-detect-venv/bin/pip" ]; then
-        echo "  Creating YOLO detect Python environment..."
-        python3 -m venv "${SCRIPT_DIR}/yolo-detect-venv" --clear
-    fi
-    source "${SCRIPT_DIR}/yolo-detect-venv/bin/activate"
+        if [ ! -d "${SCRIPT_DIR}/yolo-detect-venv" ] || [ ! -f "${SCRIPT_DIR}/yolo-detect-venv/bin/pip" ]; then
+            echo "  Creating YOLO detect Python environment..."
+            python3 -m venv "${SCRIPT_DIR}/yolo-detect-venv" --clear
+        fi
+        source "${SCRIPT_DIR}/yolo-detect-venv/bin/activate"
 
-    local detect_marker="${SCRIPT_DIR}/yolo-detect-venv/.deps_installed"
-    if [ ! -f "${detect_marker}" ]; then
-        pip install -q --upgrade pip
-        pip install -q torch torchvision --index-url https://download.pytorch.org/whl/cpu
-        pip install -q ultralytics openvino
-        touch "${detect_marker}"
-        echo "  ✓ YOLO detect dependencies installed"
-    else
-        echo "  ✓ YOLO detect dependencies cached"
-    fi
+        local detect_marker="${SCRIPT_DIR}/yolo-detect-venv/.deps_installed"
+        if [ ! -f "${detect_marker}" ]; then
+            pip install -q --upgrade pip
+            pip install -q torch torchvision --index-url https://download.pytorch.org/whl/cpu
+            pip install -q ultralytics openvino
+            touch "${detect_marker}"
+            echo "  ✓ YOLO detect dependencies installed"
+        else
+            echo "  ✓ YOLO detect dependencies cached"
+        fi
 
-    YOLO_DETECT_DIR="${YOLO_DETECT_DIR}" YOLO_DETECT_MODEL="${YOLO_DETECT_MODEL}" \
-    python3 - << 'PYEOF'
+        DETECT_DIR="${DETECT_DIR}" DETECT_MODEL="${DETECT_MODEL}" \
+        python3 - << 'PYEOF'
 import os, shutil
 from pathlib import Path
 from ultralytics import YOLO
 
-models_dir = Path(os.environ["YOLO_DETECT_DIR"])
-model_name = os.environ["YOLO_DETECT_MODEL"]
+models_dir = Path(os.environ["DETECT_DIR"])
+model_name = os.environ["DETECT_MODEL"]
 model_pt = models_dir / f"{model_name}.pt"
 export_dir = models_dir / f"{model_name}_openvino_model"
 target_dir = models_dir / model_name
 
-# Download base weights
 if not model_pt.exists():
     print(f"  Downloading {model_name}.pt ...")
     orig = os.getcwd()
@@ -302,19 +310,14 @@ if not model_pt.exists():
     YOLO(f"{model_name}.pt")
     os.chdir(orig)
     print(f"  ✓ Downloaded: {model_pt}")
-else:
-    print(f"  {model_name}.pt already exists")
 
-# Export to OpenVINO FP16 (half=True, dynamic=True)
 if not export_dir.exists() and not target_dir.exists():
     print(f"  Exporting to OpenVINO FP16 ...")
     orig = os.getcwd()
     os.chdir(str(models_dir))
     YOLO(str(model_pt)).export(format="openvino", dynamic=False, half=True, imgsz=640)
     os.chdir(orig)
-    print(f"  ✓ FP16 export: {export_dir}")
 
-# Move only .xml and .bin into target_dir, clean up the rest
 if export_dir.exists():
     target_dir.mkdir(parents=True, exist_ok=True)
     for ext in ("*.xml", "*.bin"):
@@ -323,55 +326,108 @@ if export_dir.exists():
             shutil.move(str(f), str(dest))
             print(f"  ✓ Moved {f.name} -> {dest}")
     shutil.rmtree(str(export_dir))
-    print(f"  ✓ Cleaned up {export_dir.name}")
 
-# Remove .pt file (no longer needed)
 if model_pt.exists():
     model_pt.unlink()
     print(f"  ✓ Removed {model_pt.name}")
-
-print("YOLO detect export complete.")
 PYEOF
 
-    deactivate 2>/dev/null || true
-
-    if [ -f "${target_dir}/${YOLO_DETECT_MODEL}.xml" ] && [ -f "${target_dir}/${YOLO_DETECT_MODEL}.bin" ]; then
-        echo "  ✓ YOLO detection model ready"
+        deactivate 2>/dev/null || true
     else
-        echo "  ✗ YOLO detection export failed"
+        # --- OpenVINO Model Zoo: download via wget ---
+        local prec="${MODEL_PRECISION:-FP32}"
+        echo "  Downloading ${DETECT_MODEL} (${prec}) from OpenVINO Model Zoo..."
+        mkdir -p "${target_dir}"
+        wget -nv -O "${target_dir}/${DETECT_MODEL}.xml" \
+            "${OMZ_BASE_URL}/${DETECT_MODEL}/${prec}/${DETECT_MODEL}.xml"
+        wget -nv -O "${target_dir}/${DETECT_MODEL}.bin" \
+            "${OMZ_BASE_URL}/${DETECT_MODEL}/${prec}/${DETECT_MODEL}.bin"
+    fi
+
+    if [ -f "${target_dir}/${DETECT_MODEL}.xml" ] && [ -f "${target_dir}/${DETECT_MODEL}.bin" ]; then
+        echo "  ✓ Detect model ready"
+    else
+        echo "  ✗ Detect model download/export failed"
         return 1
     fi
 fi
 
-# Copy labels.txt from SceneScape DLStreamer model-proc-files
-LABELS_SRC="${PROJECT_ROOT}/../scenescape/dlstreamer-pipeline-server/model-proc-files/labels.txt"
-if [ -f "${LABELS_SRC}" ] && [ ! -f "${target_dir}/labels.txt" ]; then
-    cp "${LABELS_SRC}" "${target_dir}/labels.txt"
-    echo "  ✓ labels.txt copied to ${target_dir}"
-elif [ -f "${target_dir}/labels.txt" ]; then
-    echo "  ✓ labels.txt already exists"
-else
-    echo "  ⚠ labels.txt not found at ${LABELS_SRC}"
-fi
-
-# Copy yolo-v8.json model-proc (YOLO11 uses the same output format as YOLOv8)
-MODELPROC_SRC="${PROJECT_ROOT}/../scenescape/dlstreamer-pipeline-server/model-proc-files/yolo-v8.json"
-MODELPROC_CONTAINER="/opt/intel/dlstreamer/samples/gstreamer/model_proc/public/yolo-v8.json"
-if [ -f "${target_dir}/yolo-v8.json" ]; then
-    echo "  ✓ yolo-v8.json model-proc already exists"
-elif [ -f "${MODELPROC_SRC}" ]; then
-    cp "${MODELPROC_SRC}" "${target_dir}/yolo-v8.json"
-    echo "  ✓ yolo-v8.json model-proc copied to ${target_dir}"
-else
-    # Extract from DLStreamer container image
-    local container_image="docker.io/intel/dlstreamer-pipeline-server:${DLSTREAMER_VERSION:-2026.1.0-20260331-weekly-ubuntu24}"
-    if docker create --name modelproctmp "${container_image}" true >/dev/null 2>&1; then
-        docker cp "modelproctmp:${MODELPROC_CONTAINER}" "${target_dir}/yolo-v8.json" 2>/dev/null && \
-            echo "  ✓ yolo-v8.json extracted from DLStreamer image" || \
-            echo "  ⚠ Failed to extract yolo-v8.json — will use DLStreamer built-in at ${MODELPROC_CONTAINER}"
-        docker rm modelproctmp >/dev/null 2>&1
+# Copy model-proc file
+if [[ "${DETECT_MODEL}" == yolo* ]]; then
+    # YOLO models use yolo-v8.json
+    if [ ! -f "${target_dir}/yolo-v8.json" ]; then
+        local MODELPROC_SRC="${MODEL_PROC_DIR}/yolo-v8.json"
+        if [ -f "${MODELPROC_SRC}" ]; then
+            cp "${MODELPROC_SRC}" "${target_dir}/yolo-v8.json"
+            echo "  ✓ yolo-v8.json model-proc copied"
+        else
+            local container_image="docker.io/intel/dlstreamer-pipeline-server:${DLSTREAMER_VERSION:-2026.1.0-20260331-weekly-ubuntu24}"
+            if docker create --name modelproctmp "${container_image}" true >/dev/null 2>&1; then
+                docker cp "modelproctmp:/opt/intel/dlstreamer/samples/gstreamer/model_proc/public/yolo-v8.json" "${target_dir}/yolo-v8.json" 2>/dev/null && \
+                    echo "  ✓ yolo-v8.json extracted from DLStreamer image" || \
+                    echo "  ⚠ Failed to extract yolo-v8.json"
+                docker rm modelproctmp >/dev/null 2>&1
+            fi
+        fi
     else
-        echo "  ⚠ yolo-v8.json not found locally — pipeline will use DLStreamer built-in at ${MODELPROC_CONTAINER}"
+        echo "  ✓ yolo-v8.json model-proc already exists"
+    fi
+    # Copy labels.txt
+    local LABELS_SRC="${MODEL_PROC_DIR}/labels.txt"
+    if [ -f "${LABELS_SRC}" ] && [ ! -f "${target_dir}/labels.txt" ]; then
+        cp "${LABELS_SRC}" "${target_dir}/labels.txt"
+        echo "  ✓ labels.txt copied"
+    elif [ -f "${target_dir}/labels.txt" ]; then
+        echo "  ✓ labels.txt already exists"
+    fi
+else
+    # OpenVINO models use {model_name}.json
+    if [ ! -f "${target_dir}/${DETECT_MODEL}.json" ]; then
+        local MODELPROC_SRC="${MODEL_PROC_DIR}/${DETECT_MODEL}.json"
+        if [ -f "${MODELPROC_SRC}" ]; then
+            cp "${MODELPROC_SRC}" "${target_dir}/${DETECT_MODEL}.json"
+            echo "  ✓ ${DETECT_MODEL}.json model-proc copied"
+        else
+            local container_image="docker.io/intel/dlstreamer-pipeline-server:${DLSTREAMER_VERSION:-2026.1.0-20260331-weekly-ubuntu24}"
+            if docker create --name modelproctmp "${container_image}" true >/dev/null 2>&1; then
+                docker cp "modelproctmp:/opt/intel/dlstreamer/samples/gstreamer/model_proc/intel/${DETECT_MODEL}.json" "${target_dir}/${DETECT_MODEL}.json" 2>/dev/null && \
+                    echo "  ✓ ${DETECT_MODEL}.json extracted from DLStreamer image" || \
+                    echo "  ⚠ Failed to extract ${DETECT_MODEL}.json"
+                docker rm modelproctmp >/dev/null 2>&1
+            fi
+        fi
+    else
+        echo "  ✓ ${DETECT_MODEL}.json model-proc already exists"
+    fi
+fi
+}
+
+# --- ReID model download function (OpenVINO Model Zoo) ---
+download_reid() {
+echo ""
+echo "------------------------------------------"
+echo "[3/4] ReID Model: ${REID_MODEL}"
+echo "------------------------------------------"
+
+mkdir -p "${REID_DIR}"
+local target_dir="${REID_DIR}/${REID_MODEL}"
+
+if [ -f "${target_dir}/${REID_MODEL}.xml" ] && [ -f "${target_dir}/${REID_MODEL}.bin" ]; then
+    echo "  ✓ ReID model already exists"
+else
+    local prec="${MODEL_PRECISION:-FP32}"
+    echo "  Downloading ${REID_MODEL} (${prec}) from OpenVINO Model Zoo..."
+    mkdir -p "${target_dir}"
+    wget -nv -O "${target_dir}/${REID_MODEL}.xml" \
+        "${OMZ_BASE_URL}/${REID_MODEL}/${prec}/${REID_MODEL}.xml"
+    wget -nv -O "${target_dir}/${REID_MODEL}.bin" \
+        "${OMZ_BASE_URL}/${REID_MODEL}/${prec}/${REID_MODEL}.bin"
+
+    if [ -f "${target_dir}/${REID_MODEL}.xml" ] && [ -f "${target_dir}/${REID_MODEL}.bin" ]; then
+        echo "  ✓ ReID model ready"
+    else
+        echo "  ✗ ReID model download failed"
+        return 1
     fi
 fi
 }
@@ -380,7 +436,7 @@ fi
 download_yolo() {
 echo ""
 echo "------------------------------------------"
-echo "[3/4] YOLO Pose: ${YOLO_MODEL_NAME}"
+echo "[4/4] YOLO Pose: ${YOLO_MODEL_NAME}"
 echo "------------------------------------------"
 
 mkdir -p "${YOLO_MODELS_DIR}"
@@ -475,72 +531,83 @@ fi
 # RUN DOWNLOADS IN PARALLEL
 ###############################################
 VLM_LOG=$(mktemp)
-YOLO_DETECT_LOG=$(mktemp)
+DETECT_LOG=$(mktemp)
+REID_LOG=$(mktemp)
 YOLO_LOG=$(mktemp)
-trap 'rm -f "${VLM_LOG}" "${YOLO_DETECT_LOG}" "${YOLO_LOG}"' EXIT
+trap 'rm -f "${VLM_LOG}" "${DETECT_LOG}" "${REID_LOG}" "${YOLO_LOG}"' EXIT
 
 download_vlm > "${VLM_LOG}" 2>&1 &
 VLM_PID=$!
 
-download_yolo_detect > "${YOLO_DETECT_LOG}" 2>&1 &
-YOLO_DETECT_PID=$!
+download_detect > "${DETECT_LOG}" 2>&1 &
+DETECT_PID=$!
+
+download_reid > "${REID_LOG}" 2>&1 &
+REID_PID=$!
 
 download_yolo > "${YOLO_LOG}" 2>&1 &
 YOLO_PID=$!
 
-echo "Downloading VLM, YOLO Detect, and YOLO Pose models in parallel..."
-echo "  VLM PID:         ${VLM_PID}"
-echo "  YOLO Detect PID: ${YOLO_DETECT_PID}"
-echo "  YOLO Pose PID:   ${YOLO_PID}"
+echo "Downloading all models in parallel..."
+echo "  VLM PID:    ${VLM_PID}"
+echo "  Detect PID: ${DETECT_PID}"
+echo "  ReID PID:   ${REID_PID}"
+echo "  YOLO PID:   ${YOLO_PID}"
 echo ""
 
 # Show progress while waiting
 VLM_DONE=0
-YOLO_DETECT_DONE=0
+DETECT_DONE=0
+REID_DONE=0
 YOLO_DONE=0
 VLM_LINES=0
-YOLO_DETECT_LINES=0
+DETECT_LINES=0
+REID_LINES=0
 YOLO_LINES=0
 while true; do
-    # Check if processes finished
     if [ ${VLM_DONE} -eq 0 ] && ! kill -0 ${VLM_PID} 2>/dev/null; then
         wait ${VLM_PID}
         VLM_RC=$?
         VLM_DONE=1
     fi
-    if [ ${YOLO_DETECT_DONE} -eq 0 ] && ! kill -0 ${YOLO_DETECT_PID} 2>/dev/null; then
-        wait ${YOLO_DETECT_PID}
-        YOLO_DETECT_RC=$?
-        YOLO_DETECT_DONE=1
+    if [ ${DETECT_DONE} -eq 0 ] && ! kill -0 ${DETECT_PID} 2>/dev/null; then
+        wait ${DETECT_PID}
+        DETECT_RC=$?
+        DETECT_DONE=1
+    fi
+    if [ ${REID_DONE} -eq 0 ] && ! kill -0 ${REID_PID} 2>/dev/null; then
+        wait ${REID_PID}
+        REID_RC=$?
+        REID_DONE=1
     fi
     if [ ${YOLO_DONE} -eq 0 ] && ! kill -0 ${YOLO_PID} 2>/dev/null; then
         wait ${YOLO_PID}
         YOLO_RC=$?
         YOLO_DONE=1
     fi
-    # Stream new lines from VLM log
+
     NEW_VLM=$(wc -l < "${VLM_LOG}")
     if [ "${NEW_VLM}" -gt "${VLM_LINES}" ]; then
-        sed -n "$((VLM_LINES + 1)),${NEW_VLM}p" "${VLM_LOG}" | sed 's/^/  [VLM]  /'
+        sed -n "$((VLM_LINES + 1)),${NEW_VLM}p" "${VLM_LOG}" | sed 's/^/  [VLM]    /'
         VLM_LINES=${NEW_VLM}
     fi
-
-    # Stream new lines from YOLO Detect log
-    NEW_YOLO_DETECT=$(wc -l < "${YOLO_DETECT_LOG}")
-    if [ "${NEW_YOLO_DETECT}" -gt "${YOLO_DETECT_LINES}" ]; then
-        sed -n "$((YOLO_DETECT_LINES + 1)),${NEW_YOLO_DETECT}p" "${YOLO_DETECT_LOG}" | sed 's/^/  [YOLO-DET] /'
-        YOLO_DETECT_LINES=${NEW_YOLO_DETECT}
+    NEW_DETECT=$(wc -l < "${DETECT_LOG}")
+    if [ "${NEW_DETECT}" -gt "${DETECT_LINES}" ]; then
+        sed -n "$((DETECT_LINES + 1)),${NEW_DETECT}p" "${DETECT_LOG}" | sed 's/^/  [DETECT] /'
+        DETECT_LINES=${NEW_DETECT}
     fi
-
-    # Stream new lines from YOLO Pose log
+    NEW_REID=$(wc -l < "${REID_LOG}")
+    if [ "${NEW_REID}" -gt "${REID_LINES}" ]; then
+        sed -n "$((REID_LINES + 1)),${NEW_REID}p" "${REID_LOG}" | sed 's/^/  [REID]   /'
+        REID_LINES=${NEW_REID}
+    fi
     NEW_YOLO=$(wc -l < "${YOLO_LOG}")
     if [ "${NEW_YOLO}" -gt "${YOLO_LINES}" ]; then
-        sed -n "$((YOLO_LINES + 1)),${NEW_YOLO}p" "${YOLO_LOG}" | sed 's/^/  [YOLO-POSE] /'
+        sed -n "$((YOLO_LINES + 1)),${NEW_YOLO}p" "${YOLO_LOG}" | sed 's/^/  [POSE]   /'
         YOLO_LINES=${NEW_YOLO}
     fi
 
-    # All done? Break.
-    if [ ${VLM_DONE} -eq 1 ] && [ ${YOLO_DETECT_DONE} -eq 1 ] && [ ${YOLO_DONE} -eq 1 ]; then
+    if [ ${VLM_DONE} -eq 1 ] && [ ${DETECT_DONE} -eq 1 ] && [ ${REID_DONE} -eq 1 ] && [ ${YOLO_DONE} -eq 1 ]; then
         break
     fi
 
@@ -554,8 +621,13 @@ if [ ${VLM_RC} -ne 0 ]; then
     FAILED=1
 fi
 
-if [ ${YOLO_DETECT_RC} -ne 0 ]; then
-    echo "  ✗ YOLO detect download/export failed (exit code ${YOLO_DETECT_RC})"
+if [ ${DETECT_RC} -ne 0 ]; then
+    echo "  ✗ Detect model download/export failed (exit code ${DETECT_RC})"
+    FAILED=1
+fi
+
+if [ ${REID_RC} -ne 0 ]; then
+    echo "  ✗ ReID model download failed (exit code ${REID_RC})"
     FAILED=1
 fi
 
@@ -574,6 +646,7 @@ echo "=========================================="
 echo "✓ All Model Setup Complete!"
 echo "=========================================="
 echo "  VLM:         ${VLM_MODELS_DIR}/${VLM_MODEL_NAME}"
-echo "  YOLO Detect: ${YOLO_DETECT_DIR}/${YOLO_DETECT_MODEL} (FP16)"
+echo "  Detect:      ${DETECT_DIR}/${DETECT_MODEL}"
+echo "  ReID:        ${REID_DIR}/${REID_MODEL}"
 echo "  YOLO Pose:   ${YOLO_MODELS_DIR}/${YOLO_MODEL_NAME}"
 echo "=========================================="

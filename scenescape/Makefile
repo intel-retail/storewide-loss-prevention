@@ -50,8 +50,8 @@ init-sample-data:
 
 .PHONY: download-models
 download-models:
-	@chmod +x $(SCENESCAPE_DIR)/scripts/download_models.sh
-	@$(SCENESCAPE_DIR)/scripts/download_models.sh
+	@echo "All models are downloaded by the app-level model_download.sh"
+	@echo "Run: make download-models from your app directory (e.g. suspicious-activity-detection)"
 
 # ---- Volumes ----
 
