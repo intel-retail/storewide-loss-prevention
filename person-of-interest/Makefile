@@ -68,6 +68,10 @@ down-scenescape:
 export-scene:
 	@$(MAKE) -C $(SCENESCAPE_DIR) APP_DIR=$(CURDIR) export-scene
 
+.PHONY: import-scene
+import-scene:
+	@$(MAKE) -C $(SCENESCAPE_DIR) APP_DIR=$(CURDIR) import-scene
+
 .PHONY: lp-logs
 lp-logs:
 	$(COMPOSE_ALL) logs -f

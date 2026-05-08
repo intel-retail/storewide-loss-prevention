@@ -118,3 +118,10 @@ status:
 export-scene:
 	@chmod +x $(SCENESCAPE_DIR)/scripts/export-scene.sh
 	@$(SCENESCAPE_DIR)/scripts/export-scene.sh $(APP_DIR)
+
+# ---- Import Scene ----
+
+.PHONY: import-scene
+import-scene:
+	@chmod +x $(SCENESCAPE_DIR)/scripts/import-scene.sh
+	@$(SCENESCAPE_DIR)/scripts/import-scene.sh $(APP_DIR)
