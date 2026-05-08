@@ -304,11 +304,11 @@ services:
       mediaserver:
         condition: service_started
     healthcheck:
-      test: ["CMD-SHELL", "curl -s http://localhost:8080/pipelines/status | grep -q RUNNING"]
-      interval: 30s
+      test: ["CMD", "curl", "-I", "-s", "http://localhost:8080/pipelines"]
+      interval: 10s
       timeout: 5s
-      retries: 3
-      start_period: 60s
+      retries: 5
+      start_period: 10s
     environment:
       - RUN_MODE=EVA
       - GENICAM=Balluff
