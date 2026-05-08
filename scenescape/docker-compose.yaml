@@ -274,7 +274,7 @@ services:
       - storewide-lp
     depends_on:
       - mediaserver
-    restart: "no"
+    restart: always
     pids_limit: 1000
 
   # ---- DLStreamer Pipeline Server (inference + MQTT publishing) ----
@@ -304,11 +304,11 @@ services:
       mediaserver:
         condition: service_started
     healthcheck:
-      test: ["CMD", "curl", "-I", "-s", "http://localhost:8080/pipelines"]
-      interval: 10s
+      test: ["CMD-SHELL", "curl -s http://localhost:8080/pipelines/status | grep -q RUNNING"]
+      interval: 30s
       timeout: 5s
-      retries: 5
-      start_period: 10s
+      retries: 3
+      start_period: 60s
     environment:
       - RUN_MODE=EVA
       - GENICAM=Balluff
