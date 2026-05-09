@@ -72,7 +72,7 @@ services:
 
   # ---------- OVMS VLM (OpenVINO Model Server) ----------
   ovms-vlm:
-    image: openvino/model_server:2026.1-gpu
+    image: openvino/model_server:${OVMS_IMAGE_TAG:-2026.1-gpu}
     container_name: ovms-vlm
     volumes:
       - ${MODEL_PATH:-./models}:/models:ro

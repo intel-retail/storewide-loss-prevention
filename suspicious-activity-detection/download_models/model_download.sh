@@ -255,6 +255,13 @@ cat > "${VLM_MODELS_DIR}/config.json" << EOF
 EOF
 echo "  ✓ config.json written"
 
+# Patch graph.pbtxt device to match TARGET_DEVICE
+local GRAPH_FILE="${VLM_MODELS_DIR}/${VLM_MODEL_NAME}/graph.pbtxt"
+if [ -f "${GRAPH_FILE}" ]; then
+    sed -i "s|device: \"[^\"]*\"|device: \"${TARGET_DEVICE:-GPU}\"|g" "${GRAPH_FILE}"
+    echo "  ✓ graph.pbtxt device set to ${TARGET_DEVICE:-GPU}"
+fi
+
 }
 
 # --- Detection model download function (YOLO or OpenVINO) ---
