@@ -74,15 +74,37 @@ suspicious-activity-detection/models/
 make up
 ```
 
+By default this uses the **GPU detect + CPU re-identification** configuration
+(`all-gpu-cpu.env`). To select a different device profile, pass the `DEVICE`
+parameter:
+
+```bash
+# GPU detect + CPU reid (default)
+make up DEVICE=all-gpu-cpu.env
+
+# All GPU (detect + reid on GPU)
+make up DEVICE=all-gpu.env
+
+# All CPU (software decode, detect + reid on CPU)
+make up DEVICE=all-cpu.env
+```
+
+Device profiles are defined in `configs/res/` and control the GStreamer decode
+chain, inference device, pre-process backend, and throughput options. A single
+unified pipeline template (`configs/pipeline-config.json`) is rendered at
+init time using the selected profile.
+
 `make up` performs the following steps automatically:
 
-1. Generates TLS certificates, SceneScape secrets, and `docker/.env`.
-2. Copies the sample video into the Docker volume.
-3. Initializes Docker volumes with correct permissions.
-4. Builds the LP, Behavioral Analysis, and Gradio UI container images.
-5. Starts all SceneScape and LP containers.
-6. Imports the scene map into SceneScape.
-7. Tails LP logs to `application.log`.
+1. Sources the selected device resource config (`configs/res/<DEVICE>`).
+2. Generates TLS certificates, SceneScape secrets, and `docker/.env`.
+3. Renders `pipeline-config.json` with device-specific settings.
+4. Copies the sample video into the Docker volume.
+5. Initializes Docker volumes with correct permissions.
+6. Builds the LP, Behavioral Analysis, and Gradio UI container images.
+7. Starts all SceneScape and LP containers.
+8. Imports the scene map into SceneScape.
+9. Tails LP logs to `application.log`.
 
 
 ## 6. Stop Services

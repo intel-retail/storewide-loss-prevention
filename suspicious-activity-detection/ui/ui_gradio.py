@@ -212,9 +212,17 @@ def get_scene_name():
     except Exception as e:
         return f"Unknown ({e})"
 
+# Cached data to avoid blanking tables on transient API failures
+_cached_zones = pd.DataFrame(columns=["Zone ID", "Name", "Type"])
+_cached_sessions = pd.DataFrame(columns=["Person", "Scene", "Zone", "Type", "Visits"])
+_cached_alerts = pd.DataFrame(columns=["Alert ID", "Type", "Level", "Person", "Region", "Details", "Timestamp"])
+_cached_alert_summary = pd.DataFrame(columns=["Alert Type", "Count"])
+
+
 def get_zones():
+    global _cached_zones
     try:
-        resp = api_get_with_retry(ZONES_API)
+        resp = api_get_with_retry(url=ZONES_API, retries=2, delay=1)
         if resp.status_code == 200:
             data = resp.json()
             rows = []
@@ -225,15 +233,16 @@ def get_zones():
                     "Type": zone.get("type"),
                 })
             if rows:
-                return pd.DataFrame(rows)
-            return pd.DataFrame(columns=["Zone ID", "Name", "Type"])
-        return pd.DataFrame([{"Error": f"API returned {resp.status_code}"}])
-    except Exception as e:
-        return pd.DataFrame([{"Error": str(e)}])
+                _cached_zones = pd.DataFrame(rows)
+            return _cached_zones
+        return _cached_zones
+    except Exception:
+        return _cached_zones
 
 def get_sessions():
+    global _cached_sessions
     try:
-        resp = api_get_with_retry(SESSIONS_API)
+        resp = api_get_with_retry(url=SESSIONS_API, retries=2, delay=1)
         if resp.status_code == 200:
             data = resp.json()
             rows = []
@@ -251,23 +260,26 @@ def get_sessions():
                             "Visits": z.get("visit_count", 0),
                         })
             if rows:
-                return pd.DataFrame(rows)
-            return pd.DataFrame(columns=["Person", "Scene", "Zone", "Type", "Visits"])
-        return pd.DataFrame([{"Error": f"API returned {resp.status_code}"}])
-    except Exception as e:
-        return pd.DataFrame([{"Error": str(e)}])
+                _cached_sessions = pd.DataFrame(rows)
+            else:
+                _cached_sessions = pd.DataFrame(columns=["Person", "Scene", "Zone", "Type", "Visits"])
+            return _cached_sessions
+        return _cached_sessions
+    except Exception:
+        return _cached_sessions
 
 def get_alerts():
+    global _cached_alerts
     try:
         # Use MQTT-fed alerts if available, fall back to REST
         with _mqtt_lock:
             data = list(_mqtt_alerts)
         if not data:
-            resp = api_get_with_retry(ALERTS_API)
+            resp = api_get_with_retry(url=ALERTS_API, retries=2, delay=1)
             if resp.status_code == 200:
                 data = resp.json()
             else:
-                return pd.DataFrame([{"Error": f"API returned {resp.status_code}"}])
+                return _cached_alerts
         rows = []
         for alert in data:
             meta = alert.get("metadata", {})
@@ -287,31 +299,32 @@ def get_alerts():
                 "Timestamp": alert.get("timestamp", ""),
             })
         if rows:
-            return pd.DataFrame(rows)
-        return pd.DataFrame(columns=["Alert ID", "Type", "Level", "Person", "Region", "Details", "Timestamp"])
-    except Exception as e:
-        return pd.DataFrame([{"Error": str(e)}])
+            _cached_alerts = pd.DataFrame(rows)
+        return _cached_alerts
+    except Exception:
+        return _cached_alerts
 
 def get_alert_summary():
+    global _cached_alert_summary
     try:
         with _mqtt_lock:
             data = list(_mqtt_alerts)
         if not data:
-            resp = api_get_with_retry(ALERTS_API)
+            resp = api_get_with_retry(url=ALERTS_API, retries=2, delay=1)
             if resp.status_code == 200:
                 data = resp.json()
             else:
-                return pd.DataFrame([{"Error": f"API returned {resp.status_code}"}])
+                return _cached_alert_summary
         counts = {}
         for alert in data:
             atype = alert.get("alert_type", "UNKNOWN")
             counts[atype] = counts.get(atype, 0) + 1
         rows = [{"Alert Type": k, "Count": v} for k, v in counts.items()]
         if rows:
-            return pd.DataFrame(rows)
-        return pd.DataFrame(columns=["Alert Type", "Count"])
-    except Exception as e:
-        return pd.DataFrame([{"Error": str(e)}])
+            _cached_alert_summary = pd.DataFrame(rows)
+        return _cached_alert_summary
+    except Exception:
+        return _cached_alert_summary
 
 def refresh_data():
     return get_annotated_frame(), get_zones(), get_sessions(), get_alerts(), get_alert_summary()
@@ -445,8 +458,8 @@ with gr.Blocks(title="Storewide Loss Prevention Dashboard") as demo:
             gr.HTML('<div class="panel-card"><div class="panel-title">All Alerts</div></div>')
             alerts_table = gr.Dataframe(interactive=False, max_height=250)
 
-    # Auto-poll every 1 second
-    timer = gr.Timer(0.05)
+    # Auto-poll every 2 seconds
+    timer = gr.Timer(2)
     timer.tick(
         fn=refresh_data,
         inputs=[],

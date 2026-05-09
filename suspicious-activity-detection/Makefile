@@ -17,17 +17,21 @@ COMPOSE_ALL := $(if $(wildcard $(CAMERAS_OVERRIDE)),$(COMPOSE_ALL) -f $(CAMERAS_
 
 RESULTS_PATH ?= ./results
 
+# Device resource config: pass DEVICE=all-gpu-cpu.env (default), all-gpu.env, or all-cpu.env
+DEVICE ?= all-gpu-cpu.env
+RESOURCE_CONFIG := configs/res/$(DEVICE)
+
 # ---- Initialization ----
 
 .PHONY: init
 init:
-	@$(MAKE) -C $(SCENESCAPE_DIR) APP_DIR=$(CURDIR) init
+	@$(MAKE) -C $(SCENESCAPE_DIR) APP_DIR=$(CURDIR) RESOURCE_CONFIG=$(RESOURCE_CONFIG) init
 
 # ---- Full Stack (SceneScape + LP) ----
 
 .PHONY: up
 up:
-	@$(MAKE) -C $(SCENESCAPE_DIR) APP_DIR=$(CURDIR) init init-sample-data download-models init-volumes
+	@$(MAKE) -C $(SCENESCAPE_DIR) APP_DIR=$(CURDIR) RESOURCE_CONFIG=$(RESOURCE_CONFIG) init init-sample-data download-models init-volumes
 	@mkdir -p $(RESULTS_PATH)
 	@echo ""
 	@echo "=== Building LP images ==="
@@ -294,3 +298,9 @@ help:
 	@echo "    - Docker with Compose v2"
 	@echo "    - openssl, python3, curl"
 	@echo "    - Internet access (to download sample videos)"
+	@echo ""
+	@echo "  Device Configuration:"
+	@echo "    make up DEVICE=all-gpu-cpu.env - GPU decode + GPU detect + CPU reid (default)"
+	@echo "    make up DEVICE=all-gpu.env     - GPU decode + GPU detect + GPU reid"
+	@echo "    make up DEVICE=all-cpu.env     - CPU decode + CPU detect + CPU reid"
+	@echo "    Resource configs: configs/res/all-gpu.env, configs/res/all-cpu.env"
