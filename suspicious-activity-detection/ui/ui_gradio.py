@@ -482,11 +482,11 @@ with gr.Blocks(title="Storewide Loss Prevention Dashboard") as demo:
 
     # ── Bottom row: Alert Summary (left) | All Alerts (right) ──
     with gr.Row(equal_height=False):
-        with gr.Column(scale=3, min_width=280):
+        with gr.Column(scale=2, min_width=200):
             gr.HTML('<div class="panel-card"><div class="panel-title">Alert Summary</div></div>')
-            alert_summary_table = gr.Dataframe(interactive=False, max_height=200)
+            alert_summary_table = gr.Dataframe(interactive=False, max_height=120)
 
-        with gr.Column(scale=6, min_width=400):
+        with gr.Column(scale=7, min_width=400):
             gr.HTML('<div class="panel-card"><div class="panel-title">All Alerts</div></div>')
             alerts_table = gr.Dataframe(interactive=False, max_height=250)
 
