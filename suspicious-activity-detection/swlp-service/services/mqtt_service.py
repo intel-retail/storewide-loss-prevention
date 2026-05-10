@@ -221,13 +221,21 @@ class MQTTService:
     def _dispatch_image(self, camera_name: str, payload: bytes) -> None:
         if not self._on_camera_image or not self.loop:
             return
+        # Camera image payloads are 1-4 MB (base64 frame in JSON).
+        # Parsing in paho's network thread blocks all other topic dispatch.
+        # Submit the raw payload to the event loop; parse in a thread there.
+        asyncio.run_coroutine_threadsafe(
+            self._parse_and_dispatch_image(camera_name, payload), self.loop
+        )
+
+    async def _parse_and_dispatch_image(self, camera_name: str, payload: bytes) -> None:
+        """Parse large image JSON off the main thread, then dispatch."""
         try:
-            data = json.loads(payload)
-            asyncio.run_coroutine_threadsafe(
-                self._on_camera_image(camera_name, data), self.loop
-            )
-        except json.JSONDecodeError:
+            data = await asyncio.to_thread(json.loads, payload)
+        except (json.JSONDecodeError, Exception):
             logger.error("Invalid JSON in image message")
+            return
+        await self._on_camera_image(camera_name, data)
 
     # ---- helpers -------------------------------------------------------------
     def _resolve_cert_path(self, rel_path: str) -> str:

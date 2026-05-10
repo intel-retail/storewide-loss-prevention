@@ -14,6 +14,7 @@ ba/requests per batch of stored frames.
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import threading
 from datetime import datetime, timezone
@@ -112,7 +113,9 @@ class FrameCaptureService:
         scenescape_frame_ts = data.get("timestamp", "")
 
         try:
-            image_bytes = base64.b64decode(image_b64)
+            # Offload CPU-intensive base64 decode (~5-15ms for HD frames)
+            # to the thread pool so the event loop stays responsive.
+            image_bytes = await asyncio.to_thread(base64.b64decode, image_b64)
         except Exception:
             logger.exception("Invalid base64 image", camera=camera_name)
             return
@@ -157,7 +160,10 @@ class FrameCaptureService:
                 continue
 
             try:
-                key = self._frame_mgr.store_person_frame(
+                # Offload synchronous S3 PUT to thread pool to avoid
+                # blocking the event loop (~5-50ms per write).
+                key = await asyncio.to_thread(
+                    self._frame_mgr.store_person_frame,
                     session.object_id, image_bytes, frame_ts,
                     region_id=zone_id,
                     entry_timestamp=entry_ts_iso,

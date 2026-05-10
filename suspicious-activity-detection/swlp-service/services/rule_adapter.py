@@ -469,6 +469,12 @@ class RuleEngineAdapter:
         scene_id = result.get("scene_id", "")
         entry_timestamp = result.get("entry_timestamp", "")
 
+        # Notify the orchestrator that a result arrived so it can resume
+        # sending new ba/requests for this visit (cooldown gate).
+        ba_orch = self._service_registry.get("behavioral_analysis")
+        if ba_orch and hasattr(ba_orch, "ack_result"):
+            ba_orch.ack_result(person_id, region_id, scene_id)
+
         # Per-visit accounting: every ba/results bumps results_received.
         if self._visit_tracker is not None and entry_timestamp:
             visit_key = self._visit_tracker.make_key(
@@ -580,25 +586,32 @@ class RuleEngineAdapter:
         if self._visit_tracker is not None and visit_key is not None:
             self._visit_tracker.mark_alerted(visit_key)
 
-        try:
-            copied = self._frame_mgr.copy_frames_to_alert(
-                scene_id=result.get("scene_id", alert.scene_id),
-                person_id=result.get("person_id", alert.object_id),
-                region_id=result.get("region_id", alert.region_id),
-                entry_timestamp=entry_timestamp,
-                last_frame_ts=last_frame_ts,
-                alert_id=alert.alert_id,
-            )
-            logger.info(
-                "BA frames copied to alert prefix",
-                alert_id=alert.alert_id,
-                copied=copied,
-            )
-        except Exception:
-            logger.exception(
-                "copy_frames_to_alert failed",
-                alert_id=alert.alert_id,
-            )
+        # Offload synchronous S3 list + N copies to a background thread
+        # to avoid blocking the event loop (~100-400ms per alert).
+        import threading
+
+        def _do_copy():
+            try:
+                copied = self._frame_mgr.copy_frames_to_alert(
+                    scene_id=result.get("scene_id", alert.scene_id),
+                    person_id=result.get("person_id", alert.object_id),
+                    region_id=result.get("region_id", alert.region_id),
+                    entry_timestamp=entry_timestamp,
+                    last_frame_ts=last_frame_ts,
+                    alert_id=alert.alert_id,
+                )
+                logger.info(
+                    "BA frames copied to alert prefix",
+                    alert_id=alert.alert_id,
+                    copied=copied,
+                )
+            except Exception:
+                logger.exception(
+                    "copy_frames_to_alert failed",
+                    alert_id=alert.alert_id,
+                )
+
+        threading.Thread(target=_do_copy, daemon=True).start()
 
     # ---- alert dispatch ------------------------------------------------------
 

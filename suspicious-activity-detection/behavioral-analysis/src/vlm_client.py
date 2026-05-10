@@ -52,9 +52,9 @@ class VLMClient:
         endpoint: str = "http://ovms-vlm:8000",
         model_name: str = "Qwen/Qwen2.5-VL-7B-Instruct",
         timeout: float = 60.0,
-        max_tokens: int = 500,
+        max_tokens: int = 100,
         temperature: float = 0.1,
-        max_image_size: int = 512,
+        max_image_size: int = 256,
         circuit_breaker_threshold: int = 3,
         circuit_breaker_cooldown: float = 30.0,
     ):
