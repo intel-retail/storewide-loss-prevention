@@ -181,7 +181,7 @@ services:
   # ---- SceneScape Controller (tracking + analytics) ----
   # scenescape-controller:latest
   scene:
-    image: ${SCENESCAPE_REGISTRY:-}intel/scenescape-manager:${SCENESCAPE_VERSION:-v2026.0.0}
+    image: ${SCENESCAPE_REGISTRY:-}intel/scenescape-controller:${SCENESCAPE_VERSION:-v2026.0.0}
     init: true
     user: "${UID:-1000}:${GID:-1000}"
     networks:
