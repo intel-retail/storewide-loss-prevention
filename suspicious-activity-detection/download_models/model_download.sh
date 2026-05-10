@@ -129,12 +129,19 @@ update_graph_pbtxt_device() {
         sed -i "s|device: \"${current_device}\"|device: \"${TARGET_DEVICE}\"|g" "${graph_file}"
         echo "  ✓ graph.pbtxt device updated: ${current_device} → ${TARGET_DEVICE}"
     fi
-    # Ensure max_num_seqs >= 2 to prevent stuck LLMExecutor on cancelled requests
+    # Ensure max_num_seqs is set to 1 (single-request concurrency)
     local current_seqs
     current_seqs=$(grep -oP '(?<=max_num_seqs: )\d+' "${graph_file}" || echo "0")
-    if [ "${current_seqs}" -lt 2 ]; then
-        sed -i "s|max_num_seqs: ${current_seqs}|max_num_seqs: 2|g" "${graph_file}"
-        echo "  ✓ graph.pbtxt max_num_seqs updated: ${current_seqs} → 2"
+    if [ "${current_seqs}" -ne 1 ]; then
+        sed -i "s|max_num_seqs: ${current_seqs}|max_num_seqs: 1|g" "${graph_file}"
+        echo "  ✓ graph.pbtxt max_num_seqs updated: ${current_seqs} → 1"
+    fi
+    # Ensure cache_size is 4 GB (not 32) to reduce memory footprint
+    local current_cache
+    current_cache=$(grep -oP '(?<=cache_size: )\d+' "${graph_file}" || echo "0")
+    if [ "${current_cache}" -ne 4 ]; then
+        sed -i "s|cache_size: ${current_cache}|cache_size: 4|g" "${graph_file}"
+        echo "  ✓ graph.pbtxt cache_size updated: ${current_cache} → 4"
     fi
 }
 
@@ -222,8 +229,8 @@ else
             --weight-format "${VLM_PRECISION}" \
             --pipeline_type VLM_CB \
             "${target_device_args[@]}" \
-            --cache_size 32 \
-            --max_num_seqs 2 \
+            --cache_size 4 \
+            --max_num_seqs 1 \
             --enable_prefix_caching True \
             --config_file_path "${VLM_MODELS_DIR}/config.json" \
             --model_repository_path "${VLM_MODELS_DIR}" \

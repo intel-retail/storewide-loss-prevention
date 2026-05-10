@@ -17,6 +17,9 @@ COMPOSE_ALL := $(if $(wildcard $(CAMERAS_OVERRIDE)),$(COMPOSE_ALL) -f $(CAMERAS_
 
 RESULTS_PATH ?= ./results
 
+# Auto-shutdown timeout in minutes (0 = disabled)
+AUTO_STOP_MINUTES ?= 20
+
 # Device resource config: pass DEVICE=all-gpu-cpu.env (default), all-gpu.env, or all-cpu.env
 DEVICE ?= all-gpu-cpu.env
 RESOURCE_CONFIG := configs/res/$(DEVICE)
@@ -39,8 +42,6 @@ up:
 	@echo ""
 	@echo "=== Starting all services ==="
 	$(COMPOSE_ALL) up -d
-	@echo ""
-	@echo "=== Waiting for VDMS + scene controller to settle ==="
 	
 	
 	@echo ""
@@ -50,10 +51,15 @@ up:
 	@echo "  Gradio UI:       http://localhost:7860"
 	@echo "  LP API:          http://localhost:8082"
 	@echo "  Alert Service:   http://localhost:8000"
-	@echo "  Alert WS:        ws://localhost:8000/api/v1/ws"
 	@echo "  LP logs:         application.log"
 	@echo ""
 	@echo "To stop: make down"
+	@pkill -f "sleep.*cd $(CURDIR) && $(MAKE) down" 2>/dev/null || true
+	@if [ "$(AUTO_STOP_MINUTES)" -gt 0 ] 2>/dev/null; then \
+		echo ""; \
+		echo "=== Auto-shutdown scheduled in $(AUTO_STOP_MINUTES) minutes ==="; \
+		nohup sh -c "sleep `expr $(AUTO_STOP_MINUTES) \* 60` && cd $(CURDIR) && $(MAKE) down" >/dev/null 2>&1 & \
+	fi
 
 .PHONY: down
 down:

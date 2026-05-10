@@ -63,27 +63,39 @@ def _on_mqtt_message(client, userdata, msg):
         camera_id = msg.topic.split("/")[-1]
         with _video_lock:
             _latest_frame[camera_id] = payload.get("image", "")
-        _render_frame()
+        global _frame_dirty
+        _frame_dirty = True
     elif msg.topic.startswith("scenescape/regulated/scene/"):
         with _video_lock:
             _latest_detections.clear()
             for obj in payload.get("objects", []):
                 _latest_detections.append(obj)
-        _render_frame()
+        _frame_dirty = True
     elif msg.topic.startswith("alerts"):
         with _mqtt_lock:
             _mqtt_alerts.appendleft(payload)
 
 
 def _start_mqtt_listener():
-    client = mqtt.Client()
-    client.on_connect = _on_mqtt_connect
-    client.on_message = _on_mqtt_message
-    try:
-        client.connect(MQTT_HOST, MQTT_PORT, keepalive=60)
-        client.loop_forever()
-    except Exception as e:
-        print(f"[MQTT] Connection error: {e}")
+    """Connect to MQTT broker with automatic reconnect on failure."""
+    backoff = 1
+    while True:
+        client = mqtt.Client()
+        client.on_connect = _on_mqtt_connect
+        client.on_message = _on_mqtt_message
+        try:
+            client.connect(MQTT_HOST, MQTT_PORT, keepalive=60)
+            backoff = 1  # reset on successful connect
+            client.loop_forever()
+        except Exception as e:
+            print(f"[MQTT] Connection error: {e} — retrying in {backoff}s")
+        finally:
+            try:
+                client.disconnect()
+            except Exception:
+                pass
+        time.sleep(backoff)
+        backoff = min(backoff * 2, 30)  # exponential backoff, cap at 30s
 
 
 # Start MQTT listener in background thread
@@ -128,11 +140,17 @@ def _get_color(obj_id):
 # Pre-render annotated frame in MQTT thread to avoid work during poll
 _rendered_frame = None
 _rendered_lock = threading.Lock()
+_frame_dirty = True  # Flag: new data arrived since last render
 
 
 def _render_frame():
-    """Render the latest frame with detections. Called from MQTT thread."""
-    global _rendered_frame
+    """Render the latest frame with detections. Called lazily on UI poll."""
+    global _rendered_frame, _frame_dirty
+    # Skip if nothing changed since last render
+    if not _frame_dirty:
+        return
+    _frame_dirty = False
+
     with _video_lock:
         frame_b64 = _latest_frame.get("lp-camera1", "")
         detections = list(_latest_detections)
@@ -158,10 +176,13 @@ def _render_frame():
         if not bounds:
             continue
 
-        x = bounds["x"] * scale_x
-        y = bounds["y"] * scale_y
-        w = bounds["width"] * scale_x
-        h = bounds["height"] * scale_y
+        try:
+            x = float(bounds["x"]) * scale_x
+            y = float(bounds["y"]) * scale_y
+            w = float(bounds["width"]) * scale_x
+            h = float(bounds["height"]) * scale_y
+        except (KeyError, TypeError, ValueError):
+            continue
         obj_id = obj.get("id", "")
         category = obj.get("category", "object")
         color = _get_color(obj_id)
@@ -185,14 +206,25 @@ def _render_frame():
 
 
 def get_annotated_frame(camera_id="lp-camera1"):
-    """Return the pre-rendered annotated frame."""
+    """Return the pre-rendered annotated frame (renders lazily on demand)."""
+    global _frame_dirty
+    # Render on demand (driven by UI poll timer), not on every MQTT message.
+    # This caps rendering to once per poll interval regardless of frame rate.
+    try:
+        _render_frame()
+    except Exception as e:
+        print(f"[UI] Render error: {e}")
     with _rendered_lock:
         frame = _rendered_frame
     if frame is not None:
         return frame
     img = Image.new("RGB", (640, 360), (30, 30, 30))
     draw = ImageDraw.Draw(img)
-    draw.text((350, 260), "Waiting for video...", fill=(180, 180, 180))
+    text = "Loading......"
+    bbox = draw.textbbox((0, 0), text, font=_FONT)
+    text_w = bbox[2] - bbox[0]
+    text_h = bbox[3] - bbox[1]
+    draw.text(((640 - text_w) / 2, (360 - text_h) / 2), text, fill=(180, 180, 180), font=_FONT)
     return img
 
 def get_scene_name():
@@ -458,8 +490,8 @@ with gr.Blocks(title="Storewide Loss Prevention Dashboard") as demo:
             gr.HTML('<div class="panel-card"><div class="panel-title">All Alerts</div></div>')
             alerts_table = gr.Dataframe(interactive=False, max_height=250)
 
-    # Auto-poll every 2 seconds
-    timer = gr.Timer(2)
+    # Auto-poll every 1 second (balanced: responsive UI without overloading backend)
+    timer = gr.Timer(1.0)
     timer.tick(
         fn=refresh_data,
         inputs=[],

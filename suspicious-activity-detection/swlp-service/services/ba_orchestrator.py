@@ -92,6 +92,8 @@ class BehavioralAnalysisOrchestrator:
 
         # Active per-visit tasks, keyed by "{scene_id}:{object_id}:{region_id}"
         self._tasks: Dict[str, asyncio.Task] = {}
+        # Track whether we're waiting for a BA result before sending another request.
+        self._pending_result: Dict[str, bool] = {}
 
         logger.info(
             "BehavioralAnalysisOrchestrator initialized",
@@ -150,6 +152,17 @@ class BehavioralAnalysisOrchestrator:
     def active_count(self) -> int:
         return sum(1 for t in self._tasks.values() if not t.done())
 
+    def ack_result(self, object_id: str, region_id: str, scene_id: str = "") -> None:
+        """Clear the pending-result flag so the next cycle can publish a new request."""
+        if scene_id:
+            key = self._key(scene_id, object_id, region_id)
+            self._pending_result.pop(key, None)
+            return
+        # If scene_id is empty, clear any matching suffix.
+        suffix = f":{object_id}:{region_id}"
+        for k in [k for k in self._pending_result if k.endswith(suffix)]:
+            self._pending_result.pop(k, None)
+
     # ---- internals -----------------------------------------------------------
 
     @staticmethod
@@ -199,6 +212,16 @@ class BehavioralAnalysisOrchestrator:
 
                 # 2) After the batch of frames, publish exactly one BA
                 #    request so BA processes the latest window once.
+                #    Skip if we're still waiting for the previous result
+                #    to avoid flooding BA with requests it can't keep up with.
+                key = self._key(scene_id, object_id, region_id)
+                if self._pending_result.get(key):
+                    logger.debug(
+                        "BA result still pending, skipping request",
+                        object_id=object_id, region_id=region_id,
+                    )
+                    continue
+
                 entry_ts_iso = session.current_zones.get(region_id, "")
                 last_frame_ts = ""
                 if self._frame_tracker is not None:
@@ -221,6 +244,7 @@ class BehavioralAnalysisOrchestrator:
                         scene_id=scene_id,
                         last_frame_ts=last_frame_ts,
                     )
+                    self._pending_result[key] = True
                 except Exception:
                     logger.exception(
                         "ba/requests publish failed",
@@ -243,4 +267,6 @@ class BehavioralAnalysisOrchestrator:
             # after the visit is over.
             if self._frame_tracker is not None:
                 self._frame_tracker.clear(scene_id, object_id, region_id)
-            self._tasks.pop(self._key(scene_id, object_id, region_id), None)
+            key = self._key(scene_id, object_id, region_id)
+            self._tasks.pop(key, None)
+            self._pending_result.pop(key, None)

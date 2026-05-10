@@ -206,6 +206,9 @@ sed -e "s|{{CAMERA_NAME}}|${CAMERA_NAME}|g" \
     -e "s|{{REID_OPTIONS}}|${REID_OPTIONS}|g" \
     -e "s|{{POST_DETECT}}|${POST_DETECT_CHAIN}|g" \
     -e "s|{{POST_INFERENCE}}|${POST_INFERENCE_CHAIN}|g" \
+    -e "s|{{QUEUE_OPTIONS}}|${QUEUE_OPTIONS}|g" \
+    -e "s|{{DETECT_THRESHOLD}}|${DETECT_THRESHOLD:-0.5}|g" \
+    -e "s|{{INFERENCE_INTERVAL}}|${INFERENCE_INTERVAL:-3}|g" \
     "${DLSTREAMER_TEMPLATE}" > "${DLSTREAMER_CONFIG}"
 echo "  Generated ${DLSTREAMER_CONFIG}"
 echo "  Using pre-existing ${APP_DIR}/docker/docker-compose.cameras.yaml"

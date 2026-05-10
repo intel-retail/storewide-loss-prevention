@@ -149,8 +149,8 @@ async def lifespan(app: FastAPI):
     ba_result_consumer = BAQueueConsumer(mqtt_svc)
     app.state.ba_result_consumer = ba_result_consumer
 
-    # 5. Session manager
-    session_mgr = SessionManager(config)
+    # 5. Session manager (receives MQTT connection state to pause expiry on disconnect)
+    session_mgr = SessionManager(config, mqtt_connected_fn=lambda: mqtt_svc.connected)
     app.state.session_manager = session_mgr
 
     # 6. Rule engine (local, in-process)

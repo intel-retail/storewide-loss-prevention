@@ -56,8 +56,10 @@ class BAQueueConsumer:
         self.connected = False
         self._shutdown = asyncio.Event()
         # In-flight analysis tasks; tracked only so shutdown can await them.
-        self._inflight: set[asyncio.Task] = set()
-
+        self._inflight: set[asyncio.Task] = set()        # Entity dedup: skip requests for entities already being analyzed.
+        self._inflight_entities: set[str] = set()
+        # Max concurrent analysis tasks to bound memory usage.
+        self._max_inflight = max(1, int(getattr(settings, "max_inflight_analyses", 3)))
     def initialize(self, loop: asyncio.AbstractEventLoop) -> None:
         self.loop = loop
         self.client = mqtt.Client(client_id="ba-queue-consumer")
@@ -150,17 +152,30 @@ class BAQueueConsumer:
         self, person_id: str, region_id: str, entry_timestamp: str,
         scene_id: str, last_frame_ts: str,
     ) -> None:
-        # Each ba/requests message gets its own independent task. We wrap
-        # the analysis in asyncio.shield so an outer cancel (e.g. service
-        # shutdown, MQTT disconnect) cannot interrupt a request that is
-        # already pose-analyzing or talking to the VLM.
+        # Drop request if this entity is already being analyzed (dedup).
+        if person_id in self._inflight_entities:
+            logger.debug(
+                f"Entity {person_id}: analysis already in-flight, skipping"
+            )
+            return
+        # Drop request if we're at capacity to bound memory usage.
+        if len(self._inflight) >= self._max_inflight:
+            logger.debug(
+                f"Max in-flight analyses ({self._max_inflight}) reached, dropping request for {person_id}"
+            )
+            return
+
+        self._inflight_entities.add(person_id)
+
         async def _runner() -> None:
-            await asyncio.shield(
-                self._analyze_visit(
+            try:
+                await self._analyze_visit(
                     person_id, region_id, entry_timestamp,
                     scene_id, last_frame_ts,
                 )
-            )
+            finally:
+                self._inflight_entities.discard(person_id)
+
         task = asyncio.create_task(_runner())
         self._inflight.add(task)
         task.add_done_callback(self._inflight.discard)

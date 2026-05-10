@@ -34,10 +34,14 @@ class SessionManager:
     Sessions are expired when absent for longer than session_timeout.
     """
 
-    def __init__(self, config: ConfigService) -> None:
+    def __init__(self, config: ConfigService, mqtt_connected_fn=None) -> None:
         self.config = config
         rules = config.get_rules_config()
         self.session_timeout = rules.get("session_timeout_seconds", 30)
+
+        # Callable that returns True when MQTT is connected; used by expiry
+        # loop to pause eviction during broker disconnects.
+        self._mqtt_connected_fn = mqtt_connected_fn
 
         # Build set of configured camera names for filtering
         self._allowed_cameras = {c["name"] for c in config.get_cameras()} if config.get_cameras() else set()
@@ -50,6 +54,12 @@ class SessionManager:
         # back to the first oid we saw for that physical person, so all
         # downstream state (sessions, frame folders, dedup) stays unified.
         self._oid_alias: Dict[tuple, str] = {}  # (scene_id, raw_oid) -> canonical_oid
+        # Grace-period tombstones: recently expired aliases are kept for
+        # ``_alias_grace_seconds`` so that late-arriving
+        # ``previous_ids_chain`` references can still resolve to the
+        # canonical and resume the session instead of creating a new one.
+        self._alias_tombstones: Dict[tuple, float] = {}  # (scene_id, oid) -> expiry_epoch
+        self._alias_grace_seconds = 300  # 5 minutes
         self._event_handlers: List[Callable] = []
         self._match_handlers: List[Callable] = []
         self._expiry_task: Optional[asyncio.Task] = None
@@ -112,6 +122,20 @@ class SessionManager:
                 logger.info("track aliased to canonical",
                             oid=oid[:8], canonical=canonical[:8],
                             chain_len=len(prev_chain or []))
+                return canonical
+            # Check tombstoned aliases (recently expired sessions).
+            # If found, the canonical session was expired but the same
+            # physical person reappeared with a new UUID — re-register
+            # the alias so the new session inherits the canonical id.
+            if prev_key in self._alias_tombstones:
+                # Tombstone still references the old canonical via the
+                # key; look it up to re-establish lineage.
+                canonical = prev_str
+                self._oid_alias[skey] = canonical
+                self._oid_alias[prev_key] = canonical
+                del self._alias_tombstones[prev_key]
+                logger.info("track aliased via tombstone",
+                            oid=oid[:8], canonical=canonical[:8])
                 return canonical
 
         # First time seeing this lineage — oid is its own root canonical.
@@ -333,8 +357,13 @@ class SessionManager:
             prev_chain = obj.get("previous_ids_chain") or []
             oid = self._resolve_canonical(scene_id, raw_oid, prev_chain)
 
-            # Skip if we've already alerted for this person/zone in this visit.
+            # Keep the session alive: region-data proves the person is
+            # still being tracked even if scene-data messages are sparse.
             session = self._sessions.get((scene_id, oid))
+            if session:
+                session.last_seen = now
+
+            # Skip if we've already alerted for this person/zone in this visit.
             if session and session.loiter_alerted.get(region_id):
                 continue
 
@@ -405,14 +434,18 @@ class SessionManager:
         # Remove session after EXITED events are processed
         del self._sessions[skey]
 
-        # Drop any oid aliases that pointed at this canonical session so the
-        # alias map doesn't grow unbounded across long runs.
+        # Move aliases to grace-period tombstones instead of deleting
+        # immediately. This allows late-arriving ``previous_ids_chain``
+        # references to still find the canonical within the grace window,
+        # preventing SceneScape re-id flicker from creating orphan sessions.
         scene_id_expired, canonical_expired = skey
+        grace_deadline = time.time() + self._alias_grace_seconds
         stale_aliases = [
             k for k, v in self._oid_alias.items()
             if k[0] == scene_id_expired and v == canonical_expired
         ]
         for k in stale_aliases:
+            self._alias_tombstones[k] = grace_deadline
             del self._oid_alias[k]
 
         # Fire PERSON_LOST
@@ -532,9 +565,19 @@ class SessionManager:
 
     # ---- expiry loop ---------------------------------------------------------
     async def run_expiry_loop(self) -> None:
-        """Periodically check for expired sessions."""
+        """Periodically check for expired sessions.
+
+        Skips expiry when MQTT is disconnected — without incoming data
+        every session's ``last_seen`` goes stale, so expiring them would
+        wipe all person tracking on a transient broker hiccup.
+        """
         while True:
             await asyncio.sleep(5)
+            # Pause expiry while MQTT is down; sessions will catch up
+            # once the connection is restored and scene-data resumes.
+            if self._mqtt_connected_fn and not self._mqtt_connected_fn():
+                logger.debug("MQTT disconnected — skipping session expiry")
+                continue
             now = datetime.now(timezone.utc)
             expired = [
                 skey
@@ -543,3 +586,12 @@ class SessionManager:
             ]
             for skey in expired:
                 await self._expire_session(skey)
+
+            # Purge alias tombstones that have exceeded the grace period.
+            now_mono = time.time()
+            expired_tombstones = [
+                k for k, deadline in self._alias_tombstones.items()
+                if now_mono > deadline
+            ]
+            for k in expired_tombstones:
+                del self._alias_tombstones[k]
