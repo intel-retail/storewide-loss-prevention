@@ -1,1 +1,4 @@
 .benchmark_poi_id
+face_crops/
+debug_faces/
+tools/debug_faces/
