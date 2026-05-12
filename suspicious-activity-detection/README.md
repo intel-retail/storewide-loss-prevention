@@ -313,6 +313,59 @@ curl -X DELETE http://localhost:8082/api/v1/lp/zones/<region-uuid>
 
 > **Note:** Runtime API changes (Option B) are in-memory and reset on container restart. Auto-discovery (Option A) re-runs on every startup.
 
+## Stream Density Benchmarking
+
+The stream density benchmark measures how many concurrent camera scenes the system can handle while keeping end-to-end latency below a target threshold. It iteratively adds scenes, collects latency samples, and reports the maximum scene count that meets the target.
+
+### Prerequisites
+
+All services must be running (`make demo` or `make up`) before starting a benchmark.
+
+### Quick Run
+
+```bash
+# Run stream density benchmark (default target: 2000ms)
+make benchmark-stream-density
+
+# With custom target latency
+make benchmark-stream-density TARGET_LATENCY_MS=5000
+
+# Single-scene benchmark (measure baseline latency)
+make benchmark
+```
+
+### How It Works
+
+1. **Iteration 1**: Restarts `ovms-vlm` and `behavioral-analysis` for a clean memory baseline, then tests with 1 scene.
+2. **Each subsequent iteration**: Adds `SCENE_INCREMENT` more scenes by cloning the base scene zip, generating new DLStreamer pipeline configs, and spinning up additional RTSP camera streams.
+3. **Data collection**: After an initialization wait, collects BA round-trip latency samples for the stabilise duration.
+4. **Pass/fail**: A scene count passes if the chosen latency metric is ≤ target and throughput ratio ≥ minimum.
+5. **Termination**: Stops on the first failure and reports the last passing scene count as the maximum.
+
+### Make Targets
+
+| Target | Description |
+|--------|-------------|
+| `make benchmark` | Single-scene latency measurement |
+| `make benchmark-stream-density` | Iterative scene scaling until latency threshold is exceeded |
+| `make clean-stream-density` | Reset to 1 scene (restore configs, remove camera overrides) |
+| `make down-stream-density` | Tear down all services and clean up |
+| `make consolidate-metrics` | Combine multiple benchmark runs into a single CSV |
+| `make build-benchmark` | Build the benchmark Docker image |
+| `make fetch-benchmark` | Pull the benchmark Docker image from registry |
+
+### Results
+
+Results are written to `suspicious-activity-detection/results/` as JSON and CSV:
+
+```
+results/
+├── swlp_stream_density_20260511_221748.json
+├── swlp_stream_density_20260511_221748.csv
+└── ...
+```
+
+
 ## Project Structure
 
 ```

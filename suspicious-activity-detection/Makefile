@@ -7,6 +7,9 @@
 # No SceneScape source checkout required.
 # SceneScape-specific targets are in scenescape/Makefile.
 
+TAG ?= latest
+REGISTRY ?= false
+
 SCENESCAPE_DIR := ../scenescape
 COMPOSE_SCENESCAPE := docker compose --project-directory . --env-file docker/.env -f $(SCENESCAPE_DIR)/docker-compose.yaml
 COMPOSE_LP := docker compose --project-directory . --env-file docker/.env -f docker/docker-compose.yaml
@@ -121,7 +124,7 @@ down-lp:
 update-submodules:
 	@echo "Cloning performance tool repositories"
 	cd .. && git submodule deinit -f .
-	cd .. && git submodule update --init --recursive
+	cd .. && git submodule update --init --remote --recursive
 	@echo "Submodules updated (if any present)."
 
 # ---- Models ----
@@ -134,7 +137,29 @@ download-models:
 # ---- Stream Density & Benchmarking ----
 
 PERF_TOOLS_DIR := ../performance-tools/benchmark-scripts
+PERF_TOOLS_DOCKER_DIR := ../performance-tools/docker
 SWLP_STREAM_DENSITY := $(PERF_TOOLS_DIR)/swlp_stream_density.py
+
+# Benchmark image configuration
+BENCHMARK_IMAGE ?= swlp-benchmark:latest
+REGISTRY_BENCHMARK ?= intel/swlp-benchmark:$(TAG)
+
+.PHONY: fetch-benchmark
+fetch-benchmark: ## Pull benchmark image from registry
+	@echo "Fetching benchmark image from registry..."
+	docker pull $(REGISTRY_BENCHMARK)
+	docker tag $(REGISTRY_BENCHMARK) $(BENCHMARK_IMAGE)
+	@echo "Benchmark image ready: $(BENCHMARK_IMAGE)"
+
+.PHONY: build-benchmark
+build-benchmark: ## Build benchmark Docker image
+	@echo "Building benchmark Docker image..."
+	@if [ "$(REGISTRY)" = "true" ]; then \
+		$(MAKE) fetch-benchmark; \
+	else \
+		cd $(PERF_TOOLS_DOCKER_DIR) && $(MAKE) build-benchmark; \
+	fi
+	@echo "Benchmark image built: $(BENCHMARK_IMAGE)"
 
 # Benchmark configuration (override via env or CLI)
 BENCHMARK_TARGET_LATENCY_MS ?= 2000
@@ -184,7 +209,7 @@ benchmark: ## Run a single-scene benchmark (1 scene, measure latency)
 		--results_dir $(CURDIR)/$(RESULTS_PATH)
 
 .PHONY: benchmark-stream-density
-benchmark-stream-density: demo ## Iteratively increase scenes until latency threshold is reached
+benchmark-stream-density: up ## Iteratively increase scenes until latency threshold is reached
 	@echo "╔══════════════════════════════════════════════════════════════════╗"
 	@echo "║       SWLP Stream Density — Scene-Based Latency Scaling         ║"
 	@echo "╚══════════════════════════════════════════════════════════════════╝"
@@ -287,8 +312,8 @@ help:
 	@echo "  Build:"
 	@echo "    make build           - Build LP container images"
 	@echo ""
-	@echo "  Stream Density & Benchmarking:"
-	@echo "    make benchmark                 - Single-scene benchmark (1 scene)"
+	@echo "  Stream Density & Benchmarking:"	@echo "    make fetch-benchmark           - Pull benchmark image from registry"
+	@echo "    make build-benchmark           - Build benchmark Docker image"	@echo "    make benchmark                 - Single-scene benchmark (1 scene)"
 	@echo "    make benchmark-stream-density  - Increase scenes until latency threshold"
 	@echo "    make consolidate-metrics       - Consolidate metrics to CSV"
 	@echo "    make stream-density            - Alias for benchmark-stream-density"
