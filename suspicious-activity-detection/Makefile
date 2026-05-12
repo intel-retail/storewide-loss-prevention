@@ -7,8 +7,8 @@
 # No SceneScape source checkout required.
 # SceneScape-specific targets are in scenescape/Makefile.
 
-TAG ?= latest
-REGISTRY ?= false
+TAG ?= 0.0.1
+REGISTRY ?= true
 
 SCENESCAPE_DIR := ../scenescape
 COMPOSE_SCENESCAPE := docker compose --project-directory . --env-file docker/.env -f $(SCENESCAPE_DIR)/docker-compose.yaml
@@ -20,7 +20,6 @@ COMPOSE_ALL := $(if $(wildcard $(CAMERAS_OVERRIDE)),$(COMPOSE_ALL) -f $(CAMERAS_
 
 RESULTS_PATH ?= ./results
 
-TAG := $(shell cat VERSION 2>/dev/null || echo latest)
 export TAG
 REGISTRY_URL = intel/
 
@@ -45,6 +44,7 @@ init:
 .PHONY: up
 up:
 	@$(MAKE) -C $(SCENESCAPE_DIR) APP_DIR=$(CURDIR) init init-sample-data download-models init-volumes
+	@$(MAKE) patch-device
 	@mkdir -p $(RESULTS_PATH)
 ifeq ($(REGISTRY_LOWER),true)
 	@echo ""
@@ -59,8 +59,6 @@ endif
 	@echo "=== Starting all services ==="
 	$(COMPOSE_ALL) up -d
 	@echo ""
-	@echo "=== Waiting for VDMS + scene controller to settle ==="
-	
 	
 	@echo ""
 	@echo "Services running:"
@@ -153,6 +151,22 @@ update-submodules:
 download-models:
 	@echo "Downloading models for Suspicious Activity Detection..."
 	bash download_models/model_download.sh
+
+# Patch graph.pbtxt device to match TARGET_DEVICE from configs/.env.example
+.PHONY: patch-device
+patch-device:
+	@TARGET_DEVICE=$$(grep '^TARGET_DEVICE=' configs/.env.example 2>/dev/null | cut -d= -f2- || echo GPU); \
+	VLM_MODEL=$$(grep '^VLM_MODEL_NAME=' configs/.env.example 2>/dev/null | cut -d= -f2- || echo Qwen/Qwen2.5-VL-7B-Instruct); \
+	GRAPH_FILE=models/vlm_models/$${VLM_MODEL}/graph.pbtxt; \
+	if [ -f "$$GRAPH_FILE" ]; then \
+		CURRENT=$$(grep -oP '(?<=device: ")[^"]+' "$$GRAPH_FILE" || true); \
+		if [ "$$CURRENT" != "$$TARGET_DEVICE" ]; then \
+			sed -i "s|device: \"$$CURRENT\"|device: \"$$TARGET_DEVICE\"|" "$$GRAPH_FILE"; \
+			echo "  ✓ graph.pbtxt device updated: $$CURRENT → $$TARGET_DEVICE"; \
+		else \
+			echo "  ✓ graph.pbtxt device already set to $$TARGET_DEVICE"; \
+		fi \
+	fi
 
 # ---- Stream Density & Benchmarking ----
 

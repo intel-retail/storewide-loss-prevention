@@ -3,18 +3,17 @@ FROM docker.io/intel/dlstreamer:latest
 USER root
 WORKDIR /app
 
-# Copy only pyproject.toml first for dependency caching
-COPY pyproject.toml .
-# Create minimal src package so pip can resolve the project
-RUN mkdir -p src/behavioral_analysis && touch src/behavioral_analysis/__init__.py
+# Copy only requirements.txt first for dependency caching
+COPY requirements.txt .
 
-# Install Python dependencies (cached unless pyproject.toml changes)
-# --ignore-installed: base image has system numpy/openvino via apt (no RECORD),
-# pip cannot uninstall them but the versions already satisfy our requirements.
-RUN pip install --no-cache-dir --break-system-packages --ignore-installed .
-
-# Install performance-tools for metrics logging
-RUN pip install --no-cache-dir --break-system-packages git+https://github.com/intel-retail/performance-tools.git@main#subdirectory=benchmark-scripts
+# Install Python dependencies (cached unless requirements.txt changes)
+# - Base image already provides numpy and openvino via apt — skip reinstalling them
+# - Clean up afterwards to reduce layer size
+RUN pip install --no-cache-dir --break-system-packages --ignore-installed -r requirements.txt \
+    && find /usr/local/lib/python3.12/dist-packages -type d -name '__pycache__' -exec rm -rf {} + 2>/dev/null || true \
+    && find /usr/local/lib/python3.12/dist-packages -type d -name 'tests' -exec rm -rf {} + 2>/dev/null || true \
+    && find /usr/local/lib/python3.12/dist-packages -name '*.so' -exec strip --strip-unneeded {} + 2>/dev/null || true \
+    && rm -rf /root/.cache /tmp/*
 
 # Now copy actual source and config
 COPY src/ ./src/
