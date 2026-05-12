@@ -18,19 +18,28 @@ patterns:
       per_side: true
       phases:
         - name: hand_raised
-          min_frames: 2
+          min_frames: 3
           conditions:
             - subject: wrist
               relation: above
               reference: waist_midpoint
+            - subject: wrist
+              relation: not_near
+              reference: nose
+              threshold: 0.5
 
-        - name: hand_at_waist
-          min_frames: 2
+        - name: hand_to_conceal_zone
+          min_frames: 3
+          match: any
           conditions:
             - subject: wrist
               relation: near
               reference: waist_midpoint
               threshold: 0.6
+            - subject: wrist
+              relation: near
+              reference: torso_center
+              threshold: 0.5
 
     vlm:
       enabled: true

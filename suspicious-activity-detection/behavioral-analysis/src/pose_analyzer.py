@@ -162,10 +162,6 @@ class PoseAnalyzer:
                 description=f"Pattern '{pattern_id}' is disabled",
             )
 
-        if pattern_id == "shelf_to_waist" and "phases" not in pattern_cfg.get("pose", {}):
-            # Legacy hard-coded implementation (used when no declarative phases defined)
-            return self._detect_shelf_to_waist(pose_sequence, pattern_cfg)
-
         # Generic declarative rule engine
         pose_cfg = pattern_cfg.get("pose", {})
         if "phases" in pose_cfg:
@@ -177,6 +173,7 @@ class PoseAnalyzer:
                 confidence=engine_result.confidence,
                 pattern_id=pattern_id,
                 description=engine_result.description,
+                key_frames=engine_result.key_frames,
             )
 
         logger.warning(
@@ -248,9 +245,16 @@ class PoseAnalyzer:
             logger.warning(f"No VLM prompt configured for pattern {pose_result.pattern_id}")
             return pose_result
 
-        # Sample frames evenly for VLM
+        # Sample frames for VLM — prefer key_frames from pose detection
         num_frames = vlm_cfg.get("num_frames", 4)
-        sampled = self._sample_frames(frames, num_frames)
+        if pose_result.key_frames:
+            key_indices = pose_result.key_frames
+            key_frame_list = [
+                frames[i] for i in key_indices if i < len(frames)
+            ]
+            sampled = self._sample_frames(key_frame_list, num_frames)
+        else:
+            sampled = self._sample_frames(frames, num_frames)
         frame_images = [f[0] for f in sampled]
         sampled_ts = [int(f[1]) for f in sampled]
         sampled_keys = (
@@ -316,141 +320,3 @@ class PoseAnalyzer:
             return frames
         indices = np.linspace(0, len(frames) - 1, n, dtype=int)
         return [frames[i] for i in indices]
-
-    def _detect_shelf_to_waist(
-        self,
-        poses: list[Pose],
-        pattern_cfg: dict[str, Any] = None,
-    ) -> PatternResult:
-        """
-        Detect shelf-to-waist hand movement pattern.
-
-        Pattern: Hand moves from above chest level to waist/pocket area.
-
-        Detection logic (sliding window):
-        For each possible split point in the sequence, check whether the
-        early portion has enough "hand raised" frames and the late portion
-        has enough "hand at waist" frames.  This avoids requiring the
-        transition to happen exactly at the midpoint.
-
-        Body-relative threshold:
-        Instead of a fixed normalised distance, the waist proximity
-        threshold is expressed as a fraction of the person's torso length
-        (shoulder-midpoint to hip-midpoint), so it scales with distance
-        from the camera.
-        """
-        if pattern_cfg is None:
-            pattern_cfg = {}
-        pose_cfg = pattern_cfg.get("pose", {})
-
-        min_raised = pose_cfg.get("min_hand_raised_frames", 2)
-        min_at_waist = pose_cfg.get("min_hand_at_waist_frames", 2)
-        waist_ratio = pose_cfg.get("waist_proximity_ratio", 0.6)
-
-        if len(poses) < self.min_frames:
-            return PatternResult(
-                matched=False,
-                confidence=0.0,
-                pattern_id="shelf_to_waist",
-                description=f"Not enough frames: {len(poses)}/{self.min_frames}",
-            )
-
-        # Pre-classify each frame per wrist: "raised", "at_waist", or None
-        for wrist_name, wrist_getter in [
-            ("left", lambda p: p.left_wrist),
-            ("right", lambda p: p.right_wrist),
-        ]:
-            raised_flags: list[bool] = []
-            waist_flags: list[bool] = []
-
-            for pose in poses:
-                wrist = wrist_getter(pose)
-                ls = pose.left_shoulder
-                rs = pose.right_shoulder
-                lh = pose.left_hip
-                rh = pose.right_hip
-
-                # Skip frame if wrist or body keypoints are low confidence
-                body_ok = (
-                    wrist[2] >= self.confidence_threshold
-                    and ls[2] >= self.confidence_threshold
-                    and rs[2] >= self.confidence_threshold
-                    and lh[2] >= self.confidence_threshold
-                    and rh[2] >= self.confidence_threshold
-                )
-
-                if not body_ok:
-                    raised_flags.append(False)
-                    waist_flags.append(False)
-                    continue
-
-                chest = pose.chest_midpoint
-                waist = pose.waist_midpoint
-
-                # Torso length for body-relative threshold
-                torso_len = self._euclidean_distance(chest, waist)
-                if torso_len < 1e-4:
-                    raised_flags.append(False)
-                    waist_flags.append(False)
-                    continue
-
-                wrist_pt = (wrist[0], wrist[1])
-
-                # Hand above waist? (lower y = higher in image)
-                # Uses waist midpoint as reference — retail shelves are
-                # typically at chest-to-waist height from store cameras.
-                is_raised = wrist[1] < waist[1]
-
-                # Hand near waist? (distance < waist_ratio * torso_len)
-                dist_to_waist = self._euclidean_distance(wrist_pt, waist)
-                is_at_waist = dist_to_waist < (waist_ratio * torso_len)
-
-                raised_flags.append(is_raised)
-                waist_flags.append(is_at_waist)
-
-            # Sliding split: try every split point from min_raised .. len-min_at_waist
-            n = len(poses)
-            best_conf = 0.0
-            best_split = -1
-            best_raised = 0
-            best_waist = 0
-
-            for split in range(min_raised, n - min_at_waist + 1):
-                r_count = sum(raised_flags[:split])
-                w_count = sum(waist_flags[split:])
-
-                if r_count >= min_raised and w_count >= min_at_waist:
-                    conf = (r_count + w_count) / n
-                    if conf > best_conf:
-                        best_conf = conf
-                        best_split = split
-                        best_raised = r_count
-                        best_waist = w_count
-
-            if best_split >= 0:
-                return PatternResult(
-                    matched=True,
-                    confidence=min(1.0, best_conf),
-                    pattern_id="shelf_to_waist",
-                    description=(
-                        f"{wrist_name.capitalize()} hand: raised in "
-                        f"{best_raised} frames (0-{best_split - 1}), "
-                        f"at waist in {best_waist} frames "
-                        f"({best_split}-{n - 1})"
-                    ),
-                )
-
-        # No pattern detected
-        return PatternResult(
-            matched=False,
-            confidence=0.0,
-            pattern_id="shelf_to_waist",
-            description="Hand movement pattern not detected",
-        )
-
-    @staticmethod
-    def _euclidean_distance(
-        p1: tuple[float, float], p2: tuple[float, float]
-    ) -> float:
-        """Calculate Euclidean distance between two points."""
-        return ((p1[0] - p2[0]) ** 2 + (p1[1] - p2[1]) ** 2) ** 0.5

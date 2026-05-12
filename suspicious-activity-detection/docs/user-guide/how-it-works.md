@@ -17,7 +17,7 @@ The main services in this deployment are:
 - [Behavioral Analysis Service](#behavioral-analysis-service)
 - [Alert Service](#alert-service)
 - [Frame Storage (SeaweedFS / MinIO)](#frame-storage-seaweedfs--minio)
-- [Gradio UI](#gradio-ui)
+- [Store Wide Loss Prevention Suspicious UI](#store-wide-loss-prevention-suspicious-ui)
 
 The following sections describe each service in more detail.
 
@@ -116,7 +116,7 @@ bucket: behavioral-frames
 - **Evidence retention:** Per-alert prefix keeps the frames that backed the
   alert; retention is configurable.
 
-### Gradio UI
+### Store Wide Loss Prevention Suspicious UI
 
 The **Gradio UI** provides a web-based dashboard:
 

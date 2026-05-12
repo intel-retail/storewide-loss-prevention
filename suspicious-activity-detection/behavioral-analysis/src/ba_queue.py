@@ -264,7 +264,7 @@ class BAQueueConsumer:
                 if self.settings.vlm_enabled and self.pose_analyzer.vlm_client:
                     async with self._vlm_sem:
                         result = await self.pose_analyzer.analyze_with_vlm(
-                            frames=frames,
+                            frames=pose_frames,
                             pose_result=result,
                         )
                     if result.vlm_metrics:

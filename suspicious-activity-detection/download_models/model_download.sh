@@ -632,26 +632,38 @@ FAILED=0
 
 if [ ${VLM_RC} -ne 0 ]; then
     echo "  ✗ VLM download/export failed (exit code ${VLM_RC})"
+    echo "  --- VLM error log ---"
+    cat "${VLM_LOG}"
+    echo "  --- end VLM log ---"
     FAILED=1
 fi
 
 if [ ${DETECT_RC} -ne 0 ]; then
     echo "  ✗ Detect model download/export failed (exit code ${DETECT_RC})"
+    echo "  --- Detect error log ---"
+    cat "${DETECT_LOG}"
+    echo "  --- end Detect log ---"
     FAILED=1
 fi
 
 if [ ${REID_RC} -ne 0 ]; then
     echo "  ✗ ReID model download failed (exit code ${REID_RC})"
+    echo "  --- ReID error log ---"
+    cat "${REID_LOG}"
+    echo "  --- end ReID log ---"
     FAILED=1
 fi
 
 if [ ${YOLO_RC} -ne 0 ]; then
     echo "  ✗ YOLO pose download/export failed (exit code ${YOLO_RC})"
+    echo "  --- YOLO error log ---"
+    cat "${YOLO_LOG}"
+    echo "  --- end YOLO log ---"
     FAILED=1
 fi
 
 if [ ${FAILED} -ne 0 ]; then
-    echo "One or more downloads failed."
+    echo "One or more downloads failed. See error logs above."
     exit 1
 fi
 

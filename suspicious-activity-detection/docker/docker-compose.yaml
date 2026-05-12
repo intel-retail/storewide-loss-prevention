@@ -9,11 +9,11 @@ services:
       - ${MODEL_PATH:-./models}/reid_models:/home/pipeline-server/models/reid:ro
 
   # ---------- Gradio UI Service ----------
-  gradio-ui:
+  swlp-suscpicious-ui:
     build:
       context: ui
       dockerfile: Dockerfile
-    image: gradio-ui:latest
+    image: ${DOCKER_REGISTRY:-}swlp-suscpicious-ui:${TAG}
     ports:
       - "7860:7860"
     networks:
@@ -104,7 +104,7 @@ services:
     build:
       context: behavioral-analysis
       dockerfile: Dockerfile
-    image: ${REGISTRY:-}behavioral-analysis:${TAG:-latest}
+    image: ${DOCKER_REGISTRY:-}behavioral-analysis:${TAG}
     ports:
       - "${BA_SERVICE_PORT:-8085}:8080"
     networks:
@@ -153,7 +153,7 @@ services:
     build:
       context: .
       dockerfile: swlp-service/Dockerfile
-    image: ${REGISTRY:-}swlp-service:${TAG:-latest}
+    image:  ${DOCKER_REGISTRY:-}swlp-service:${TAG}
     ports:
       - "${LP_SERVICE_PORT:-8082}:8082"
     networks:

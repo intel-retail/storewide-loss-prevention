@@ -31,6 +31,8 @@ visualized for a retail loss-prevention scenario.
   by each workload.
 - [How It Works](./how-it-works.md) – High-level architecture, service
   responsibilities, and data/control flows.
+- [Pattern Authoring Guide](./pattern-authoring-guide.md) – How to define
+  custom pose-based activity patterns in `patterns.yaml` without code changes.
 - [Release Notes](./release-notes.md) – Version history and known issues.
 
 > **Disclaimer:** This application is provided for development and evaluation

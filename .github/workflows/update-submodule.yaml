@@ -38,7 +38,7 @@ jobs:
             -H "Accept: application/vnd.github+json" \
             -H "Authorization: Bearer $GITHUB_TOKEN" \
             -H "X-GitHub-Api-Version: 2022-11-28" \
-            https://api.github.com/repos/intel-retail/loss-prevention/pulls \
+            https://api.github.com/repos/intel-retail/storewide-loss-prevention/pulls \
             -d "{\"title\":\"Performance Tools Submodule Update\",\"body\":\"Please review and approve the automated PR!\",\"head\":\"$BRANCH_NAME\",\"base\":\"main\"}")
           
           # Check if PR was created successfully
@@ -67,7 +67,7 @@ jobs:
             -H "Accept: application/vnd.github+json" \
             -H "Authorization: Bearer $GITHUB_TOKEN" \
             -H "X-GitHub-Api-Version: 2022-11-28" \
-            https://api.github.com/repos/intel-retail/loss-prevention/pulls/$PR_NUMBER/requested_reviewers \
+            https://api.github.com/repos/intel-retail/storewide-loss-prevention/pulls/$PR_NUMBER/requested_reviewers \
             -d "{\"reviewers\":$REVIEWERS_JSON}")
           
           # Check if reviewers were added successfully

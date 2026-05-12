@@ -14,7 +14,7 @@ settings:
   # spread across `frame_capture_interval_seconds`, then publish one
   # ba/requests message. e.g. count=5, interval=1.0 -> 5 frames/s and
   # one BA request every second.
-  frame_capture_count: 3
+  frame_capture_count: 15
   frame_capture_interval_seconds: 1.0
 
 # Default variable values used by the rule engine for ${var:default}
