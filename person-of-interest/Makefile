@@ -154,7 +154,6 @@ _benchmark-enroll:
 	done
 	@ENROLL_RESP=$$(curl -sf -X POST http://localhost:8000/api/v1/poi \
 		-F "images=@sample_data/poi_1.png" \
-		-F "images=@sample_data/poi_2.JPG" \
 		-F "severity=high" \
 		-F "description=Benchmark POI" 2>&1); \
 	POI_ID=$$(echo "$$ENROLL_RESP" | python3 -c "import sys,json; print(json.load(sys.stdin).get('poi_id',''))" 2>/dev/null); \
