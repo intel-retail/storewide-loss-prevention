@@ -9,11 +9,11 @@ services:
       - ${MODEL_PATH:-./models}/reid_models:/home/pipeline-server/models/reid:ro
 
   # ---------- Gradio UI Service ----------
-  gradio-ui:
+  swlp-suscpicious-ui:
     build:
       context: ui
       dockerfile: Dockerfile
-    image: ${DOCKER_REGISTRY:-}gradio-ui:${TAG}
+    image: ${DOCKER_REGISTRY:-}swlp-suscpicious-ui:${TAG}
     ports:
       - "7860:7860"
     networks:
