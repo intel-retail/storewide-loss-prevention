@@ -1,0 +1,73 @@
+# This workflow uses actions that are not certified by GitHub.
+# They are provided by a third-party and are governed by
+# separate terms of service, privacy policy, and support
+# documentation.
+
+name: trivy_image_scan
+
+on:
+  workflow_dispatch:
+  pull_request:
+  push:
+    branches:
+      - main
+permissions:
+  contents: read
+
+jobs:
+    trivy_image_scan_storewide-lossprevention:
+      permissions:
+        contents: read # for actions/checkout to fetch code
+        security-events: write # for github/codeql-action/upload-sarif to upload SARIF results
+        actions: read # only required for a private repository by github/codeql-action/upload-sarif to get the Action run status
+      name: trivy_image_scan
+      runs-on: "ubuntu-24.04-4core-150GB"
+      steps:
+        - name: Checkout code
+          uses: actions/checkout@1e31de5234b9f8995739874a8ce0492dc87873e2
+          with:
+            ref: main
+        - name: Read TAG from Makefile
+          shell: bash
+          run: |
+            VERSION="$(grep -m1 '^TAG' suspicious-activity-detection/Makefile | sed 's/TAG.*=\s*//' | tr -d '\n\r' | xargs)"
+            echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+            echo "Using VERSION=$VERSION"
+            
+        - name: Build suspicious-activity-detection images
+          run: |
+            cd suspicious-activity-detection
+            make build-lp
+
+        - name: Run Trivy vulnerability scanner on swlp-service
+          uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1
+          with:
+            image-ref: "intel/swlp-service:${{ env.VERSION }}"
+            format: 'table'
+            output: 'trivy-results-swlp-service.txt'
+            severity: 'CRITICAL,HIGH'
+
+        - name: Run Trivy vulnerability scanner on swlp-behavioral-analysis
+          uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1
+          with:
+            image-ref: "intel/swlp-behavioral-analysis:${{ env.VERSION }}"
+            format: 'table'
+            output: 'trivy-results-swlp-behavioral-analysis.txt'
+            severity: 'CRITICAL,HIGH'
+
+        - name: Run Trivy vulnerability scanner on swlp-suscpicious-ui
+          uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1
+          with:
+            image-ref: "intel/swlp-suscpicious-ui:${{ env.VERSION }}"
+            format: 'table'
+            output: 'trivy-results-swlp-suscpicious-ui.txt'
+            severity: 'CRITICAL,HIGH'
+            
+        - name: Upload Trivy scan results
+          uses: actions/upload-artifact@v4
+          with:
+            name: trivy-suspicious-activity-detection-report
+            path: |
+              trivy-results-swlp-service.txt
+              trivy-results-swlp-behavioral-analysis.txt
+              trivy-results-swlp-suscpicious-ui.txt
