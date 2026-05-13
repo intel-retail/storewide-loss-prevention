@@ -315,6 +315,10 @@ down-stream-density:
 build:
 	$(COMPOSE_SCENESCAPE) build
 
+.PHONY: build-lp
+build-lp: ## Build LP container images (swlp-service, behavioral-analysis, swlp-suscpicious-ui)
+	$(COMPOSE_ALL) build swlp-service behavioral-analysis swlp-suscpicious-ui
+
 # ---- Cleanup ----
 
 .PHONY: clean
