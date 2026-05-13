@@ -43,9 +43,9 @@ init:
 
 .PHONY: up
 up:
-	@$(MAKE) -C $(SCENESCAPE_DIR) APP_DIR=$(CURDIR) init init-sample-data download-models init-volumes
+	@$(MAKE) -C $(SCENESCAPE_DIR) APP_DIR=$(CURDIR) RESOURCE_CONFIG=$(RESOURCE_CONFIG) init init-sample-data download-models init-volumes
 	@$(MAKE) patch-device
-	@mkdir -p $(RESULTS_PATH)
+	@mkdir -p $(RESULTS_PATH) $(RESULTS_PATH)/ba $(RESULTS_PATH)/swlp
 ifeq ($(REGISTRY_LOWER),true)
 	@echo ""
 	@echo "=== Pulling LP images from $(REGISTRY_URL) ==="
@@ -70,16 +70,20 @@ endif
 	@echo "  LP logs:         application.log"
 	@echo ""
 	@echo "To stop: make down"
-	@pkill -f "auto-stop-swlp" 2>/dev/null || true
+	@if [ -f /tmp/swlp-auto-stop.pid ]; then \
+		kill $$(cat /tmp/swlp-auto-stop.pid) 2>/dev/null || true; \
+		rm -f /tmp/swlp-auto-stop.pid; \
+	fi
 	@if [ "$(AUTO_STOP_MINUTES)" -gt 0 ] 2>/dev/null; then \
 		echo ""; \
 		echo "=== Auto-shutdown scheduled in $(AUTO_STOP_MINUTES) minutes ==="; \
-		nohup sh -c ": auto-stop-swlp; sleep `expr $(AUTO_STOP_MINUTES) \* 60` && cd $(CURDIR) && $(MAKE) down" >/dev/null 2>&1 & \
+		( sleep `expr $(AUTO_STOP_MINUTES) \* 60` && cd $(CURDIR) && $(MAKE) down ) &  \
+		echo $$! > /tmp/swlp-auto-stop.pid; \
 	fi
 
 .PHONY: down
 down:
-	-$(COMPOSE_ALL) down
+	-$(COMPOSE_ALL) down  --remove-orphans
 	-docker volume rm storewide-lp_seaweedfs-data 2>/dev/null || true
 	@rm -f application.log
 
@@ -224,7 +228,7 @@ BENCHMARK_VENV := cd $(PERF_TOOLS_DIR) && \
 	export PYTHONPATH=$(PERF_TOOLS_DIR):$$PYTHONPATH
 
 .PHONY: benchmark
-benchmark: ## Run a single-scene benchmark (1 scene, measure latency)
+benchmark: build-benchmark up ## Run a single-scene benchmark (1 scene, measure latency)
 	@echo "╔══════════════════════════════════════════════════════════════════╗"
 	@echo "║       SWLP Benchmark — Single Scene                             ║"
 	@echo "╚══════════════════════════════════════════════════════════════════╝"
@@ -240,10 +244,11 @@ benchmark: ## Run a single-scene benchmark (1 scene, measure latency)
 		--latency_metric $(BENCHMARK_LATENCY_METRIC) \
 		--init_duration $(BENCHMARK_INIT_DURATION) \
 		--stabilise_duration $(BENCHMARK_STABILISE_DURATION) \
-		--results_dir $(CURDIR)/$(RESULTS_PATH)
+		--results_dir $(CURDIR)/$(RESULTS_PATH); \
+	rc=$$?; $(MAKE) down; exit $$rc
 
 .PHONY: benchmark-stream-density
-benchmark-stream-density: up ## Iteratively increase scenes until latency threshold is reached
+benchmark-stream-density: build-benchmark up ## Iteratively increase scenes until latency threshold is reached
 	@echo "╔══════════════════════════════════════════════════════════════════╗"
 	@echo "║       SWLP Stream Density — Scene-Based Latency Scaling         ║"
 	@echo "╚══════════════════════════════════════════════════════════════════╝"
@@ -266,7 +271,8 @@ benchmark-stream-density: up ## Iteratively increase scenes until latency thresh
 		--stabilise_duration $(BENCHMARK_STABILISE_DURATION) \
 		--max_iterations $(BENCHMARK_MAX_ITERATIONS) \
 		--min_throughput_ratio $(BENCHMARK_MIN_THROUGHPUT_RATIO) \
-		--results_dir $(CURDIR)/$(RESULTS_PATH)
+		--results_dir $(CURDIR)/$(RESULTS_PATH); \
+	rc=$$?; $(MAKE) down; exit $$rc
 
 .PHONY: consolidate-metrics
 consolidate-metrics: ## Consolidate benchmark metrics from results/ into a CSV

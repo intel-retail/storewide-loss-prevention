@@ -86,7 +86,7 @@ services:
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
       http_proxy: ${http_proxy}
       https_proxy: ${https_proxy}
-      no_proxy: ${no_proxy:-${NO_PROXY:-}},.scenescape.intel.com,${HOST_IP},broker.scenescape.intel.com,seaweedfs,behavioral-analysis,alert-service,localhost,127.0.0.1,172.18.0.0/16,10.0.0.0/8
+      no_proxy: ${no_proxy:-${NO_PROXY:-}},.scenescape.intel.com,${HOST_IP:-},broker.scenescape.intel.com,seaweedfs,behavioral-analysis,alert-service,localhost,127.0.0.1,172.18.0.0/16,10.0.0.0/8
       # Store
       STORE_NAME: ${STORE_NAME:-Retail}
       STORE_ID: ${STORE_ID:-store_001}

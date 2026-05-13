@@ -360,12 +360,19 @@ configs:
 volumes:
   vol-db:
   vol-media:
+    name: storewide-lp_vol-media
+    external: true
   vol-migrations:
   vol-sample-data:
+    name: storewide-lp_vol-sample-data
+    external: true
   vol-models:
+    name: storewide-lp_vol-models
+    external: true
   vol-dlstreamer-pipeline-root:
     driver: local
     driver_opts:
       type: tmpfs
       device: tmpfs
   seaweedfs-data:
+
