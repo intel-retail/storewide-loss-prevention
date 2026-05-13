@@ -1,5 +1,6 @@
 import { useAlertWebSocket } from '../../hooks/useAlertWebSocket';
 import AlertCard from './AlertCard';
+import CameraStreams from './CameraStreams';
 import ImagePreviewModal from '../common/ImagePreviewModal';
 import { useState } from 'react';
 import { clearAlerts } from '../../api/poiApi';
@@ -87,6 +88,8 @@ const LiveAlerts = () => {
 
       {/* Main content */}
       <div className="flex-1 p-6 space-y-4 overflow-y-auto">
+        <CameraStreams />
+
         <div className="flex items-center justify-between">
           <div>
             <h2 className="text-xl font-display font-medium text-intel-dark">Live Alerts</h2>

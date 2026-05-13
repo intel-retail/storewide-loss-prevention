@@ -3,3 +3,24 @@ face_crops/
 debug_faces/
 tools/debug_faces/
 ui/node_modules/
+
+# Runtime data
+data/
+uploads/
+results/
+application.log
+
+# Large binary models (use `make download-models` to fetch)
+models/intel/
+
+# Sample video files (stored in Docker volume)
+sample_data/*.mp4
+
+# Backup / generated config files
+configs/*.bak
+docker/.env
+docker/.env.bak
+*.bak
+
+# Python
+__pycache__/

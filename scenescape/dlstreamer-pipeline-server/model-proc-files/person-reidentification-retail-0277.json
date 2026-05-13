@@ -1,0 +1,18 @@
+{
+  "json_schema_version": "2.0.0",
+  "input_preproc": [
+    {
+      "layer_name": "data",
+      "precision": "U8",
+      "format": "image",
+      "color_format": "BGR",
+      "resize": "aspect-ratio"
+    }
+  ],
+  "output_postproc": [
+    {
+      "attribute_name": "reid",
+      "format": "cosine_distance"
+    }
+  ]
+}

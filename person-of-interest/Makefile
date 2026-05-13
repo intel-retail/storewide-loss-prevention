@@ -28,32 +28,22 @@ init:
 .PHONY: demo
 demo:
 	@$(MAKE) -C $(SCENESCAPE_DIR) APP_DIR=$(CURDIR) init init-sample-data download-models init-volumes
-	@mkdir -p $(RESULTS_PATH)
 	@echo ""
-	@echo "=== Building LP images ==="
-	$(COMPOSE_ALL) build swlp-service behavioral-analysis gradio-ui
+	@echo "=== Building POI images ==="
+	$(COMPOSE_POI) build poi-backend ui
 	@echo ""
 	@echo "=== Starting all services ==="
-	$(COMPOSE_ALL) up -d
-	@rm -f application.log
-	@$(COMPOSE_ALL) logs -f swlp-service behavioral-analysis alert-service > application.log 2>&1 &
+	$(MAKE) up
 	@echo ""
-	@echo "Services running:"
-	@echo "  SceneScape UI:   https://localhost"
-	@echo "  Login:           admin / $$(grep SUPASS docker/.env | cut -d= -f2-)"
-	@echo "  Gradio UI:       http://localhost:7860"
-	@echo "  LP API:          http://localhost:8082"
-	@echo "  Alert Service:   http://localhost:8000"
-	@echo "  Alert WS:        ws://localhost:8000/api/v1/ws"
-	@echo "  LP logs:         application.log"
-	@echo ""
-	@echo "To stop: make lp-down"
+	@echo "To stop: make down"
 
 .PHONY: lp-down
 lp-down:
-	-$(COMPOSE_ALL) down
-	-docker volume rm storewide-lp_seaweedfs-data 2>/dev/null || true
+	-$(COMPOSE_POI) down
+	-$(COMPOSE_SCENESCAPE) down
 	@rm -f application.log
+	@rm -f $(SCENESCAPE_DIR)/dlstreamer-pipeline-server/person-of-interest-*-[0-9]*-pipeline-config.json 2>/dev/null || true
+	@rm -f docker/docker-compose.cameras.yaml 2>/dev/null || true
 
 # SceneScape only (without LP services)
 .PHONY: run-scenescape
@@ -97,7 +87,9 @@ down-lp:
 
 .PHONY: download-models
 download-models:
-	@$(MAKE) -C $(SCENESCAPE_DIR) APP_DIR=$(CURDIR) download-models
+	@echo "Downloading models for Person of Interest..."
+	@bash $(SCENESCAPE_DIR)/scripts/download_models.sh
+	@bash scripts/download_clip_reid.sh
 
 # ---- Stream Density & Benchmarking ----
 

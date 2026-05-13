@@ -221,6 +221,8 @@ services:
       - vol-media:/home/scenescape/SceneScape/media
       - vol-sample-data:/home/scenescape/SceneScape/sample_data
       - ${SECRETSDIR}/django:/run/secrets/django
+      - ../scenescape/controller/patches/moving_object.py:/usr/local/lib/python3.11/site-packages/controller/moving_object.py:ro
+      - ../scenescape/controller/patches/vdms_adapter.py:/usr/local/lib/python3.11/site-packages/controller/vdms_adapter.py:ro
     secrets:
       - source: root-cert
         target: certs/scenescape-ca.pem
@@ -259,6 +261,7 @@ services:
     image: bluenviron/mediamtx:1.14.0
     ports:
       - "8554:8554"
+      - "8889:8889"
     networks:
       storewide-lp:
         aliases:
