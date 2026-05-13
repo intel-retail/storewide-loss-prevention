@@ -55,6 +55,7 @@ services:
       - ${MODEL_PATH:-./models}:/models:ro
       - ../scenescape/secrets:/app/secrets:ro
       - ${RESULTS_PATH:-./results}:/app/results
+      - ./behavioral-analysis/config:/app/config:ro
     restart: unless-stopped
 
   # ---------- Store-wide Loss Prevention ----------

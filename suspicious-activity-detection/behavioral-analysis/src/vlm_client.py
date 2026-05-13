@@ -65,12 +65,22 @@ class VLMClient:
         self.temperature = temperature
         self.max_image_size = max_image_size
 
+        # Persistent HTTP client — reuses TCP connections across requests
+        self._http_client = httpx.AsyncClient(
+            timeout=self.timeout,
+            limits=httpx.Limits(max_connections=4, max_keepalive_connections=2),
+        )
+
         # Circuit breaker state
         self._consecutive_failures = 0
         self._circuit_open = False
         self._circuit_opened_at = 0.0
         self._cb_threshold = circuit_breaker_threshold
         self._cb_cooldown = circuit_breaker_cooldown
+
+    async def close(self) -> None:
+        """Shut down the persistent HTTP client."""
+        await self._http_client.aclose()
 
     def _encode_frame(self, frame: np.ndarray) -> str:
         """Resize and encode a frame as base64 JPEG."""
@@ -129,29 +139,29 @@ class VLMClient:
         # Cooldown elapsed — try a health probe before closing circuit
         logger.info("Circuit breaker cooldown elapsed, probing VLM health...")
         try:
-            async with httpx.AsyncClient(timeout=10.0) as client:
-                r = await client.post(
-                    f"{self.endpoint}/v3/chat/completions",
-                    json={
-                        "model": self.model_name,
-                        "messages": [{"role": "user", "content": "hi"}],
-                        "max_tokens": 5,
-                    },
+            r = await self._http_client.post(
+                f"{self.endpoint}/v3/chat/completions",
+                json={
+                    "model": self.model_name,
+                    "messages": [{"role": "user", "content": "hi"}],
+                    "max_tokens": 5,
+                },
+                timeout=10.0,
+            )
+            if r.status_code == 200:
+                self._circuit_open = False
+                self._consecutive_failures = 0
+                logger.info("Circuit breaker CLOSED — VLM recovered")
+                return None
+            else:
+                # Still broken, reset cooldown
+                self._circuit_opened_at = time.perf_counter()
+                logger.warning("VLM still unhealthy (HTTP %s), circuit stays open", r.status_code)
+                return VLMResult(
+                    raw_response="",
+                    success=False,
+                    error=f"VLM unhealthy after cooldown (HTTP {r.status_code})",
                 )
-                if r.status_code == 200:
-                    self._circuit_open = False
-                    self._consecutive_failures = 0
-                    logger.info("Circuit breaker CLOSED — VLM recovered")
-                    return None
-                else:
-                    # Still broken, reset cooldown
-                    self._circuit_opened_at = time.perf_counter()
-                    logger.warning("VLM still unhealthy (HTTP %s), circuit stays open", r.status_code)
-                    return VLMResult(
-                        raw_response="",
-                        success=False,
-                        error=f"VLM unhealthy after cooldown (HTTP {r.status_code})",
-                    )
         except Exception as e:
             self._circuit_opened_at = time.perf_counter()
             logger.warning("VLM health probe failed: %s, circuit stays open", e)
@@ -221,9 +231,8 @@ class VLMClient:
 
         t0 = time.perf_counter()
         try:
-            async with httpx.AsyncClient(timeout=self.timeout) as client:
-                response = await client.post(url, json=payload)
-                response.raise_for_status()
+            response = await self._http_client.post(url, json=payload)
+            response.raise_for_status()
 
             data = response.json()
             raw_text = data["choices"][0]["message"]["content"]
