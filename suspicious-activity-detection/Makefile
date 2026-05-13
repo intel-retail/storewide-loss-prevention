@@ -228,7 +228,7 @@ BENCHMARK_VENV := cd $(PERF_TOOLS_DIR) && \
 	export PYTHONPATH=$(PERF_TOOLS_DIR):$$PYTHONPATH
 
 .PHONY: benchmark
-benchmark: build-benchmark up ## Run a single-scene benchmark (1 scene, measure latency)
+benchmark:  up ## Run a single-scene benchmark (1 scene, measure latency)
 	@echo "╔══════════════════════════════════════════════════════════════════╗"
 	@echo "║       SWLP Benchmark — Single Scene                             ║"
 	@echo "╚══════════════════════════════════════════════════════════════════╝"
