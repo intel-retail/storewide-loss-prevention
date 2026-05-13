@@ -179,8 +179,8 @@ PERF_TOOLS_DOCKER_DIR := ../performance-tools/docker
 SWLP_STREAM_DENSITY := $(PERF_TOOLS_DIR)/swlp_stream_density.py
 
 # Benchmark image configuration
-BENCHMARK_IMAGE ?= swlp-benchmark:latest
-REGISTRY_BENCHMARK ?= intel/swlp-benchmark:$(TAG)
+BENCHMARK_IMAGE ?= retail-benchmark:latest
+REGISTRY_BENCHMARK ?= intel/retail-benchmark:$(TAG)
 
 .PHONY: fetch-benchmark
 fetch-benchmark: ## Pull benchmark image from registry
@@ -248,7 +248,7 @@ benchmark: build-benchmark up ## Run a single-scene benchmark (1 scene, measure 
 	rc=$$?; $(MAKE) down; exit $$rc
 
 .PHONY: benchmark-stream-density
-benchmark-stream-density: build-benchmark up ## Iteratively increase scenes until latency threshold is reached
+benchmark-stream-density: up ## Iteratively increase scenes until latency threshold is reached
 	@echo "╔══════════════════════════════════════════════════════════════════╗"
 	@echo "║       SWLP Stream Density — Scene-Based Latency Scaling         ║"
 	@echo "╚══════════════════════════════════════════════════════════════════╝"
