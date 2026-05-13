@@ -7,6 +7,9 @@
 # No SceneScape source checkout required.
 # SceneScape-specific targets are in scenescape/Makefile.
 
+TAG ?= 0.0.1
+REGISTRY ?= true
+
 SCENESCAPE_DIR := ../scenescape
 COMPOSE_SCENESCAPE := docker compose --project-directory . --env-file docker/.env -f $(SCENESCAPE_DIR)/docker-compose.yaml
 COMPOSE_LP := docker compose --project-directory . --env-file docker/.env -f docker/docker-compose.yaml
@@ -16,6 +19,12 @@ CAMERAS_OVERRIDE := docker/docker-compose.cameras.yaml
 COMPOSE_ALL := $(if $(wildcard $(CAMERAS_OVERRIDE)),$(COMPOSE_ALL) -f $(CAMERAS_OVERRIDE),$(COMPOSE_ALL))
 
 RESULTS_PATH ?= ./results
+
+export TAG
+REGISTRY_URL = intel/
+
+# Normalize REGISTRY to lowercase for case-insensitive comparison
+REGISTRY_LOWER := $(shell echo $(REGISTRY) | tr A-Z a-z)
 
 # Auto-shutdown timeout in minutes (0 = disabled)
 AUTO_STOP_MINUTES ?= 20
@@ -35,14 +44,21 @@ init:
 .PHONY: up
 up:
 	@$(MAKE) -C $(SCENESCAPE_DIR) APP_DIR=$(CURDIR) RESOURCE_CONFIG=$(RESOURCE_CONFIG) init init-sample-data download-models init-volumes
-	@mkdir -p $(RESULTS_PATH)
+	@$(MAKE) patch-device
+	@mkdir -p $(RESULTS_PATH) $(RESULTS_PATH)/ba $(RESULTS_PATH)/swlp
+ifeq ($(REGISTRY_LOWER),true)
+	@echo ""
+	@echo "=== Pulling LP images from $(REGISTRY_URL) ==="
+	DOCKER_REGISTRY=$(REGISTRY_URL) $(COMPOSE_ALL) pull swlp-service behavioral-analysis swlp-suscpicious-ui
+else
 	@echo ""
 	@echo "=== Building LP images ==="
-	$(COMPOSE_ALL) build swlp-service behavioral-analysis gradio-ui
+	$(COMPOSE_ALL) build swlp-service behavioral-analysis swlp-suscpicious-ui
+endif
 	@echo ""
 	@echo "=== Starting all services ==="
 	$(COMPOSE_ALL) up -d
-	
+	@echo ""
 	
 	@echo ""
 	@echo "Services running:"
@@ -54,16 +70,20 @@ up:
 	@echo "  LP logs:         application.log"
 	@echo ""
 	@echo "To stop: make down"
-	@pkill -f "sleep.*cd $(CURDIR) && $(MAKE) down" 2>/dev/null || true
+	@if [ -f /tmp/swlp-auto-stop.pid ]; then \
+		kill $$(cat /tmp/swlp-auto-stop.pid) 2>/dev/null || true; \
+		rm -f /tmp/swlp-auto-stop.pid; \
+	fi
 	@if [ "$(AUTO_STOP_MINUTES)" -gt 0 ] 2>/dev/null; then \
 		echo ""; \
 		echo "=== Auto-shutdown scheduled in $(AUTO_STOP_MINUTES) minutes ==="; \
-		nohup sh -c "sleep `expr $(AUTO_STOP_MINUTES) \* 60` && cd $(CURDIR) && $(MAKE) down" >/dev/null 2>&1 & \
+		( sleep `expr $(AUTO_STOP_MINUTES) \* 60` && cd $(CURDIR) && $(MAKE) down ) &  \
+		echo $$! > /tmp/swlp-auto-stop.pid; \
 	fi
 
 .PHONY: down
 down:
-	-$(COMPOSE_ALL) down
+	-$(COMPOSE_ALL) down  --remove-orphans
 	-docker volume rm storewide-lp_seaweedfs-data 2>/dev/null || true
 	@rm -f application.log
 
@@ -110,10 +130,15 @@ status:
 
 .PHONY: demo-lp
 demo-lp:
+ifeq ($(REGISTRY_LOWER),true)
+	@echo "Pulling LP images from $(REGISTRY_URL)..."
+	DOCKER_REGISTRY=$(REGISTRY_URL) $(COMPOSE_ALL) pull swlp-service behavioral-analysis swlp-suscpicious-ui
+else
 	@echo "Building LP images..."
-	$(COMPOSE_ALL) build swlp-service behavioral-analysis gradio-ui
+	$(COMPOSE_ALL) build swlp-service behavioral-analysis swlp-suscpicious-ui
+endif
 	@echo "Starting LP services only (SceneScape must be running)..."
-	$(COMPOSE_LP) up -d
+	$(COMPOSE_ALL) up -d swlp-service behavioral-analysis swlp-suscpicious-ui
 
 .PHONY: down-lp
 down-lp:
@@ -125,7 +150,7 @@ down-lp:
 update-submodules:
 	@echo "Cloning performance tool repositories"
 	cd .. && git submodule deinit -f .
-	cd .. && git submodule update --init --recursive
+	cd .. && git submodule update --init --remote --recursive
 	@echo "Submodules updated (if any present)."
 
 # ---- Models ----
@@ -135,10 +160,48 @@ download-models:
 	@echo "Downloading models for Suspicious Activity Detection..."
 	bash download_models/model_download.sh
 
+# Patch graph.pbtxt device to match TARGET_DEVICE from configs/.env.example
+.PHONY: patch-device
+patch-device:
+	@TARGET_DEVICE=$$(grep '^TARGET_DEVICE=' configs/.env.example 2>/dev/null | cut -d= -f2- || echo GPU); \
+	VLM_MODEL=$$(grep '^VLM_MODEL_NAME=' configs/.env.example 2>/dev/null | cut -d= -f2- || echo Qwen/Qwen2.5-VL-7B-Instruct); \
+	GRAPH_FILE=models/vlm_models/$${VLM_MODEL}/graph.pbtxt; \
+	if [ -f "$$GRAPH_FILE" ]; then \
+		CURRENT=$$(grep -oP '(?<=device: ")[^"]+' "$$GRAPH_FILE" || true); \
+		if [ "$$CURRENT" != "$$TARGET_DEVICE" ]; then \
+			sed -i "s|device: \"$$CURRENT\"|device: \"$$TARGET_DEVICE\"|" "$$GRAPH_FILE"; \
+			echo "  ✓ graph.pbtxt device updated: $$CURRENT → $$TARGET_DEVICE"; \
+		else \
+			echo "  ✓ graph.pbtxt device already set to $$TARGET_DEVICE"; \
+		fi \
+	fi
+
 # ---- Stream Density & Benchmarking ----
 
 PERF_TOOLS_DIR := ../performance-tools/benchmark-scripts
+PERF_TOOLS_DOCKER_DIR := ../performance-tools/docker
 SWLP_STREAM_DENSITY := $(PERF_TOOLS_DIR)/swlp_stream_density.py
+
+# Benchmark image configuration
+BENCHMARK_IMAGE ?= swlp-benchmark:latest
+REGISTRY_BENCHMARK ?= intel/swlp-benchmark:$(TAG)
+
+.PHONY: fetch-benchmark
+fetch-benchmark: ## Pull benchmark image from registry
+	@echo "Fetching benchmark image from registry..."
+	docker pull $(REGISTRY_BENCHMARK)
+	docker tag $(REGISTRY_BENCHMARK) $(BENCHMARK_IMAGE)
+	@echo "Benchmark image ready: $(BENCHMARK_IMAGE)"
+
+.PHONY: build-benchmark
+build-benchmark: ## Build benchmark Docker image
+	@echo "Building benchmark Docker image..."
+	@if [ "$(REGISTRY)" = "true" ]; then \
+		$(MAKE) fetch-benchmark; \
+	else \
+		cd $(PERF_TOOLS_DOCKER_DIR) && $(MAKE) build-benchmark; \
+	fi
+	@echo "Benchmark image built: $(BENCHMARK_IMAGE)"
 
 # Benchmark configuration (override via env or CLI)
 BENCHMARK_TARGET_LATENCY_MS ?= 2000
@@ -169,7 +232,7 @@ BENCHMARK_VENV := cd $(PERF_TOOLS_DIR) && \
 	export PYTHONPATH=$(PERF_TOOLS_DIR):$$PYTHONPATH
 
 .PHONY: benchmark
-benchmark: ## Run a single-scene benchmark (1 scene, measure latency)
+benchmark: build-benchmark up ## Run a single-scene benchmark (1 scene, measure latency)
 	@echo "╔══════════════════════════════════════════════════════════════════╗"
 	@echo "║       SWLP Benchmark — Single Scene                             ║"
 	@echo "╚══════════════════════════════════════════════════════════════════╝"
@@ -185,10 +248,11 @@ benchmark: ## Run a single-scene benchmark (1 scene, measure latency)
 		--latency_metric $(BENCHMARK_LATENCY_METRIC) \
 		--init_duration $(BENCHMARK_INIT_DURATION) \
 		--stabilise_duration $(BENCHMARK_STABILISE_DURATION) \
-		--results_dir $(CURDIR)/$(RESULTS_PATH)
+		--results_dir $(CURDIR)/$(RESULTS_PATH); \
+	rc=$$?; $(MAKE) down; exit $$rc
 
 .PHONY: benchmark-stream-density
-benchmark-stream-density: demo ## Iteratively increase scenes until latency threshold is reached
+benchmark-stream-density: build-benchmark up ## Iteratively increase scenes until latency threshold is reached
 	@echo "╔══════════════════════════════════════════════════════════════════╗"
 	@echo "║       SWLP Stream Density — Scene-Based Latency Scaling         ║"
 	@echo "╚══════════════════════════════════════════════════════════════════╝"
@@ -211,7 +275,8 @@ benchmark-stream-density: demo ## Iteratively increase scenes until latency thre
 		--stabilise_duration $(BENCHMARK_STABILISE_DURATION) \
 		--max_iterations $(BENCHMARK_MAX_ITERATIONS) \
 		--min_throughput_ratio $(BENCHMARK_MIN_THROUGHPUT_RATIO) \
-		--results_dir $(CURDIR)/$(RESULTS_PATH)
+		--results_dir $(CURDIR)/$(RESULTS_PATH); \
+	rc=$$?; $(MAKE) down; exit $$rc
 
 .PHONY: consolidate-metrics
 consolidate-metrics: ## Consolidate benchmark metrics from results/ into a CSV
@@ -291,8 +356,8 @@ help:
 	@echo "  Build:"
 	@echo "    make build           - Build LP container images"
 	@echo ""
-	@echo "  Stream Density & Benchmarking:"
-	@echo "    make benchmark                 - Single-scene benchmark (1 scene)"
+	@echo "  Stream Density & Benchmarking:"	@echo "    make fetch-benchmark           - Pull benchmark image from registry"
+	@echo "    make build-benchmark           - Build benchmark Docker image"	@echo "    make benchmark                 - Single-scene benchmark (1 scene)"
 	@echo "    make benchmark-stream-density  - Increase scenes until latency threshold"
 	@echo "    make consolidate-metrics       - Consolidate metrics to CSV"
 	@echo "    make stream-density            - Alias for benchmark-stream-density"

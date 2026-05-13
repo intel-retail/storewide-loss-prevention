@@ -172,6 +172,7 @@ class EngineResult:
     confidence: float
     description: str
     phase_matches: list[PhaseMatch] = field(default_factory=list)
+    key_frames: list[int] = field(default_factory=list)
 
 
 class PoseRuleEngine:
@@ -270,6 +271,7 @@ class PoseRuleEngine:
             required = min_frames_per_phase[0]
             if count >= required:
                 conf = count / n
+                matched_indices = [i for i, m in enumerate(frame_matches[0]) if m]
                 return EngineResult(
                     matched=True,
                     confidence=min(1.0, conf),
@@ -278,6 +280,7 @@ class PoseRuleEngine:
                         name=phases[0].get("name", "0"),
                         matched=True, match_count=count, required=required,
                     )],
+                    key_frames=matched_indices,
                 )
             return EngineResult(
                 matched=False, confidence=0.0,
@@ -326,6 +329,11 @@ class PoseRuleEngine:
                 description="Pattern not detected in any split",
             )
 
+        # Collect frame indices that matched in each phase
+        early_indices = [i for i in range(best_split) if frame_matches[0][i]]
+        late_indices = [i for i in range(best_split, n) if frame_matches[1][i]]
+        key_frames = early_indices + late_indices
+
         phase_matches = [
             PhaseMatch(
                 name=phases[0].get("name", "0"),
@@ -343,6 +351,7 @@ class PoseRuleEngine:
         return EngineResult(
             matched=True, confidence=min(1.0, best_conf),
             description=desc, phase_matches=phase_matches,
+            key_frames=key_frames,
         )
 
     def _find_best_multi_split(
@@ -391,6 +400,7 @@ class PoseRuleEngine:
 
         phase_matches = []
         desc_parts = []
+        key_frames = []
         prev = 0
         for i, phase in enumerate(phases):
             end = best_splits[i] if i < len(best_splits) else n
@@ -399,12 +409,14 @@ class PoseRuleEngine:
                 matched=True, match_count=best_counts[i],
                 required=min_frames_per_phase[i],
             ))
+            key_frames.extend(j for j in range(prev, end) if frame_matches[i][j])
             desc_parts.append(f"'{phase.get('name', str(i))}' {best_counts[i]} frames ({prev}-{end - 1})")
             prev = end
 
         return EngineResult(
             matched=True, confidence=min(1.0, best_conf),
             description=", ".join(desc_parts), phase_matches=phase_matches,
+            key_frames=key_frames,
         )
 
     def _evaluate_window(
@@ -455,9 +467,17 @@ class PoseRuleEngine:
             )
 
         conf = best_count / window_size
+        best_end = best_start + window_size
+        key_frames = []
+        for i in range(len(phases)):
+            key_frames.extend(
+                j for j in range(best_start, best_end) if frame_matches[i][j]
+            )
+        key_frames = sorted(set(key_frames))
         return EngineResult(
             matched=True, confidence=min(1.0, conf),
-            description=f"Matched in window [{best_start}:{best_start + window_size}]",
+            description=f"Matched in window [{best_start}:{best_end}]",
+            key_frames=key_frames,
         )
 
     def _compute_phase_frame_matches(

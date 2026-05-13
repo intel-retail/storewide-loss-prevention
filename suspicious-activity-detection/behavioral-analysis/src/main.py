@@ -85,6 +85,8 @@ async def lifespan(app: FastAPI):
     # Shutdown
     await queue_consumer.stop()
     queue_task.cancel()
+    if vlm_client:
+        await vlm_client.close()
     logger.info("Shutting down BehavioralAnalysis Service")
 
 
@@ -236,7 +238,7 @@ async def analyze_activity(request: AnalyzeRequest):
         # Step 5: If pose pattern matched, send to VLM for confirmation
         if result.matched and settings.vlm_enabled:
             result = await pose_analyzer.analyze_with_vlm(
-                frames=frames,
+                frames=pose_frames,
                 pose_result=result,
             )
 

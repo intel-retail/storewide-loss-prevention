@@ -18,19 +18,28 @@ patterns:
       per_side: true
       phases:
         - name: hand_raised
-          min_frames: 2
+          min_frames: 3
           conditions:
             - subject: wrist
               relation: above
               reference: waist_midpoint
+            - subject: wrist
+              relation: not_near
+              reference: nose
+              threshold: 0.5
 
-        - name: hand_at_waist
-          min_frames: 2
+        - name: hand_to_conceal_zone
+          min_frames: 3
+          match: any
           conditions:
             - subject: wrist
               relation: near
               reference: waist_midpoint
               threshold: 0.6
+            - subject: wrist
+              relation: near
+              reference: torso_center
+              threshold: 0.5
 
     vlm:
       enabled: true
@@ -41,37 +50,26 @@ patterns:
         (frame 1 = earliest, frame 4 = latest).
 
         TASK: Decide whether this person is performing a CONCEALMENT action
-        (taking merchandise from a shelf/display and moving it toward their body,
-        waist, pocket, bag, or under clothing — i.e. hiding it rather than carrying
-        it openly toward checkout or a basket).
+        (taking merchandise from a shelf/display and hiding it on their body,
+        waist, pocket, bag, or under clothing).
 
-        Evidence to look for (the more present, the higher the confidence):
-        1. Hand/arm reaches toward a shelf, rack, or product display in an early frame.
-        2. Hand returns holding or appearing to hold an object.
-        3. The object/hand is moved toward the waist, pocket, jacket, bag, sleeve,
-           waistband, or under a garment — NOT toward a visible shopping basket,
-           cart, or held openly at side.
-        4. Body posture suggests shielding the action (turning away from camera,
-           hunching, using the other hand to cover).
+        Evidence FOR concealment:
+        - Hand reaches toward shelf then moves item toward waist/pocket/bag/under clothing
+        - Body shields or turns away from camera during the motion
 
-        Counter-evidence (lower the confidence):
-        - Item is placed openly in a hand-held basket, cart, or kept visible.
-        - Person is just browsing, adjusting clothing/phone/personal item, or
-          putting their own belongings (phone, wallet) away.
-        - No shelf interaction is visible at all.
-        - Hands stay above waist throughout / no downward motion to body.
+        Evidence AGAINST (set suspicious=false):
+        - Item placed openly in basket, cart, or carried visibly
+        - Person is just browsing shelves without taking anything
+        - Adjusting own belongings (phone, wallet, clothing)
+        - No shelf interaction visible — hands stay at sides or above waist
+        - Normal shopping behavior (comparing items, reading labels, putting item back)
 
-        Calibration:
-        - confidence >= 0.8 : multiple strong cues, clear shelf-to-body motion.
-        - 0.5 - 0.79        : plausible concealment but some ambiguity.
-        - < 0.5             : weak / inconclusive — set "suspicious": false.
+        IMPORTANT: Most people in a store are NOT stealing. Default to suspicious=false unless you see CLEAR shelf-to-body concealment motion.
 
-        Respond ONLY with a single JSON object, no prose, no markdown, no code fence:
-        {
-          "suspicious": true | false,
-          "confidence": 0.0,
-          "reasoning": "one short sentence citing the specific frames and cues you observed"
-        }
+        Confidence: >=0.8 clear concealment, 0.5-0.79 ambiguous, <0.5 set suspicious=false.
+
+        Respond ONLY with a single JSON object, no prose:
+        {"suspicious": true|false, "confidence": 0.0, "reasoning": "one sentence citing cues observed"}
       response_fields:
         - suspicious
         - confidence

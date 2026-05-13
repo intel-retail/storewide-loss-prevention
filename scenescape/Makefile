@@ -60,6 +60,7 @@ init-volumes:
 	@echo "Initializing Docker volumes..."
 	@docker volume create storewide-lp_vol-media 2>/dev/null || true
 	@docker run --rm -v storewide-lp_vol-media:/data alpine:3.23 sh -c "chown 1000:1000 /data && touch /data/placeholder"
+	@docker volume create storewide-lp_vol-models 2>/dev/null || true
 	@echo "Volumes initialized."
 
 # ---- Load local SceneScape images from reid-drop ----
