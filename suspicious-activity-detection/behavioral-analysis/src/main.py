@@ -85,6 +85,8 @@ async def lifespan(app: FastAPI):
     # Shutdown
     await queue_consumer.stop()
     queue_task.cancel()
+    if vlm_client:
+        await vlm_client.close()
     logger.info("Shutting down BehavioralAnalysis Service")
 
 
