@@ -204,7 +204,7 @@ services:
     container_name: ovms-vlm
     volumes:
       - ${MODEL_PATH:-./models/vlm_models}:/models:ro
-      - ${MODEL_PATH:-./models/vlm_models}/.cache/huggingface:/cache
+      - ovms-cache:/cache
     ports:
       - "${OVMS_GRPC_PORT:-8002}:8000"
       - "${OVMS_REST_PORT:-8003}:8001"
@@ -236,3 +236,4 @@ networks:
 
 volumes:
   seaweedfs-data:
+  ovms-cache:

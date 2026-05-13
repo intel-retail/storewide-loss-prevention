@@ -7,7 +7,7 @@
 # No SceneScape source checkout required.
 # SceneScape-specific targets are in scenescape/Makefile.
 
-TAG ?= 0.0.1
+TAG ?= 2026.1.0-rc1
 REGISTRY ?= true
 
 SCENESCAPE_DIR := ../scenescape
@@ -32,6 +32,24 @@ AUTO_STOP_MINUTES ?= 20
 # Device resource config: pass DEVICE=all-gpu-cpu.env (default), all-gpu.env, or all-cpu.env
 DEVICE ?= all-gpu-cpu.env
 RESOURCE_CONFIG := configs/res/$(DEVICE)
+
+
+# ---- Submodules ----
+
+.PHONY: update-submodules
+update-submodules:
+	@echo "Cloning performance tool repositories"
+	cd .. && git submodule deinit -f .
+	cd .. && git submodule update --init --remote --recursive
+	@echo "Submodules updated (if any present)."
+
+# ---- Models ----
+
+.PHONY: download-models
+download-models:
+	@echo "Downloading models for Suspicious Activity Detection..."
+	bash download_models/model_download.sh
+
 
 # ---- Initialization ----
 
@@ -123,8 +141,8 @@ status:
 
 # ---- LP-Only (SceneScape must be running separately) ----
 
-.PHONY: demo-lp
-demo-lp:
+.PHONY: run-lp
+run-lp:
 ifeq ($(REGISTRY_LOWER),true)
 	@echo "Pulling LP images from $(REGISTRY_URL)..."
 	DOCKER_REGISTRY=$(REGISTRY_URL) $(COMPOSE_ALL) pull swlp-service behavioral-analysis swlp-suscpicious-ui
@@ -139,21 +157,7 @@ endif
 down-lp:
 	$(COMPOSE_LP) down
 
-# ---- Submodules ----
 
-.PHONY: update-submodules
-update-submodules:
-	@echo "Cloning performance tool repositories"
-	cd .. && git submodule deinit -f .
-	cd .. && git submodule update --init --remote --recursive
-	@echo "Submodules updated (if any present)."
-
-# ---- Models ----
-
-.PHONY: download-models
-download-models:
-	@echo "Downloading models for Suspicious Activity Detection..."
-	bash download_models/model_download.sh
 
 # Patch graph.pbtxt device to match TARGET_DEVICE from configs/.env.example
 .PHONY: patch-device
