@@ -99,7 +99,6 @@ up:
 down:
 	-$(COMPOSE_ALL) down  --remove-orphans
 	-docker volume rm storewide-lp_seaweedfs-data 2>/dev/null || true
-	@rm -f application.log
 
 # Wipes the corrupt VDMS reid_vector descriptor set + graph metadata that
 # SceneScape's first-init creates without dimensions, then bounces the
