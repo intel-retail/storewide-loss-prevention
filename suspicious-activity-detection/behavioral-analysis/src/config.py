@@ -47,8 +47,8 @@ class Settings(BaseSettings):
     # latency grow without bound. 1–2 keeps OVMS responsive on a single
     # GPU.
     vlm_max_concurrency: int = 1
-    vlm_max_tokens: int = 70
-    vlm_temperature: float = 0.1
+    vlm_max_tokens: int = 50
+    vlm_temperature: float = 0.0
     vlm_max_image_size: int = 256
 
     # Pattern config file path

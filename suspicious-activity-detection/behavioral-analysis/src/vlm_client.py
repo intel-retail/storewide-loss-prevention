@@ -10,6 +10,7 @@ the prompt and response schema are fully driven by configuration.
 
 import asyncio
 import base64
+import io
 import json
 import logging
 import time
@@ -19,6 +20,7 @@ from typing import Any, Optional
 import httpx
 import cv2
 import numpy as np
+from PIL import Image
 
 logger = logging.getLogger(__name__)
 
@@ -68,7 +70,8 @@ class VLMClient:
         # Persistent HTTP client — reuses TCP connections across requests
         self._http_client = httpx.AsyncClient(
             timeout=self.timeout,
-            limits=httpx.Limits(max_connections=4, max_keepalive_connections=2),
+            limits=httpx.Limits(max_connections=10, max_keepalive_connections=5),
+            http2=True,
         )
 
         # Circuit breaker state
@@ -83,7 +86,7 @@ class VLMClient:
         await self._http_client.aclose()
 
     def _encode_frame(self, frame: np.ndarray) -> str:
-        """Resize and encode a frame as base64 JPEG."""
+        """Resize and encode a frame as progressive JPEG."""
         h, w = frame.shape[:2]
         if max(h, w) > self.max_image_size:
             scale = self.max_image_size / max(h, w)
@@ -93,8 +96,11 @@ class VLMClient:
                 interpolation=cv2.INTER_AREA,
             )
 
-        _, buffer = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 80])
-        return base64.b64encode(buffer.tobytes()).decode("utf-8")
+        # Convert BGR (OpenCV) → RGB (PIL) and encode as progressive JPEG
+        img = Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
+        buf = io.BytesIO()
+        img.save(buf, format="JPEG", quality=80, optimize=True, progressive=True)
+        return base64.b64encode(buf.getvalue()).decode("utf-8")
 
     def _build_messages(
         self,
@@ -104,7 +110,10 @@ class VLMClient:
         """Build OpenAI-compatible chat messages with images."""
         content = []
 
-        # Add images
+        # Text prompt first — VLM can start prefilling while images load
+        content.append({"type": "text", "text": prompt})
+
+        # Add images after text
         for frame in frames:
             b64 = self._encode_frame(frame)
             content.append(
@@ -114,10 +123,10 @@ class VLMClient:
                 }
             )
 
-        # Add text prompt
-        content.append({"type": "text", "text": prompt})
-
-        return [{"role": "user", "content": content}]
+        return [
+            {"role": "system", "content": "You are a CCTV surveillance analyst. Respond with JSON only, no extra text."},
+            {"role": "user", "content": content},
+        ]
 
     async def _check_circuit_breaker(self) -> Optional[VLMResult]:
         """Check if circuit breaker is open. Returns error result if open, None if closed."""
@@ -225,6 +234,7 @@ class VLMClient:
             "messages": messages,
             "max_tokens": self.max_tokens,
             "temperature": self.temperature,
+            "stop": ["}"],
         }
 
         url = f"{self.endpoint}/v3/chat/completions"
@@ -308,7 +318,8 @@ class VLMClient:
         Extract and parse JSON from VLM response text.
 
         Handles responses that may have markdown code blocks or
-        extra text around the JSON.
+        extra text around the JSON.  Also handles truncation from
+        stop=["}"] which strips the closing brace.
         """
         text = text.strip()
 
@@ -317,6 +328,13 @@ class VLMClient:
             return json.loads(text)
         except json.JSONDecodeError:
             pass
+
+        # If stop token stripped the closing brace, re-add it
+        if text.startswith("{") and not text.endswith("}"):
+            try:
+                return json.loads(text + "}")
+            except json.JSONDecodeError:
+                pass
 
         # Try extracting from markdown code block
         if "```" in text:
