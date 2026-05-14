@@ -12,6 +12,9 @@ from collections import deque
 
 import paho.mqtt.client as mqtt
 from PIL import Image, ImageDraw, ImageFont
+from fastapi import FastAPI
+from fastapi.responses import StreamingResponse
+import uvicorn
 
 
 # Use Docker service name for container-to-container communication
@@ -41,6 +44,7 @@ _mqtt_lock = threading.Lock()
 _latest_frame = {}      # {camera_id: base64_jpeg}
 _latest_detections = []  # list of objects from regulated scene data
 _video_lock = threading.Lock()
+_last_camera_ts = 0.0  # throttle: timestamp of last accepted camera frame
 
 
 def _on_mqtt_connect(client, userdata, flags, rc):
@@ -54,25 +58,37 @@ def _on_mqtt_connect(client, userdata, flags, rc):
 
 
 def _on_mqtt_message(client, userdata, msg):
-    try:
-        payload = json.loads(msg.payload.decode())
-    except Exception as e:
-        print(f"[MQTT] Failed to parse message on {msg.topic}: {e}")
-        return
+    global _last_camera_ts
 
     if msg.topic.startswith("scenescape/image/camera/"):
+        # Throttle: skip if last frame was < 180ms ago (match 5 FPS render)
+        now = time.monotonic()
+        if now - _last_camera_ts < 0.18:
+            return
         camera_id = msg.topic.split("/")[-1]
+        try:
+            payload = json.loads(msg.payload.decode())
+        except Exception:
+            return
         with _video_lock:
             _latest_frame[camera_id] = payload.get("image", "")
-        global _frame_dirty
-        _frame_dirty = True
+        _last_camera_ts = now
+        _frame_event.set()
     elif msg.topic.startswith("scenescape/regulated/scene/"):
+        try:
+            payload = json.loads(msg.payload.decode())
+        except Exception:
+            return
         with _video_lock:
             _latest_detections.clear()
             for obj in payload.get("objects", []):
                 _latest_detections.append(obj)
-        _frame_dirty = True
+        _frame_event.set()
     elif msg.topic.startswith("alerts"):
+        try:
+            payload = json.loads(msg.payload.decode())
+        except Exception:
+            return
         with _mqtt_lock:
             _mqtt_alerts.appendleft(payload)
 
@@ -141,16 +157,13 @@ def _get_color(obj_id):
 # Pre-render annotated frame in MQTT thread to avoid work during poll
 _rendered_frame = None
 _rendered_lock = threading.Lock()
-_frame_dirty = True  # Flag: new data arrived since last render
+_rendered_jpeg = b""  # Pre-encoded JPEG bytes
+_frame_event = threading.Event()  # Signalled when new MQTT data arrives
 
 
 def _render_frame():
-    """Render the latest frame with detections. Called lazily on UI poll."""
-    global _rendered_frame, _frame_dirty
-    # Skip if nothing changed since last render
-    if not _frame_dirty:
-        return
-    _frame_dirty = False
+    """Render the latest frame with detections."""
+    global _rendered_frame, _rendered_jpeg
 
     with _video_lock:
         frame_b64 = _latest_frame.get("lp-camera1", "")
@@ -202,39 +215,73 @@ def _render_frame():
         draw.rectangle([bbox[0] - 1, bbox[1] - 1, bbox[2] + 1, bbox[3] + 1], fill=color)
         draw.text((x, y - 18), label, fill=(0, 0, 0), font=_FONT)
 
+    # Encode JPEG outside lock to minimize lock hold time
+    buf = io.BytesIO()
+    img.save(buf, format="JPEG", quality=65)
+    jpeg_bytes = buf.getvalue()
+
     with _rendered_lock:
         _rendered_frame = img
+        _rendered_jpeg = jpeg_bytes
 
 
 # ── Background render thread ──────────────────────────────────────────────────
 def _render_loop():
-    """Background thread: render at ~10 FPS."""
+    """Background thread: wait for new frame, render at ~5 FPS max."""
     while True:
+        # Block until MQTT delivers a new frame (no CPU spin)
+        _frame_event.wait(timeout=1.0)
+        _frame_event.clear()
         try:
             _render_frame()
         except Exception as e:
             print(f"[Render] error: {e}")
-        time.sleep(0.1)  # ~10 FPS cap
+        time.sleep(0.2)  # ~5 FPS cap
 
 
 _render_thread = threading.Thread(target=_render_loop, daemon=True)
 _render_thread.start()
 
 
-def _get_rendered_pil():
-    """Return the latest rendered frame as PIL Image for Gradio."""
-    with _rendered_lock:
-        frame = _rendered_frame
-    if frame is not None:
-        return frame
+def _make_loading_jpeg():
+    """Generate a 'Loading...' placeholder JPEG."""
     img = Image.new("RGB", (640, 360), (30, 30, 30))
     draw = ImageDraw.Draw(img)
-    text = "Loading......"
+    text = "Loading..."
     bbox = draw.textbbox((0, 0), text, font=_FONT)
-    text_w = bbox[2] - bbox[0]
-    text_h = bbox[3] - bbox[1]
-    draw.text(((640 - text_w) / 2, (360 - text_h) / 2), text, fill=(180, 180, 180), font=_FONT)
-    return img
+    tw, th = bbox[2] - bbox[0], bbox[3] - bbox[1]
+    draw.text(((640 - tw) / 2, (360 - th) / 2), text, fill=(180, 180, 180), font=_FONT)
+    buf = io.BytesIO()
+    img.save(buf, format="JPEG", quality=75)
+    return buf.getvalue()
+
+_loading_jpeg = _make_loading_jpeg()
+
+
+def _mjpeg_generator():
+    """Yield MJPEG multipart frames from the rendered frame buffer."""
+    # Show loading placeholder until HIGH_VALUE zone event is seen
+    while not _high_value_seen:
+        jpeg = _loading_jpeg
+        yield (
+            b"--frame\r\n"
+            b"Content-Type: image/jpeg\r\n"
+            b"Content-Length: " + str(len(jpeg)).encode() + b"\r\n\r\n"
+            + jpeg + b"\r\n"
+        )
+        time.sleep(0.5)
+    # Stream live frames — just yield pre-encoded JPEG bytes
+    while True:
+        with _rendered_lock:
+            jpeg = _rendered_jpeg
+        if jpeg:
+            yield (
+                b"--frame\r\n"
+                b"Content-Type: image/jpeg\r\n"
+                b"Content-Length: " + str(len(jpeg)).encode() + b"\r\n\r\n"
+                + jpeg + b"\r\n"
+            )
+        time.sleep(0.2)  # ~5 FPS
 
 
 def get_scene_name():
@@ -259,126 +306,121 @@ _cached_zones = pd.DataFrame(columns=["Zone ID", "Name", "Type"])
 _cached_sessions = pd.DataFrame(columns=["Person", "Scene", "Zone", "Type", "Visits"])
 _cached_alerts = pd.DataFrame(columns=["Alert ID", "Type", "Level", "Person", "Region", "Details", "Timestamp"])
 _cached_alert_summary = pd.DataFrame(columns=["Alert Type", "Count"])
+_high_value_seen = False
+
+
+def _refresh_data_cache():
+    """Background thread: refresh zone/session/alert caches every 2s.
+    Runs in its own thread so slow HTTP calls never block Gradio's event queue."""
+    global _cached_zones, _cached_sessions, _cached_alerts, _cached_alert_summary, _high_value_seen
+    while True:
+        try:
+            # --- Zones ---
+            try:
+                resp = requests.get(ZONES_API, timeout=3)
+                if resp.status_code == 200:
+                    data = resp.json()
+                    rows = []
+                    for zone_id, zone in data.items():
+                        rows.append({
+                            "Zone ID": zone_id,
+                            "Name": zone.get("name"),
+                            "Type": zone.get("type"),
+                        })
+                    if rows:
+                        _cached_zones = pd.DataFrame(rows)
+            except Exception:
+                pass
+
+            # --- Sessions ---
+            try:
+                resp = requests.get(SESSIONS_API, timeout=3)
+                if resp.status_code == 200:
+                    data = resp.json()
+                    rows = []
+                    for session in data:
+                        person_id = session.get("object_id", "")[:8]
+                        scene_name = session.get("scene_name", "")
+                        zone_summary = session.get("zone_summary", [])
+                        if zone_summary:
+                            for z in zone_summary:
+                                zone_name = z.get("zone_name", "?")
+                                zone_type = z.get("zone_type", "?")
+                                visit_count = z.get("visit_count", 0)
+                                if zone_type.upper() == "HIGH_VALUE":
+                                    _high_value_seen = True
+                                rows.append({
+                                    "Person": person_id,
+                                    "Scene": scene_name,
+                                    "Zone": zone_name,
+                                    "Type": zone_type,
+                                    "Visits": visit_count,
+                                })
+                    if rows:
+                        _cached_sessions = pd.DataFrame(rows)
+                    else:
+                        _cached_sessions = pd.DataFrame(columns=["Person", "Scene", "Zone", "Type", "Visits"])
+            except Exception:
+                pass
+
+            # --- Alerts ---
+            try:
+                with _mqtt_lock:
+                    data = list(_mqtt_alerts)
+                if not data:
+                    resp = requests.get(ALERTS_API, timeout=3)
+                    if resp.status_code == 200:
+                        data = resp.json()
+                if data:
+                    rows = []
+                    for alert in data:
+                        meta = alert.get("metadata", {})
+                        payload = alert.get("payload", {})
+                        detail_keys = {k: v for k, v in meta.items()
+                                      if k not in ("alert_id", "person_id", "zone_id", "zone_name", "severity")}
+                        if not detail_keys:
+                            detail_keys = {k: v for k, v in payload.items() if k not in ("severity", "evidence")}
+                        rows.append({
+                            "Alert ID": (alert.get("alert_id") or meta.get("alert_id", ""))[:8],
+                            "Type": alert.get("alert_type", ""),
+                            "Level": alert.get("alert_level") or meta.get("severity") or payload.get("severity", ""),
+                            "Person": (alert.get("object_id") or meta.get("person_id", ""))[:8],
+                            "Region": alert.get("region_name") or meta.get("zone_name", "N/A"),
+                            "Details": json.dumps(detail_keys) if detail_keys else "{}",
+                            "Timestamp": alert.get("timestamp", ""),
+                        })
+                    if rows:
+                        _cached_alerts = pd.DataFrame(rows)
+                    # --- Alert Summary ---
+                    counts = {}
+                    for alert in data:
+                        atype = alert.get("alert_type", "UNKNOWN")
+                        counts[atype] = counts.get(atype, 0) + 1
+                    srows = [{"Alert Type": k, "Count": v} for k, v in counts.items()]
+                    if srows:
+                        _cached_alert_summary = pd.DataFrame(srows)
+            except Exception:
+                pass
+        except Exception:
+            pass
+        time.sleep(2.0)
+
+
+_data_thread = threading.Thread(target=_refresh_data_cache, daemon=True)
+_data_thread.start()
 
 
 def get_zones():
-    global _cached_zones
-    try:
-        resp = api_get_with_retry(url=ZONES_API, retries=2, delay=1)
-        if resp.status_code == 200:
-            data = resp.json()
-            rows = []
-            for zone_id, zone in data.items():
-                rows.append({
-                    "Zone ID": zone_id,
-                    "Name": zone.get("name"),
-                    "Type": zone.get("type"),
-                })
-            if rows:
-                _cached_zones = pd.DataFrame(rows)
-            return _cached_zones
-        return _cached_zones
-    except Exception:
-        return _cached_zones
+    return _cached_zones
 
 def get_sessions():
-    global _cached_sessions
-    try:
-        resp = api_get_with_retry(url=SESSIONS_API, retries=2, delay=1)
-        if resp.status_code == 200:
-            data = resp.json()
-            rows = []
-            for session in data:
-                person_id = session.get("object_id", "")[:8]
-                scene_name = session.get("scene_name", "")
-                zone_summary = session.get("zone_summary", [])
-                if zone_summary:
-                    # Check if person's first zone entry was CHECKOUT
-                    first_zone_is_checkout = (
-                        zone_summary[0].get("zone_type", "").upper() == "CHECKOUT"
-                    )
-                    for z in zone_summary:
-                        zone_name = z.get("zone_name", "?")
-                        zone_type = z.get("zone_type", "?")
-                        visit_count = z.get("visit_count", 0)
-                        # If first zone event was CHECKOUT, subtract 1 from its count
-                        if first_zone_is_checkout and zone_type.upper() == "CHECKOUT":
-                            visit_count -= 1
-                            if visit_count <= 0:
-                                continue
-                        rows.append({
-                            "Person": person_id,
-                            "Scene": scene_name,
-                            "Zone": zone_name,
-                            "Type": zone_type,
-                            "Visits": visit_count,
-                        })
-            if rows:
-                _cached_sessions = pd.DataFrame(rows)
-            else:
-                _cached_sessions = pd.DataFrame(columns=["Person", "Scene", "Zone", "Type", "Visits"])
-            return _cached_sessions
-        return _cached_sessions
-    except Exception:
-        return _cached_sessions
+    return _cached_sessions
 
 def get_alerts():
-    global _cached_alerts
-    try:
-        # Use MQTT-fed alerts if available, fall back to REST
-        with _mqtt_lock:
-            data = list(_mqtt_alerts)
-        if not data:
-            resp = api_get_with_retry(url=ALERTS_API, retries=2, delay=1)
-            if resp.status_code == 200:
-                data = resp.json()
-            else:
-                return _cached_alerts
-        rows = []
-        for alert in data:
-            meta = alert.get("metadata", {})
-            payload = alert.get("payload", {})
-            # Build details from metadata (survives MQTT) excluding known fields
-            detail_keys = {k: v for k, v in meta.items()
-                          if k not in ("alert_id", "person_id", "zone_id", "zone_name", "severity")}
-            if not detail_keys:
-                detail_keys = {k: v for k, v in payload.items() if k not in ("severity", "evidence")}
-            rows.append({
-                "Alert ID": (alert.get("alert_id") or meta.get("alert_id", ""))[:8],
-                "Type": alert.get("alert_type", ""),
-                "Level": alert.get("alert_level") or meta.get("severity") or payload.get("severity", ""),
-                "Person": (alert.get("object_id") or meta.get("person_id", ""))[:8],
-                "Region": alert.get("region_name") or meta.get("zone_name", "N/A"),
-                "Details": json.dumps(detail_keys) if detail_keys else "{}",
-                "Timestamp": alert.get("timestamp", ""),
-            })
-        if rows:
-            _cached_alerts = pd.DataFrame(rows)
-        return _cached_alerts
-    except Exception:
-        return _cached_alerts
+    return _cached_alerts
 
 def get_alert_summary():
-    global _cached_alert_summary
-    try:
-        with _mqtt_lock:
-            data = list(_mqtt_alerts)
-        if not data:
-            resp = api_get_with_retry(url=ALERTS_API, retries=2, delay=1)
-            if resp.status_code == 200:
-                data = resp.json()
-            else:
-                return _cached_alert_summary
-        counts = {}
-        for alert in data:
-            atype = alert.get("alert_type", "UNKNOWN")
-            counts[atype] = counts.get(atype, 0) + 1
-        rows = [{"Alert Type": k, "Count": v} for k, v in counts.items()]
-        if rows:
-            _cached_alert_summary = pd.DataFrame(rows)
-        return _cached_alert_summary
-    except Exception:
-        return _cached_alert_summary
+    return _cached_alert_summary
 
 
 HEADER_HTML = """
@@ -443,17 +485,17 @@ div[class*="footer"], a[href*="gradio.app"] { display: none !important; }
 
 /* Right sidebar panels */
 .panel-card {
-    background: white; border-radius: 8px;
-    padding: 0.6rem 0.8rem; margin-bottom: 0.5rem;
-    border: 1px solid #e0e3e8;
-    box-shadow: 0 1px 3px rgba(0,0,0,0.06);
+    background: white !important; border-radius: 8px !important;
+    padding: 0.6rem 0.8rem !important; margin-bottom: 0.5rem !important;
+    border: 1px solid #e0e3e8 !important;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.06) !important;
 }
 .panel-title {
-    font-size: 13px; font-weight: 700; color: #0071c5;
-    font-family: 'Segoe UI', sans-serif;
-    text-transform: uppercase; letter-spacing: 0.5px;
-    margin-bottom: 0.3rem; padding-bottom: 0.25rem;
-    border-bottom: 2px solid #0071c5;
+    font-size: 14px !important; font-weight: 700 !important; color: #0071c5 !important;
+    font-family: 'Segoe UI', sans-serif !important;
+    text-transform: uppercase !important; letter-spacing: 0.5px !important;
+    margin-bottom: 0.3rem !important; padding-bottom: 0.25rem !important;
+    border-bottom: 2px solid #0071c5 !important;
 }
 .live-badge {
     display: inline-block; background: #e53935; color: white;
@@ -479,57 +521,74 @@ div[class*="footer"], a[href*="gradio.app"] { display: none !important; }
 """
 
 with gr.Blocks(title="Storewide Loss Prevention Dashboard") as demo:
+    gr.HTML(f"<style>{CUSTOM_CSS}</style>")
     gr.HTML(HEADER_HTML)
 
     # ── Top row: Live Video (left) | Zones + Sessions (right) ──
     with gr.Row(equal_height=False):
 
-        # ── LEFT: Live Video Feed ──
+        # ── LEFT: Live Video Feed (MJPEG stream) ──
         with gr.Column(scale=4, elem_id="video-panel"):
-            gr.HTML('<span class="live-badge">&#9679; LIVE</span>')
-            live_video = gr.Image(
-                label=None, type="pil", interactive=False,
-                show_label=False,
+            gr.HTML(
+                '<span style="display:inline-block;background:#e53935;color:white;'
+                'font-size:10px;font-weight:700;padding:2px 8px;border-radius:3px;'
+                'letter-spacing:1px;margin-bottom:4px;">&#9679; LIVE</span>'
+            )
+            gr.HTML(
+                '<div style="position:relative;width:100%;padding-bottom:56.25%;background:#1e1e1e;border-radius:8px;overflow:hidden;">'
+                '<img src="/mjpeg" style="position:absolute;top:0;left:0;width:100%;height:100%;object-fit:contain;" '
+                'alt="Live Video Feed" />'
+                '</div>'
             )
 
         # ── RIGHT: Zones & Person Activity ──
         with gr.Column(scale=5, min_width=320):
-            gr.HTML('<div class="panel-card"><div class="panel-title">Zones / Regions</div></div>')
+            gr.HTML('<div style="background:white;border-radius:8px;padding:0.6rem 0.8rem;margin-bottom:0.5rem;border:1px solid #e0e3e8;box-shadow:0 1px 3px rgba(0,0,0,0.06);"><div style="font-size:14px;font-weight:700;color:#0071c5;font-family:Segoe UI,sans-serif;text-transform:uppercase;letter-spacing:0.5px;padding-bottom:0.25rem;border-bottom:2px solid #0071c5;">Zones / Regions</div></div>')
             zones_table = gr.Dataframe(interactive=False, max_height=180)
 
-            gr.HTML('<div class="panel-card" style="margin-top:0.3rem"><div class="panel-title">Person Zone Activity</div></div>')
+            gr.HTML('<div style="background:white;border-radius:8px;padding:0.6rem 0.8rem;margin-top:0.3rem;margin-bottom:0.5rem;border:1px solid #e0e3e8;box-shadow:0 1px 3px rgba(0,0,0,0.06);"><div style="font-size:14px;font-weight:700;color:#0071c5;font-family:Segoe UI,sans-serif;text-transform:uppercase;letter-spacing:0.5px;padding-bottom:0.25rem;border-bottom:2px solid #0071c5;">Person Zone Activity</div></div>')
             sessions_table = gr.Dataframe(interactive=False, max_height=220)
 
     # ── Bottom row: Alert Summary (left) | All Alerts (right) ──
     with gr.Row(equal_height=False):
         with gr.Column(scale=2, min_width=200):
-            gr.HTML('<div class="panel-card"><div class="panel-title">Alert Summary</div></div>')
+            gr.HTML('<div style="background:white;border-radius:8px;padding:0.6rem 0.8rem;margin-bottom:0.5rem;border:1px solid #e0e3e8;box-shadow:0 1px 3px rgba(0,0,0,0.06);"><div style="font-size:14px;font-weight:700;color:#0071c5;font-family:Segoe UI,sans-serif;text-transform:uppercase;letter-spacing:0.5px;padding-bottom:0.25rem;border-bottom:2px solid #0071c5;">Alert Summary</div></div>')
             alert_summary_table = gr.Dataframe(interactive=False, max_height=120)
 
         with gr.Column(scale=7, min_width=400):
-            gr.HTML('<div class="panel-card"><div class="panel-title">All Alerts</div></div>')
+            gr.HTML('<div style="background:white;border-radius:8px;padding:0.6rem 0.8rem;margin-bottom:0.5rem;border:1px solid #e0e3e8;box-shadow:0 1px 3px rgba(0,0,0,0.06);"><div style="font-size:14px;font-weight:700;color:#0071c5;font-family:Segoe UI,sans-serif;text-transform:uppercase;letter-spacing:0.5px;padding-bottom:0.25rem;border-bottom:2px solid #0071c5;">All Alerts</div></div>')
             alerts_table = gr.Dataframe(interactive=False, max_height=250)
 
-    # Auto-poll: fast timer for video, slower timer for data tables
-    video_timer = gr.Timer(0.2)
-    video_timer.tick(
-        fn=_get_rendered_pil,
-        inputs=[],
-        outputs=[live_video],
-    )
+    # Data tables poll — video is handled by native MJPEG stream
     data_timer = gr.Timer(2.0)
     data_timer.tick(
         fn=lambda: (get_zones(), get_sessions(), get_alerts(), get_alert_summary()),
         inputs=[],
         outputs=[zones_table, sessions_table, alerts_table, alert_summary_table],
+        queue=False,
     )
 
     demo.load(
-        fn=lambda: (_get_rendered_pil(), get_zones(), get_sessions(), get_alerts(), get_alert_summary()),
+        fn=lambda: (get_zones(), get_sessions(), get_alerts(), get_alert_summary()),
         inputs=[],
-        outputs=[live_video, zones_table, sessions_table, alerts_table, alert_summary_table],
+        outputs=[zones_table, sessions_table, alerts_table, alert_summary_table],
     )
 
     gr.HTML(FOOTER_HTML)
 
-demo.launch(server_name="0.0.0.0", css=CUSTOM_CSS)
+# Mount Gradio on a FastAPI app with MJPEG endpoint
+app = FastAPI()
+
+
+@app.get("/mjpeg")
+def mjpeg_feed():
+    return StreamingResponse(
+        _mjpeg_generator(),
+        media_type="multipart/x-mixed-replace; boundary=frame",
+    )
+
+
+app = gr.mount_gradio_app(app, demo, path="/")
+
+if __name__ == "__main__":
+    uvicorn.run(app, host="0.0.0.0", port=7860)

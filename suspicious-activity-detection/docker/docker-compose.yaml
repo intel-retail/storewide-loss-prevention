@@ -2,11 +2,19 @@
 # SPDX-License-Identifier: Apache-2.0
 
 services:
-  # ---------- DLStreamer override: app-specific model mounts ----------
+  # ---------- DLStreamer override: app-specific model mounts + startup ordering ----------
   lp-video:
+    depends_on:
+      swlp-suscpicious-ui:
+        condition: service_healthy
     volumes:
       - ${MODEL_PATH:-./models}/detect_models:/home/pipeline-server/models/detect:ro
       - ${MODEL_PATH:-./models}/reid_models:/home/pipeline-server/models/reid:ro
+
+  lp-cams:
+    depends_on:
+      swlp-suscpicious-ui:
+        condition: service_healthy
 
   # ---------- Behavioral Analysis (YOLO Pose + VLM) ----------
   behavioral-analysis:

@@ -27,7 +27,7 @@ REGISTRY_URL = intel/
 REGISTRY_LOWER := $(shell echo $(REGISTRY) | tr A-Z a-z)
 
 # Auto-shutdown timeout in minutes (0 = disabled)
-AUTO_STOP_MINUTES ?= 20
+AUTO_STOP_MINUTES ?= 15
 
 # Device resource config: pass DEVICE=all-gpu-cpu.env (default), all-gpu.env, or all-cpu.env
 DEVICE ?= all-gpu-cpu.env
@@ -82,9 +82,6 @@ up:
 	@echo "  SceneScape UI:   https://localhost"
 	@echo "  Login:           admin / $$(grep SUPASS docker/.env | cut -d= -f2-)"
 	@echo "  Gradio UI:       http://localhost:7860"
-	@echo "  LP API:          http://localhost:8082"
-	@echo "  Alert Service:   http://localhost:8000"
-	@echo "  LP logs:         application.log"
 	@echo ""
 	@echo "To stop: make down"
 	@if [ -f /tmp/swlp-auto-stop.pid ]; then \
@@ -102,7 +99,6 @@ up:
 down:
 	-$(COMPOSE_ALL) down  --remove-orphans
 	-docker volume rm storewide-lp_seaweedfs-data 2>/dev/null || true
-	@rm -f application.log
 
 # Wipes the corrupt VDMS reid_vector descriptor set + graph metadata that
 # SceneScape's first-init creates without dimensions, then bounces the
