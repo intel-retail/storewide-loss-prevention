@@ -25,8 +25,6 @@ jobs:
       steps:
         - name: Checkout code
           uses: actions/checkout@1e31de5234b9f8995739874a8ce0492dc87873e2
-          with:
-            ref: main
         - name: Read TAG from Makefile
           shell: bash
           run: |
