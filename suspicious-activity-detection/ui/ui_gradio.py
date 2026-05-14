@@ -334,18 +334,24 @@ def get_sessions():
                 scene_name = session.get("scene_name", "")
                 zone_summary = session.get("zone_summary", [])
                 if zone_summary:
+                    # Check if person's first zone entry was CHECKOUT
+                    first_zone_is_checkout = (
+                        zone_summary[0].get("zone_type", "").upper() == "CHECKOUT"
+                    )
                     for z in zone_summary:
                         zone_name = z.get("zone_name", "?")
                         zone_type = z.get("zone_type", "?")
                         visit_count = z.get("visit_count", 0)
-                        # Skip first visit to CHECKOUT zone
-                        if zone_type.upper() == "CHECKOUT" and visit_count <= 1:
-                            continue
+                        # If first zone event was CHECKOUT, subtract 1 from its count
+                        if first_zone_is_checkout and zone_type.upper() == "CHECKOUT":
+                            visit_count -= 1
+                            if visit_count <= 0:
+                                continue
                         rows.append({
                             "Person": person_id,
                             "Scene": scene_name,
                             "Zone": zone_name,
-                            "Type": z.get("zone_type", "?"),
+                            "Type": zone_type,
                             "Visits": visit_count,
                         })
             if rows:
