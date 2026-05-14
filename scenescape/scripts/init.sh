@@ -229,6 +229,8 @@ if [ "${SECRETS_GENERATED}" = "1" ]; then
     docker volume rm storewide-lp_vol-db storewide-lp_vol-migrations 2>/dev/null || true
 fi
 
+mkdir -p "$(dirname "${ENV_FILE}")"
+
 if [ -f "${ENV_FILE}" ]; then
     echo "  ${ENV_FILE} already exists. Backing up to ${ENV_FILE}.bak"
     cp "${ENV_FILE}" "${ENV_FILE}.bak"

@@ -63,7 +63,28 @@ git clone https://github.com/sainijit/storewide-loss-prevention-retail.git
 cd storewide-loss-prevention-retail/person-of-interest
 ```
 
-### Step 2: Initialize Environment
+### Step 2: Update Submodules
+
+Pull the latest shared dependencies (SceneScape, performance-tools, etc.):
+
+```bash
+make update-submodules
+```
+
+### Step 3: Place Video Files
+
+Place your camera video files in the `scenescape/sample_data/` directory. The filenames
+must match the `video` entries in `configs/zone_config.json`:
+
+```bash
+../scenescape/sample_data/Camera_01.mp4
+../scenescape/sample_data/Camera_02.mp4
+```
+
+> **Note:** Without video files, the cameras will appear offline in both the SceneScape
+> and POI UIs. Any MP4 video containing people can be used for testing.
+
+### Step 4: Initialize Environment
 
 All application configuration is centralized in `configs/zone_config.json`. Edit that file
 first, then run `make init` to generate `docker/.env`, secrets, and per-camera pipeline
@@ -118,14 +139,14 @@ The `zone_config.json` file defines:
 - `services{}` for ports, log level, and SeaweedFS settings
 - `benchmark{}` for stream-density benchmark parameters
 
-### Step 3: Build the Application
+### Step 5: Build the Application
 
 ```bash
 # Build POI backend and UI images locally
 make build REGISTRY=false
 ```
 
-### Step 4: Download Models
+### Step 6: Download Models
 
 The OpenVINO face detection and re-identification models are required for both enrollment
 and DLStreamer inference:
@@ -138,7 +159,7 @@ This downloads `face-detection-retail-0004`, `face-reidentification-retail-0095`
 `person-detection-retail-0013`, and `person-reidentification-retail-0277` into the
 `models/` directory.
 
-### Step 5: Launch the Application
+### Step 7: Launch the Application
 
 The POI system connects to SceneScape via a shared Docker network. Create it if it
 doesn't exist:
@@ -178,7 +199,7 @@ This launches the following containers:
 > be running (either started by `make up` automatically, or via `make run-scenescape`
 > separately). To start the MCP server, run `docker compose up -d mcp-server` separately.
 
-### Step 6: Access the Interface
+### Step 8: Access the Interface
 
 Open your browser and navigate to:
 
@@ -192,7 +213,7 @@ The POI Backend API is available at:
 http://<host-ip>:8000/docs
 ```
 
-### Step 7: Stop Services
+### Step 9: Stop Services
 
 ```bash
 # Stop all services
