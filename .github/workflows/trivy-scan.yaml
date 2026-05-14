@@ -22,7 +22,9 @@ jobs:
       uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1
       with:
         scan-type: 'fs'
-        scan-ref: '.'
+        scan-ref: 'suspicious-activity-detection'
+        scanners: 'vuln,secret'
+        severity: 'CRITICAL,HIGH'
         format: 'sarif'
         output: 'trivy-results.sarif'
         trivy-config: ./.github/.trivyConf.yaml
