@@ -12,9 +12,7 @@ from collections import deque
 
 import paho.mqtt.client as mqtt
 from PIL import Image, ImageDraw, ImageFont
-from fastapi import FastAPI
-from fastapi.responses import StreamingResponse
-import uvicorn
+
 
 # Use Docker service name for container-to-container communication
 LP_BASE_URL = os.environ.get("LP_BASE_URL", "http://storewide-loss-prevention:8082")
@@ -208,61 +206,22 @@ def _render_frame():
         _rendered_frame = img
 
 
-# ── MJPEG streaming ──────────────────────────────────────────────────────────
-_mjpeg_event = threading.Event()
-_mjpeg_jpeg: bytes = b""
-_mjpeg_jpeg_lock = threading.Lock()
-
-
-def _update_mjpeg_jpeg():
-    """Convert rendered PIL frame to JPEG bytes for MJPEG stream."""
-    global _mjpeg_jpeg
-    with _rendered_lock:
-        frame = _rendered_frame
-    if frame is None:
-        return
-    buf = io.BytesIO()
-    frame.save(buf, format="JPEG", quality=70)
-    with _mjpeg_jpeg_lock:
-        _mjpeg_jpeg = buf.getvalue()
-    _mjpeg_event.set()
-
-
-def _mjpeg_render_loop():
-    """Background thread: render + encode at ~10 FPS."""
+# ── Background render thread ──────────────────────────────────────────────────
+def _render_loop():
+    """Background thread: render at ~10 FPS."""
     while True:
         try:
             _render_frame()
-            _update_mjpeg_jpeg()
         except Exception as e:
-            print(f"[MJPEG] Render error: {e}")
+            print(f"[Render] error: {e}")
         time.sleep(0.1)  # ~10 FPS cap
 
 
-_mjpeg_thread = threading.Thread(target=_mjpeg_render_loop, daemon=True)
-_mjpeg_thread.start()
+_render_thread = threading.Thread(target=_render_loop, daemon=True)
+_render_thread.start()
 
 
-def _mjpeg_generator():
-    """Yield MJPEG multipart frames."""
-    boundary = b"--frame\r\n"
-    while True:
-        _mjpeg_event.wait(timeout=1.0)
-        _mjpeg_event.clear()
-        with _mjpeg_jpeg_lock:
-            jpeg = _mjpeg_jpeg
-        if not jpeg:
-            continue
-        yield (
-            boundary
-            + b"Content-Type: image/jpeg\r\n"
-            + f"Content-Length: {len(jpeg)}\r\n\r\n".encode()
-            + jpeg
-            + b"\r\n"
-        )
-
-
-def _get_mjpeg_pil():
+def _get_rendered_pil():
     """Return the latest rendered frame as PIL Image for Gradio."""
     with _rendered_lock:
         frame = _rendered_frame
@@ -554,7 +513,7 @@ with gr.Blocks(title="Storewide Loss Prevention Dashboard") as demo:
     # Auto-poll: fast timer for video, slower timer for data tables
     video_timer = gr.Timer(0.2)
     video_timer.tick(
-        fn=_get_mjpeg_pil,
+        fn=_get_rendered_pil,
         inputs=[],
         outputs=[live_video],
     )
@@ -566,7 +525,7 @@ with gr.Blocks(title="Storewide Loss Prevention Dashboard") as demo:
     )
 
     demo.load(
-        fn=lambda: (_get_mjpeg_pil(), get_zones(), get_sessions(), get_alerts(), get_alert_summary()),
+        fn=lambda: (_get_rendered_pil(), get_zones(), get_sessions(), get_alerts(), get_alert_summary()),
         inputs=[],
         outputs=[live_video, zones_table, sessions_table, alerts_table, alert_summary_table],
     )
