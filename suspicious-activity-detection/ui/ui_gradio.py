@@ -260,27 +260,18 @@ _loading_jpeg = _make_loading_jpeg()
 
 def _mjpeg_generator():
     """Yield MJPEG multipart frames from the rendered frame buffer."""
-    # Show loading placeholder until HIGH_VALUE zone event is seen
-    while not _high_value_seen:
-        jpeg = _loading_jpeg
+    # Stream live frames — show loading placeholder until first real frame arrives
+    while True:
+        with _rendered_lock:
+            jpeg = _rendered_jpeg
+        if not jpeg:
+            jpeg = _loading_jpeg
         yield (
             b"--frame\r\n"
             b"Content-Type: image/jpeg\r\n"
             b"Content-Length: " + str(len(jpeg)).encode() + b"\r\n\r\n"
             + jpeg + b"\r\n"
         )
-        time.sleep(0.5)
-    # Stream live frames — just yield pre-encoded JPEG bytes
-    while True:
-        with _rendered_lock:
-            jpeg = _rendered_jpeg
-        if jpeg:
-            yield (
-                b"--frame\r\n"
-                b"Content-Type: image/jpeg\r\n"
-                b"Content-Length: " + str(len(jpeg)).encode() + b"\r\n\r\n"
-                + jpeg + b"\r\n"
-            )
         time.sleep(0.2)  # ~5 FPS
 
 
@@ -536,9 +527,25 @@ with gr.Blocks(title="Storewide Loss Prevention Dashboard") as demo:
             )
             gr.HTML(
                 '<div style="position:relative;width:100%;padding-bottom:56.25%;background:#1e1e1e;border-radius:8px;overflow:hidden;">'
-                '<img src="/mjpeg" style="position:absolute;top:0;left:0;width:100%;height:100%;object-fit:contain;" '
+                '<img id="mjpeg-feed" src="/mjpeg" style="position:absolute;top:0;left:0;width:100%;height:100%;object-fit:contain;" '
                 'alt="Live Video Feed" />'
                 '</div>'
+                '<script>'
+                '(function(){'
+                '  function reconnect(){'
+                '    var img=document.getElementById("mjpeg-feed");'
+                '    if(img){img.src="/mjpeg?t="+Date.now();}'
+                '  }'
+                '  setTimeout(reconnect, 2000);'
+                '  setInterval(function(){'
+                '    var img=document.getElementById("mjpeg-feed");'
+                '    if(img && (!img.complete || img.naturalWidth===0)){reconnect();}'
+                '  }, 5000);'
+                '  document.addEventListener("visibilitychange",function(){'
+                '    if(!document.hidden){reconnect();}'
+                '  });'
+                '})();'
+                '</script>'
             )
 
         # ── RIGHT: Zones & Person Activity ──

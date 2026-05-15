@@ -7,6 +7,7 @@ services:
     depends_on:
       swlp-suscpicious-ui:
         condition: service_healthy
+        required: false
     volumes:
       - ${MODEL_PATH:-./models}/detect_models:/home/pipeline-server/models/detect:ro
       - ${MODEL_PATH:-./models}/reid_models:/home/pipeline-server/models/reid:ro
@@ -15,6 +16,7 @@ services:
     depends_on:
       swlp-suscpicious-ui:
         condition: service_healthy
+        required: false
 
   # ---------- Behavioral Analysis (YOLO Pose + VLM) ----------
   behavioral-analysis:
@@ -109,6 +111,7 @@ services:
       BEHAVIORAL_ANALYSIS_URL: ${BEHAVIORAL_ANALYSIS_URL:-http://behavioral-analysis:8080}
       ALERT_SERVICE_URL: ${ALERT_SERVICE_URL:-http://alert-service:8000}
       ANALYSIS_FPS: ${ANALYSIS_FPS:-1}
+      ENABLE_UI: ${ENABLE_UI:-true}
       USECASE_1: ${USECASE_1:-SWLP-Service}
       CONTAINER_RESULTS_PATH: /app/results/swlp
     volumes:
@@ -119,6 +122,8 @@ services:
 
   # ---------- Gradio UI Service ----------
   swlp-suscpicious-ui:
+    profiles:
+      - ui
     build:
       context: ui
       dockerfile: Dockerfile

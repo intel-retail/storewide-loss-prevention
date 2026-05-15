@@ -98,6 +98,25 @@ chain, inference device, pre-process backend, and throughput options. A single
 unified pipeline template (`configs/pipeline-config.json`) is rendered at
 init time using the selected profile.
 
+### Disable the Gradio UI
+
+The Gradio dashboard (`swlp-suscpicious-ui`) is enabled by default. To run
+the stack **without** the UI container (for example, headless deployments or
+resource-constrained systems), pass `ENABLE_UI=false`:
+
+```bash
+# Start without the Gradio UI
+make up ENABLE_UI=false
+
+# Start with the UI (default)
+make up ENABLE_UI=true
+```
+
+When the UI is disabled, the `swlp-suscpicious-ui` container is not built or
+started, and the Gradio dashboard at `http://localhost:7860` is unavailable.
+All other services (SceneScape, swlp-service, Behavioral Analysis, OVMS, etc.)
+continue to run normally.
+
 `make up` performs the following steps automatically:
 
 1. Sources the selected device resource config (`configs/res/<DEVICE>`).
