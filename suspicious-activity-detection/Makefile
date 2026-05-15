@@ -18,6 +18,15 @@ COMPOSE_ALL := docker compose --project-directory . --env-file docker/.env -f $(
 CAMERAS_OVERRIDE := docker/docker-compose.cameras.yaml
 COMPOSE_ALL := $(if $(wildcard $(CAMERAS_OVERRIDE)),$(COMPOSE_ALL) -f $(CAMERAS_OVERRIDE),$(COMPOSE_ALL))
 
+# Enable Gradio UI (set to false to skip)
+ENABLE_UI ?= true
+
+# Conditionally enable the Gradio UI profile
+ENABLE_UI_LOWER := $(shell echo $(ENABLE_UI) | tr A-Z a-z)
+ifeq ($(ENABLE_UI_LOWER),true)
+  COMPOSE_ALL := $(COMPOSE_ALL) --profile ui
+endif
+
 RESULTS_PATH ?= ./results
 
 export TAG
@@ -70,7 +79,11 @@ up:
 		DOCKER_REGISTRY=$(REGISTRY_URL) $(COMPOSE_ALL) pull; \
 	else \
 		echo "Building LP images..."; \
-		$(COMPOSE_ALL) build swlp-service behavioral-analysis swlp-suscpicious-ui; \
+		BUILD_SERVICES="swlp-service behavioral-analysis"; \
+		if [ "$(ENABLE_UI_LOWER)" = "true" ]; then \
+			BUILD_SERVICES="$$BUILD_SERVICES swlp-suscpicious-ui"; \
+		fi; \
+		$(COMPOSE_ALL) build $$BUILD_SERVICES; \
 	fi
 	@echo ""
 	@echo "=== Starting all services ==="
@@ -81,7 +94,11 @@ up:
 	@echo "Services running:"
 	@echo "  SceneScape UI:   https://localhost"
 	@echo "  Login:           admin / $$(grep SUPASS docker/.env | cut -d= -f2-)"
-	@echo "  Gradio UI:       http://localhost:7860"
+	@if [ "$(ENABLE_UI_LOWER)" = "true" ]; then \
+		echo "  Gradio UI:       http://localhost:7860"; \
+	else \
+		echo "  Gradio UI:       DISABLED (ENABLE_UI=false)"; \
+	fi
 	@echo ""
 	@echo "To stop: make down"
 	@if [ -f /tmp/swlp-auto-stop.pid ]; then \
@@ -97,7 +114,7 @@ up:
 
 .PHONY: down
 down:
-	-$(COMPOSE_ALL) down  --remove-orphans
+	-$(COMPOSE_ALL) --profile ui down  --remove-orphans
 	-docker volume rm storewide-lp_seaweedfs-data 2>/dev/null || true
 
 # Wipes the corrupt VDMS reid_vector descriptor set + graph metadata that
@@ -227,7 +244,8 @@ BENCHMARK_VENV := cd $(PERF_TOOLS_DIR) && \
 	export PYTHONPATH=$(PERF_TOOLS_DIR):$$PYTHONPATH
 
 .PHONY: benchmark
-benchmark:  up ## Run a single-scene benchmark (1 scene, measure latency)
+benchmark: ## Run a single-scene benchmark (1 scene, measure latency)
+	@$(MAKE) up ENABLE_UI=false
 	@echo "╔══════════════════════════════════════════════════════════════════╗"
 	@echo "║       SWLP Benchmark — Single Scene                             ║"
 	@echo "╚══════════════════════════════════════════════════════════════════╝"
@@ -247,7 +265,8 @@ benchmark:  up ## Run a single-scene benchmark (1 scene, measure latency)
 	rc=$$?; $(MAKE) down; exit $$rc
 
 .PHONY: benchmark-stream-density
-benchmark-stream-density: up ## Iteratively increase scenes until latency threshold is reached
+benchmark-stream-density: ## Iteratively increase scenes until latency threshold is reached
+	@$(MAKE) up ENABLE_UI=false
 	@echo "╔══════════════════════════════════════════════════════════════════╗"
 	@echo "║       SWLP Stream Density — Scene-Based Latency Scaling         ║"
 	@echo "╚══════════════════════════════════════════════════════════════════╝"
