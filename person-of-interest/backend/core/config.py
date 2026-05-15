@@ -78,8 +78,7 @@ class Config:
     alert_service_url: str = ""
     delivery_handlers: list[str] = field(default_factory=lambda: ["log"])
 
-    # Camera / RTSP / MediaMTX
-    rtsp_base_url: str = "rtsp://mediaserver:8554"
+    # Camera / MediaMTX
     camera_streams: str = ""  # comma-separated: "Camera_01,Camera_02"
     camera_stream_map: dict = field(default_factory=dict)  # camera_id → mediamtx stream path
     mediamtx_webrtc_port: int = 8889
@@ -162,7 +161,6 @@ class Config:
             alert_service_url=os.getenv("ALERT_SERVICE_URL", "http://alert-service:8000"),
             delivery_handlers=handlers,
             log_level=os.getenv("LOG_LEVEL", "INFO"),
-            rtsp_base_url=os.getenv("RTSP_BASE_URL", "rtsp://mediaserver:8554"),
             camera_streams=os.getenv("RTSP_PREWARM_CAMERAS", ""),
             camera_stream_map=_parse_stream_map(os.getenv("CAMERA_STREAM_MAP", "")),
             mediamtx_webrtc_port=int(os.getenv("MEDIAMTX_WEBRTC_PORT", "8889")),

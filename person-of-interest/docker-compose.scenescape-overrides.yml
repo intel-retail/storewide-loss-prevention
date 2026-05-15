@@ -9,8 +9,6 @@ services:
   # Expose WebRTC ICE port for browser playback
   mediaserver:
     ports:
-      - "8554:8554"
-      - "8889:8889"
       - "8189:8189/udp"
 
   # Re-encode to baseline H264 (no B-frames) so WebRTC playback works

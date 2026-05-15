@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import logging
 
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 
 from backend.core.config import get_config
 
@@ -94,5 +94,5 @@ def get_camera(camera_id: str):
         for cam in _cameras_from_config():
             if cam["camera_id"] == camera_id:
                 return cam
-        return {"error": f"Camera {camera_id} not found"}
+        raise HTTPException(status_code=404, detail=f"Camera {camera_id} not found")
     return camera

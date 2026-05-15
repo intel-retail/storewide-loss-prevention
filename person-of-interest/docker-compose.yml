@@ -19,7 +19,7 @@ services:
       - ALERT_DEDUP_TTL=60
       - RTSP_BASE_URL=rtsp://mediaserver:8554
       - RTSP_PREWARM_CAMERAS=Camera_01,Camera_02
-      - CAMERA_STREAM_MAP=Camera_01:Camera_01,Camera_02:Camera_02
+      - CAMERA_STREAM_MAP=${CAMERA_STREAM_MAP:-Camera_01:Camera_01,Camera_02:Camera_02}
       - MQTT_IMAGE_CAMERAS=Camera_01,Camera_02
       - SIMILARITY_THRESHOLD=${SIMILARITY_THRESHOLD:-0.50}
       - SEARCH_SIMILARITY_THRESHOLD=${SEARCH_SIMILARITY_THRESHOLD:-0.65}
@@ -27,7 +27,7 @@ services:
       - ENROLL_FACE_PADDING=0.0
       - ENROLL_FACE_SQUARE=false
       - ENROLL_EMBEDDING_STRATEGY=mean
-      - MEDIAMTX_WEBRTC_PORT=8889
+      - MEDIAMTX_WEBRTC_PORT=${MEDIAMTX_WEBRTC_PORT:-8889}
     volumes:
       - faiss-data:/data/faiss
       - ./data/uploads:/data/uploads

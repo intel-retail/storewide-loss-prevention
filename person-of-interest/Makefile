@@ -398,9 +398,7 @@ up:
 		echo "$(BLUE)=== Creating .env from .env.example ===$(NC)"; \
 		cp .env.example .env; \
 	fi
-	@# Ensure storewide-lp network exists (compose will attach to it)
-	@docker network inspect storewide-lp >/dev/null 2>&1 || \
-		(echo "$(BLUE)=== Creating storewide-lp network ===$(NC)" && docker network create storewide-lp)
+	@# Let SceneScape Compose create and label storewide-lp before POI attaches to it
 	@echo "$(BLUE)=== Starting SceneScape services ===$(NC)"
 	-$(COMPOSE_SCENESCAPE) up -d --no-recreate
 	@echo ""

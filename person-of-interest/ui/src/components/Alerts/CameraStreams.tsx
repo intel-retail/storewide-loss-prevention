@@ -83,7 +83,7 @@ const CameraStreams = () => {
           {!loading && !error && cameras.length === 0 && (
             <p className="text-sm text-gray-500 py-4 text-center">No cameras configured</p>
           )}
-          {!loading && cameras.length > 0 && (
+          {!loading && !error && cameras.length > 0 && (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
               {cameras.map((cam) => (
                 <div key={cam.camera_id} className="relative rounded-lg overflow-hidden bg-gray-900">
