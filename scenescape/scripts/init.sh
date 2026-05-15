@@ -13,6 +13,7 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SCENESCAPE_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 APP_DIR="${1:-}"
+RESOURCE_CONFIG="${2:-}"
 
 if [ -z "${APP_DIR}" ]; then
     echo "Usage: $0 <app-dir>"
@@ -197,9 +198,94 @@ fi
 
 DLSTREAMER_OUTPUT_DIR="${SCENESCAPE_DIR}/dlstreamer-pipeline-server"
 
+# ---- Source AI-model settings from configs/.env.example (single source of truth) ----
+ENV_EXAMPLE="${APP_DIR}/configs/.env.example"
+AI_KEYS_REGEX='^(VLM_ENABLED|VLM_MODEL_NAME|VLM_PRECISION|TARGET_DEVICE|YOLO_MODEL_NAME|DETECT_MODEL|REID_MODEL|MODEL_PRECISION|SCENESCAPE_VERSION|SCENESCAPE_REGISTRY|DLSTREAMER_VERSION|OVMS_IMAGE_TAG|RESULTS_PATH)='
+if [ -f "${ENV_EXAMPLE}" ]; then
+    AI_ENV_TMP="$(mktemp)"
+    grep -E "${AI_KEYS_REGEX}" "${ENV_EXAMPLE}" > "${AI_ENV_TMP}" || true
+    set -a
+    # shellcheck disable=SC1090
+    . "${AI_ENV_TMP}"
+    set +a
+    rm -f "${AI_ENV_TMP}"
+    echo "  Loaded AI-model settings from ${ENV_EXAMPLE}"
+fi
+
+# Source device resource config (all-gpu-cpu.env, all-gpu.env, or all-cpu.env)
+RESOURCE_CONFIG="${RESOURCE_CONFIG:-configs/res/all-gpu-cpu.env}"
+RESOURCE_CONFIG_PATH="${APP_DIR}/${RESOURCE_CONFIG}"
+if [ -f "${RESOURCE_CONFIG_PATH}" ]; then
+    echo "  Loading resource config: ${RESOURCE_CONFIG}"
+    set -a
+    # shellcheck disable=SC1090
+    . "${RESOURCE_CONFIG_PATH}"
+    set +a
+else
+    echo -e "${YELLOW}WARNING: Resource config not found at ${RESOURCE_CONFIG_PATH}, using defaults${NC}"
+fi
+
+DETECT_DEVICE="${DETECT_DEVICE:-GPU}"
+REID_DEVICE="${REID_DEVICE:-CPU}"
+DETECT_MODEL="${DETECT_MODEL:-yolo11s}"
+REID_MODEL="${REID_MODEL:-person-reidentification-retail-0277}"
+
+# Auto-derive model-proc and labels: YOLO models need both, OpenVINO models skip labels
+if [[ "${DETECT_MODEL}" == yolo* ]]; then
+    DETECT_MODEL_PROC="${DETECT_MODEL_PROC:-yolo-v8.json}"
+    DETECT_LABELS="labels-file=/home/pipeline-server/models/detect/${DETECT_MODEL}/labels.txt"
+else
+    DETECT_MODEL_PROC="${DETECT_MODEL_PROC:-${DETECT_MODEL}.json}"
+    DETECT_LABELS=""
+fi
+MODEL_PRECISION="${MODEL_PRECISION:-FP32}"
+
+# Defaults for pipeline element variables (if not set by resource config)
+DECODE="${DECODE:-rtph264depay ! h264parse ! vah264dec ! vapostproc ! video/x-raw(memory:VAMemory)}"
+PRE_PROCESS="${PRE_PROCESS:-pre-process-backend=va-surface-sharing}"
+DETECTION_OPTIONS="${DETECTION_OPTIONS:-ie-config=GPU_THROUGHPUT_STREAMS=2 nireq=2}"
+REID_PRE_PROCESS="${REID_PRE_PROCESS:-pre-process-backend=opencv}"
+REID_OPTIONS="${REID_OPTIONS:-nireq=2}"
+POST_DETECT="${POST_DETECT:-}"
+POST_INFERENCE="${POST_INFERENCE:-}"
+QUEUE_OPTIONS="${QUEUE_OPTIONS:-max-size-buffers=1 leaky=downstream}"
+DETECT_THRESHOLD="${DETECT_THRESHOLD:-0.5}"
+INFERENCE_INTERVAL="${INFERENCE_INTERVAL:-3}"
+
+echo "  Resource config: ${RESOURCE_CONFIG}"
+echo "  Detect: ${DETECT_MODEL} on ${DETECT_DEVICE}  ReID: ${REID_MODEL} on ${REID_DEVICE}"
+
+# Build !-delimited element chains; insert leading " ! " only when non-empty
+POST_DETECT_CHAIN=""
+if [ -n "${POST_DETECT}" ]; then
+    POST_DETECT_CHAIN="! ${POST_DETECT}"
+fi
+POST_INFERENCE_CHAIN=""
+if [ -n "${POST_INFERENCE}" ]; then
+    POST_INFERENCE_CHAIN="! ${POST_INFERENCE}"
+fi
+
 # Camera 1 — always generated
 PIPELINE_CONFIG_1="${DLSTREAMER_OUTPUT_DIR}/${APP_NAME}-${CAMERA_NAME}-pipeline-config.json"
-sed "s/{{CAMERA_NAME}}/${CAMERA_NAME}/g" "${DLSTREAMER_TEMPLATE}" > "${PIPELINE_CONFIG_1}"
+sed -e "s|{{CAMERA_NAME}}|${CAMERA_NAME}|g" \
+    -e "s|{{DETECT_MODEL_PROC}}|${DETECT_MODEL_PROC}|g" \
+    -e "s|{{DETECT_LABELS}}|${DETECT_LABELS}|g" \
+    -e "s|{{DETECT_MODEL}}|${DETECT_MODEL}|g" \
+    -e "s|{{DETECT_DEVICE}}|${DETECT_DEVICE}|g" \
+    -e "s|{{REID_MODEL}}|${REID_MODEL}|g" \
+    -e "s|{{REID_DEVICE}}|${REID_DEVICE}|g" \
+    -e "s|{{MODEL_PRECISION}}|${MODEL_PRECISION}|g" \
+    -e "s|{{DECODE}}|${DECODE}|g" \
+    -e "s|{{PRE_PROCESS}}|${PRE_PROCESS}|g" \
+    -e "s|{{DETECTION_OPTIONS}}|${DETECTION_OPTIONS}|g" \
+    -e "s|{{REID_PRE_PROCESS}}|${REID_PRE_PROCESS}|g" \
+    -e "s|{{REID_OPTIONS}}|${REID_OPTIONS}|g" \
+    -e "s|{{POST_DETECT}}|${POST_DETECT_CHAIN}|g" \
+    -e "s|{{POST_INFERENCE}}|${POST_INFERENCE_CHAIN}|g" \
+    -e "s|{{QUEUE_OPTIONS}}|${QUEUE_OPTIONS}|g" \
+    -e "s|{{DETECT_THRESHOLD}}|${DETECT_THRESHOLD}|g" \
+    -e "s|{{INFERENCE_INTERVAL}}|${INFERENCE_INTERVAL}|g" \
+    "${DLSTREAMER_TEMPLATE}" > "${PIPELINE_CONFIG_1}"
 echo "  Camera 1: ${PIPELINE_CONFIG_1}"
 echo "    Pipeline: reid_${CAMERA_NAME}  cameraid: ${CAMERA_NAME}"
 
@@ -207,9 +293,31 @@ echo "    Pipeline: reid_${CAMERA_NAME}  cameraid: ${CAMERA_NAME}"
 PIPELINE_CONFIG_2=""
 if [ -n "${CAMERA_NAME_2}" ]; then
     PIPELINE_CONFIG_2="${DLSTREAMER_OUTPUT_DIR}/${APP_NAME}-${CAMERA_NAME_2}-pipeline-config.json"
-    sed "s/{{CAMERA_NAME}}/${CAMERA_NAME_2}/g" "${DLSTREAMER_TEMPLATE}" > "${PIPELINE_CONFIG_2}"
+    sed -e "s|{{CAMERA_NAME}}|${CAMERA_NAME_2}|g" \
+        -e "s|{{DETECT_MODEL_PROC}}|${DETECT_MODEL_PROC}|g" \
+        -e "s|{{DETECT_LABELS}}|${DETECT_LABELS}|g" \
+        -e "s|{{DETECT_MODEL}}|${DETECT_MODEL}|g" \
+        -e "s|{{DETECT_DEVICE}}|${DETECT_DEVICE}|g" \
+        -e "s|{{REID_MODEL}}|${REID_MODEL}|g" \
+        -e "s|{{REID_DEVICE}}|${REID_DEVICE}|g" \
+        -e "s|{{MODEL_PRECISION}}|${MODEL_PRECISION}|g" \
+        -e "s|{{DECODE}}|${DECODE}|g" \
+        -e "s|{{PRE_PROCESS}}|${PRE_PROCESS}|g" \
+        -e "s|{{DETECTION_OPTIONS}}|${DETECTION_OPTIONS}|g" \
+        -e "s|{{REID_PRE_PROCESS}}|${REID_PRE_PROCESS}|g" \
+        -e "s|{{REID_OPTIONS}}|${REID_OPTIONS}|g" \
+        -e "s|{{POST_DETECT}}|${POST_DETECT_CHAIN}|g" \
+        -e "s|{{POST_INFERENCE}}|${POST_INFERENCE_CHAIN}|g" \
+        -e "s|{{QUEUE_OPTIONS}}|${QUEUE_OPTIONS}|g" \
+        -e "s|{{DETECT_THRESHOLD}}|${DETECT_THRESHOLD}|g" \
+        -e "s|{{INFERENCE_INTERVAL}}|${INFERENCE_INTERVAL}|g" \
+        "${DLSTREAMER_TEMPLATE}" > "${PIPELINE_CONFIG_2}"
     echo "  Camera 2: ${PIPELINE_CONFIG_2}"
     echo "    Pipeline: reid_${CAMERA_NAME_2}  cameraid: ${CAMERA_NAME_2}"
+else
+    # Fallback to camera 1 config so Docker Compose config resolution doesn't fail
+    PIPELINE_CONFIG_2="${PIPELINE_CONFIG_1}"
+    echo "  Camera 2: not configured (using camera 1 config as placeholder)"
 fi
 
 # ---- Step 4: Generate .env file ----
@@ -302,6 +410,30 @@ BENCHMARK_STABILISE_DURATION=${BENCHMARK_STABILISE_DURATION}
 BENCHMARK_MAX_ITERATIONS=${BENCHMARK_MAX_ITERATIONS}
 BENCHMARK_MIN_THROUGHPUT_RATIO=${BENCHMARK_MIN_THROUGHPUT_RATIO}
 RESULTS_PATH=${RESULTS_PATH}
+
+# ---- AI Models (sourced from configs/.env.example) ----
+VLM_ENABLED=${VLM_ENABLED:-true}
+VLM_MODEL_NAME=${VLM_MODEL_NAME:-Qwen/Qwen2.5-VL-7B-Instruct}
+VLM_PRECISION=${VLM_PRECISION:-int8}
+TARGET_DEVICE=${TARGET_DEVICE:-GPU}
+YOLO_MODEL_NAME=${YOLO_MODEL_NAME:-yolo26n-pose}
+DETECT_MODEL=${DETECT_MODEL}
+REID_MODEL=${REID_MODEL}
+OVMS_IMAGE_TAG=${OVMS_IMAGE_TAG:-2026.1-gpu}
+
+# ---- Device Resource Config ----
+DECODE=${DECODE}
+DETECT_DEVICE=${DETECT_DEVICE}
+REID_DEVICE=${REID_DEVICE}
+PRE_PROCESS=${PRE_PROCESS}
+DETECTION_OPTIONS=${DETECTION_OPTIONS}
+REID_PRE_PROCESS=${REID_PRE_PROCESS}
+REID_OPTIONS=${REID_OPTIONS}
+POST_DETECT=${POST_DETECT}
+POST_INFERENCE=${POST_INFERENCE}
+QUEUE_OPTIONS=${QUEUE_OPTIONS}
+DETECT_THRESHOLD=${DETECT_THRESHOLD}
+INFERENCE_INTERVAL=${INFERENCE_INTERVAL}
 EOF
 
 echo ""
