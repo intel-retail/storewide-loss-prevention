@@ -6,7 +6,7 @@ import os
 MQTT_BROKER = os.getenv("MQTT_BROKER", "broker.scenescape.intel.com")
 MQTT_PORT = int(os.getenv("MQTT_PORT", "1883"))
 MQTT_CA_CERT = os.getenv("MQTT_CA_CERT", "/run/secrets/certs/scenescape-ca.pem")
-SCENE_UID = os.getenv("SCENE_UID", "69252337-3fee-4c43-b330-42c8c9281630")
+SCENE_UID = os.getenv("SCENE_UID", "")
 MQTT_TOPIC_FACE = f"scenescape/data/scene/{SCENE_UID}/face"
 MQTT_TOPIC_EVENTS = f"scenescape/event/region/{SCENE_UID}/+/objects"
 

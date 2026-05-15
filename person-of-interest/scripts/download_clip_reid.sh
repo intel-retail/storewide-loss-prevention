@@ -61,6 +61,7 @@ docker run --rm \
     -e HTTPS_PROXY="${HTTPS_PROXY:-}" \
     -e no_proxy="${no_proxy:-}" \
     -e NO_PROXY="${NO_PROXY:-}" \
+    -e PYTHONWARNINGS="ignore::FutureWarning,ignore::UserWarning" \
     python:3.12-slim bash -c "
 set -e
 
@@ -94,9 +95,11 @@ for f in glob.glob('model/*.py') + glob.glob('model/**/*.py', recursive=True):
 
 echo '--- Exporting to ONNX ---'
 python3 -c \"
-import sys, os
+import sys, os, warnings, logging
 sys.path.insert(0, os.getcwd())
 os.environ['CUDA_VISIBLE_DEVICES'] = ''
+warnings.filterwarnings('ignore')
+logging.disable(logging.WARNING)
 
 import torch
 import torch.nn as nn
@@ -148,13 +151,13 @@ torch.onnx.export(
     opset_version=14, do_constant_folding=True,
 )
 print('  ONNX export complete: clip_reid_market1501.onnx')
-\"
+\" 2>/dev/null
 
 echo '--- Converting to OpenVINO IR ---'
 mkdir -p ${DEST}
 ovc clip_reid_market1501.onnx \
     --output_model ${DEST}/${MODEL_NAME}.xml \
-    --compress_to_fp16=False 2>&1 | tail -3
+    --compress_to_fp16=False 2>/dev/null | tail -3
 
 echo ''
 echo '--- Verifying output ---'

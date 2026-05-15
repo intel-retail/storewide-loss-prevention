@@ -1,0 +1,7 @@
+# SceneScape controller patches (POI-specific)
+# Layered on top of scenescape/docker-compose.yaml — not used standalone.
+services:
+  scene:
+    volumes:
+      - ../scenescape/controller/patches/moving_object.py:/usr/local/lib/python3.11/site-packages/controller/moving_object.py:ro
+      - ../scenescape/controller/patches/vdms_adapter.py:/usr/local/lib/python3.11/site-packages/controller/vdms_adapter.py:ro

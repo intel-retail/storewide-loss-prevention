@@ -8,9 +8,9 @@
 # SceneScape-specific targets are in scenescape/Makefile.
 
 SCENESCAPE_DIR := ../scenescape
-COMPOSE_SCENESCAPE := docker compose --project-directory . --env-file docker/.env -f $(SCENESCAPE_DIR)/docker-compose.yaml
+COMPOSE_SCENESCAPE := docker compose --project-directory . --env-file docker/.env -f $(SCENESCAPE_DIR)/docker-compose.yaml -f docker-compose.scenescape-overrides.yml
 COMPOSE_LP := docker compose --project-directory . --env-file docker/.env -f docker/docker-compose.yaml
-COMPOSE_ALL := docker compose --project-directory . --env-file docker/.env -f $(SCENESCAPE_DIR)/docker-compose.yaml -f docker/docker-compose.yaml
+COMPOSE_ALL := docker compose --project-directory . --env-file docker/.env -f $(SCENESCAPE_DIR)/docker-compose.yaml -f docker-compose.scenescape-overrides.yml -f docker/docker-compose.yaml
 # When stream-density override exists, layer it in
 CAMERAS_OVERRIDE := docker/docker-compose.cameras.yaml
 COMPOSE_ALL := $(if $(wildcard $(CAMERAS_OVERRIDE)),$(COMPOSE_ALL) -f $(CAMERAS_OVERRIDE),$(COMPOSE_ALL))
@@ -408,6 +408,9 @@ up:
 	fi
 	@echo "$(BLUE)=== Starting SceneScape services ===$(NC)"
 	-$(COMPOSE_SCENESCAPE) up -d --no-recreate
+	@echo ""
+	@echo "$(BLUE)=== Resolving SCENE_UID ===$(NC)"
+	@bash scripts/resolve_scene_uid.sh
 	@echo ""
 	@echo "$(BLUE)=== Starting POI services ===$(NC)"
 	$(COMPOSE_POI) up -d poi-backend ui poi-alert-service

@@ -1,4 +1,5 @@
 [submodule "performance-tools"]
 	path = performance-tools
-	url = https://github.com/sainijit/performance-tools.git
-	branch = poi-stream-density
+	url = https://github.com/intel-retail/performance-tools.git
+	branch = main
+

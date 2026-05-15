@@ -90,12 +90,6 @@ services:
       - poi-net
       - storewide-lp
 
-  # ── SceneScape Controller patches (POI-specific) ────────
-  scene:
-    volumes:
-      - ../scenescape/controller/patches/moving_object.py:/usr/local/lib/python3.11/site-packages/controller/moving_object.py:ro
-      - ../scenescape/controller/patches/vdms_adapter.py:/usr/local/lib/python3.11/site-packages/controller/vdms_adapter.py:ro
-
 volumes:
   redis-data:
   faiss-data:

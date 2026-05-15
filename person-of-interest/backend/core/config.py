@@ -95,7 +95,7 @@ class Config:
     @classmethod
     def _from_env(cls) -> Config:
         model_base = os.getenv("MODEL_BASE", "/models/intel")
-        scene_uid = os.getenv("SCENE_UID", "db68a737-92db-4477-880b-07bc7d658ab9")
+        scene_uid = os.getenv("SCENE_UID", "")
         mqtt_topic = os.getenv(
             "MQTT_TOPIC_EVENT",
             "scenescape/data/camera/+",
