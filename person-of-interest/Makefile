@@ -136,11 +136,11 @@ benchmark-stream-density: _benchmark-enroll ## Stream density with auto-enroll
 		$(MAKE) --no-print-directory _benchmark-cleanup; \
 		exit $$ret
 
-# Internal: enroll sample POI before benchmark
+# Internal: ensure services are running, then enroll sample POI before benchmark
 .PHONY: _benchmark-enroll
-_benchmark-enroll:
+_benchmark-enroll: up
 	@echo "$(BLUE)=== Enrolling benchmark POI from sample_data ===$(NC)"
-	@for i in 1 2 3 4 5; do \
+	@for i in 1 2 3 4 5 6 7 8 9 10; do \
 		if curl -sf http://localhost:8000/api/v1/status >/dev/null 2>&1; then break; fi; \
 		echo "  Waiting for poi-backend..."; sleep 5; \
 	done
