@@ -19,7 +19,7 @@
     "version": "latest",
     "controller_image": "scenescape-controller",
     "manager_image": "scenescape-manager",
-    "dlstreamer_version": "2026.1.0-20260331-weekly-ubuntu24",
+    "dlstreamer_version": "2026.1.0-ubuntu24-rc1.1",
     "api_user": "admin"
   },
   "store": {
