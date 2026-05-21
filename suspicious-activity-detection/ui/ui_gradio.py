@@ -1,5 +1,4 @@
 
-import gradio as gr
 import pandas as pd
 import requests
 import json
@@ -13,7 +12,7 @@ from collections import deque
 import paho.mqtt.client as mqtt
 from PIL import Image, ImageDraw, ImageFont
 from fastapi import FastAPI
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, HTMLResponse
 import uvicorn
 
 
@@ -330,8 +329,8 @@ def _refresh_data_cache():
                     data = resp.json()
                     rows = []
                     for session in data:
-                        person_id = session.get("object_id", "")[:8]
-                        scene_name = session.get("scene_name", "")
+                        person_id = str(session.get("object_id") or "")[:8]
+                        scene_name = str(session.get("scene_name") or "")
                         zone_summary = session.get("zone_summary", [])
                         if zone_summary:
                             for z in zone_summary:
@@ -349,10 +348,13 @@ def _refresh_data_cache():
                                 })
                     if rows:
                         _cached_sessions = pd.DataFrame(rows)
+                        print(f"[DATA] Sessions updated: {len(rows)} rows", flush=True)
                     else:
                         _cached_sessions = pd.DataFrame(columns=["Person", "Scene", "Zone", "Type", "Visits"])
-            except Exception:
-                pass
+                else:
+                    print(f"[DATA] Sessions API returned {resp.status_code}", flush=True)
+            except Exception as exc:
+                print(f"[DATA] Sessions error: {exc}", flush=True)
 
             # --- Alerts ---
             try:
@@ -414,177 +416,156 @@ def get_alert_summary():
     return _cached_alert_summary
 
 
-HEADER_HTML = """
-<div style="
-    position: fixed; top: 0; left: 0; right: 0; z-index: 100;
-    background: linear-gradient(135deg, #0071c5 0%, #004a8f 100%);
-    width: 100%; height: 52px;
-    display: flex; align-items: center; justify-content: space-between;
-    padding: 0 1.5rem;
-    border-bottom: 2px solid #005a9e;
-    box-shadow: 0 2px 8px rgba(0,0,0,0.15);
-">
-    <div style="display: flex; align-items: center; gap: 0.8rem;">
-        <svg width="64" height="28" viewBox="0 0 200 80" xmlns="http://www.w3.org/2000/svg">
-            <text x="10" y="55" font-family="Arial, sans-serif" font-size="48" font-weight="bold" fill="white">Intel</text>
-        </svg>
-        <span style="font-size: 16px; font-weight: 600; color: white; font-family: 'Segoe UI', sans-serif; letter-spacing: 0.3px;">
-            Suspicious Activity Detection
-        </span>
-    </div>
-    <span style="font-size: 12px; color: #ffffffaa; font-family: 'Segoe UI', sans-serif;">
-        SCENE_NAME_PLACEHOLDER
-    </span>
-</div>
-""".replace("SCENE_NAME_PLACEHOLDER", get_scene_name())
+SCENE_NAME = get_scene_name()
 
-FOOTER_HTML = """
-<div style="
-    position: fixed; bottom: 0; left: 0; right: 0; z-index: 100;
-    background: linear-gradient(135deg, #0071c5 0%, #004a8f 100%);
-    width: 100%; color: #ffffffcc;
-    text-align: center; padding: 0.4rem; font-size: 12px;
-    font-family: 'Segoe UI', sans-serif;
-    border-top: 2px solid #005a9e;
-    box-shadow: 0 -2px 8px rgba(0,0,0,0.15);
-">
-    &copy; 2026 Intel Corporation
-</div>
+# ─── Full HTML dashboard served by FastAPI (no Gradio event system) ───
+DASHBOARD_HTML = """<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Storewide Loss Prevention Dashboard</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box;}
+body{font-family:'Segoe UI',system-ui,sans-serif;background:#f0f2f5;color:#222;}
+header{position:fixed;top:0;left:0;right:0;z-index:100;height:52px;
+ background:linear-gradient(135deg,#0071c5,#004a8f);display:flex;
+ align-items:center;justify-content:space-between;padding:0 1.5rem;
+ border-bottom:2px solid #005a9e;box-shadow:0 2px 8px rgba(0,0,0,.15);}
+header .brand{display:flex;align-items:center;gap:.8rem;}
+header .brand span{font-size:16px;font-weight:600;color:#fff;letter-spacing:.3px;}
+header .scene{font-size:12px;color:#ffffffaa;}
+footer{position:fixed;bottom:0;left:0;right:0;z-index:100;
+ background:linear-gradient(135deg,#0071c5,#004a8f);color:#ffffffcc;
+ text-align:center;padding:.4rem;font-size:12px;
+ border-top:2px solid #005a9e;box-shadow:0 -2px 8px rgba(0,0,0,.15);}
+main{padding:60px .8rem 36px;display:grid;
+ grid-template-columns:4fr 5fr;grid-template-rows:auto auto;gap:.6rem;
+ max-width:1600px;margin:0 auto;}
+.video-panel{background:#111;border-radius:8px;padding:.4rem;position:relative;}
+.video-panel img{width:100%;border-radius:6px;display:block;}
+.live-badge{position:absolute;top:12px;left:12px;background:#e53935;color:#fff;
+ font-size:10px;font-weight:700;padding:2px 8px;border-radius:3px;
+ letter-spacing:1px;animation:pulse 1.5s infinite;z-index:2;}
+@keyframes pulse{0%,100%{opacity:1;}50%{opacity:.6;}}
+.card{background:#fff;border-radius:8px;padding:.6rem .8rem;
+ border:1px solid #e0e3e8;box-shadow:0 1px 3px rgba(0,0,0,.06);}
+.card+.card{margin-top:.5rem;}
+.card-title{font-size:14px;font-weight:700;color:#0071c5;text-transform:uppercase;
+ letter-spacing:.5px;padding-bottom:.25rem;margin-bottom:.4rem;
+ border-bottom:2px solid #0071c5;}
+.right-col{display:flex;flex-direction:column;gap:.5rem;}
+.bottom-row{grid-column:1/-1;display:grid;grid-template-columns:2fr 7fr;gap:.6rem;}
+table.dt{width:100%;border-collapse:collapse;font-size:12px;}
+table.dt th{text-align:left;padding:5px 8px;font-size:11px;font-weight:700;
+ color:#333;border-bottom:2px solid #0071c5;background:#f8f9fb;}
+table.dt td{padding:4px 8px;border-bottom:1px solid #eee;}
+table.dt tr:hover td{background:#f0f6ff;}
+.empty{color:#999;padding:12px 8px;font-size:13px;font-style:italic;}
+.scroll{overflow-y:auto;}
+</style>
+</head>
+<body>
+
+<header>
+ <div class="brand">
+  <svg width="64" height="28" viewBox="0 0 200 80"><text x="10" y="55" font-family="Arial,sans-serif" font-size="48" font-weight="bold" fill="white">Intel</text></svg>
+  <span>Suspicious Activity Detection</span>
+ </div>
+ <span class="scene">""" + SCENE_NAME + """</span>
+</header>
+
+<main>
+ <!-- LEFT: Video -->
+ <div class="video-panel">
+  <span class="live-badge">&#9679; LIVE</span>
+  <img id="mjpeg-feed" src="/mjpeg" alt="Live Video Feed">
+ </div>
+
+ <!-- RIGHT: Zones + Sessions -->
+ <div class="right-col">
+  <div class="card">
+   <div class="card-title">Zones / Regions</div>
+   <div id="zones-data" class="scroll" style="max-height:180px">
+    <div class="empty">Loading&hellip;</div>
+   </div>
+  </div>
+  <div class="card">
+   <div class="card-title">Person Zone Activity</div>
+   <div id="sessions-data" class="scroll" style="max-height:220px">
+    <div class="empty">Loading&hellip;</div>
+   </div>
+  </div>
+ </div>
+
+ <!-- BOTTOM: Alert Summary + All Alerts -->
+ <div class="bottom-row">
+  <div class="card">
+   <div class="card-title">Alert Summary</div>
+   <div id="summary-data" class="scroll" style="max-height:120px">
+    <div class="empty">Loading&hellip;</div>
+   </div>
+  </div>
+  <div class="card">
+   <div class="card-title">All Alerts</div>
+   <div id="alerts-data" class="scroll" style="max-height:250px">
+    <div class="empty">Loading&hellip;</div>
+   </div>
+  </div>
+ </div>
+</main>
+
+<footer>&copy; 2026 Intel Corporation</footer>
+
+<script>
+function T(rows,cols){
+ if(!rows||!rows.length) return '<div class="empty">No data</div>';
+ var h='<table class="dt"><thead><tr>';
+ for(var i=0;i<cols.length;i++) h+='<th>'+cols[i]+'</th>';
+ h+='</tr></thead><tbody>';
+ for(var r=0;r<rows.length;r++){
+  h+='<tr>';
+  for(var c=0;c<cols.length;c++){
+   var v=rows[r][cols[c]];
+   h+='<td>'+(v!==null&&v!==undefined?v:'')+'</td>';
+  }
+  h+='</tr>';
+ }
+ return h+'</tbody></table>';
+}
+function refresh(){
+ fetch('/api/data').then(function(r){return r.json()}).then(function(d){
+  var e;
+  e=document.getElementById('zones-data');
+  if(e) e.innerHTML=T(d.zones,['Zone ID','Name','Type']);
+  e=document.getElementById('sessions-data');
+  if(e) e.innerHTML=T(d.sessions,['Person','Scene','Zone','Type','Visits']);
+  e=document.getElementById('alerts-data');
+  if(e) e.innerHTML=T(d.alerts,['Alert ID','Type','Level','Person','Region','Details','Timestamp']);
+  e=document.getElementById('summary-data');
+  if(e) e.innerHTML=T(d.alert_summary,['Alert Type','Count']);
+ }).catch(function(err){console.error('[Dashboard]',err)});
+}
+/* MJPEG reconnect */
+function reconn(){var img=document.getElementById('mjpeg-feed');if(img)img.src='/mjpeg?t='+Date.now();}
+setInterval(function(){var img=document.getElementById('mjpeg-feed');
+ if(img&&(!img.complete||img.naturalWidth===0))reconn();},5000);
+document.addEventListener('visibilitychange',function(){if(!document.hidden)reconn();});
+
+setTimeout(refresh,500);
+setInterval(refresh,3000);
+</script>
+</body>
+</html>
 """
 
-CUSTOM_CSS = """
-footer, .built-with, .api-link, .settings-link,
-div[class*="footer"], a[href*="gradio.app"] { display: none !important; }
-
-.gradio-container {
-    padding-top: 52px !important;
-    max-width: 100% !important;
-    background: #f0f2f5 !important;
-}
-
-/* Video panel — dark background */
-#video-panel {
-    background: #111 !important;
-    border-radius: 8px;
-    padding: 0.4rem !important;
-}
-#video-panel img {
-    border-radius: 6px;
-    width: 100% !important;
-    height: auto !important;
-}
-
-/* Right sidebar panels */
-.panel-card {
-    background: white !important; border-radius: 8px !important;
-    padding: 0.6rem 0.8rem !important; margin-bottom: 0.5rem !important;
-    border: 1px solid #e0e3e8 !important;
-    box-shadow: 0 1px 3px rgba(0,0,0,0.06) !important;
-}
-.panel-title {
-    font-size: 14px !important; font-weight: 700 !important; color: #0071c5 !important;
-    font-family: 'Segoe UI', sans-serif !important;
-    text-transform: uppercase !important; letter-spacing: 0.5px !important;
-    margin-bottom: 0.3rem !important; padding-bottom: 0.25rem !important;
-    border-bottom: 2px solid #0071c5 !important;
-}
-.live-badge {
-    display: inline-block; background: #e53935; color: white;
-    font-size: 10px; font-weight: 700; padding: 2px 8px;
-    border-radius: 3px; letter-spacing: 1px;
-    animation: pulse-red 1.5s infinite;
-    margin-bottom: 4px;
-}
-@keyframes pulse-red {
-    0%, 100% { opacity: 1; }
-    50% { opacity: 0.6; }
-}
-
-/* Compact dataframes */
-.gradio-dataframe { font-size: 12px !important; }
-.gradio-dataframe th { font-size: 11px !important; padding: 4px 6px !important; }
-.gradio-dataframe td { padding: 3px 6px !important; }
-
-/* Alerts section at bottom */
-#alerts-row {
-    margin-top: 0.3rem;
-}
-"""
-
-with gr.Blocks(title="Storewide Loss Prevention Dashboard") as demo:
-    gr.HTML(f"<style>{CUSTOM_CSS}</style>")
-    gr.HTML(HEADER_HTML)
-
-    # ── Top row: Live Video (left) | Zones + Sessions (right) ──
-    with gr.Row(equal_height=False):
-
-        # ── LEFT: Live Video Feed (MJPEG stream) ──
-        with gr.Column(scale=4, elem_id="video-panel"):
-            gr.HTML(
-                '<span style="display:inline-block;background:#e53935;color:white;'
-                'font-size:10px;font-weight:700;padding:2px 8px;border-radius:3px;'
-                'letter-spacing:1px;margin-bottom:4px;">&#9679; LIVE</span>'
-            )
-            gr.HTML(
-                '<div style="position:relative;width:100%;padding-bottom:56.25%;background:#1e1e1e;border-radius:8px;overflow:hidden;">'
-                '<img id="mjpeg-feed" src="/mjpeg" style="position:absolute;top:0;left:0;width:100%;height:100%;object-fit:contain;" '
-                'alt="Live Video Feed" />'
-                '</div>'
-                '<script>'
-                '(function(){'
-                '  function reconnect(){'
-                '    var img=document.getElementById("mjpeg-feed");'
-                '    if(img){img.src="/mjpeg?t="+Date.now();}'
-                '  }'
-                '  setTimeout(reconnect, 2000);'
-                '  setInterval(function(){'
-                '    var img=document.getElementById("mjpeg-feed");'
-                '    if(img && (!img.complete || img.naturalWidth===0)){reconnect();}'
-                '  }, 5000);'
-                '  document.addEventListener("visibilitychange",function(){'
-                '    if(!document.hidden){reconnect();}'
-                '  });'
-                '})();'
-                '</script>'
-            )
-
-        # ── RIGHT: Zones & Person Activity ──
-        with gr.Column(scale=5, min_width=320):
-            gr.HTML('<div style="background:white;border-radius:8px;padding:0.6rem 0.8rem;margin-bottom:0.5rem;border:1px solid #e0e3e8;box-shadow:0 1px 3px rgba(0,0,0,0.06);"><div style="font-size:14px;font-weight:700;color:#0071c5;font-family:Segoe UI,sans-serif;text-transform:uppercase;letter-spacing:0.5px;padding-bottom:0.25rem;border-bottom:2px solid #0071c5;">Zones / Regions</div></div>')
-            zones_table = gr.Dataframe(interactive=False, max_height=180)
-
-            gr.HTML('<div style="background:white;border-radius:8px;padding:0.6rem 0.8rem;margin-top:0.3rem;margin-bottom:0.5rem;border:1px solid #e0e3e8;box-shadow:0 1px 3px rgba(0,0,0,0.06);"><div style="font-size:14px;font-weight:700;color:#0071c5;font-family:Segoe UI,sans-serif;text-transform:uppercase;letter-spacing:0.5px;padding-bottom:0.25rem;border-bottom:2px solid #0071c5;">Person Zone Activity</div></div>')
-            sessions_table = gr.Dataframe(interactive=False, max_height=220)
-
-    # ── Bottom row: Alert Summary (left) | All Alerts (right) ──
-    with gr.Row(equal_height=False):
-        with gr.Column(scale=2, min_width=200):
-            gr.HTML('<div style="background:white;border-radius:8px;padding:0.6rem 0.8rem;margin-bottom:0.5rem;border:1px solid #e0e3e8;box-shadow:0 1px 3px rgba(0,0,0,0.06);"><div style="font-size:14px;font-weight:700;color:#0071c5;font-family:Segoe UI,sans-serif;text-transform:uppercase;letter-spacing:0.5px;padding-bottom:0.25rem;border-bottom:2px solid #0071c5;">Alert Summary</div></div>')
-            alert_summary_table = gr.Dataframe(interactive=False, max_height=120)
-
-        with gr.Column(scale=7, min_width=400):
-            gr.HTML('<div style="background:white;border-radius:8px;padding:0.6rem 0.8rem;margin-bottom:0.5rem;border:1px solid #e0e3e8;box-shadow:0 1px 3px rgba(0,0,0,0.06);"><div style="font-size:14px;font-weight:700;color:#0071c5;font-family:Segoe UI,sans-serif;text-transform:uppercase;letter-spacing:0.5px;padding-bottom:0.25rem;border-bottom:2px solid #0071c5;">All Alerts</div></div>')
-            alerts_table = gr.Dataframe(interactive=False, max_height=250)
-
-    # Data tables poll — video is handled by native MJPEG stream
-    data_timer = gr.Timer(2.0)
-    data_timer.tick(
-        fn=lambda: (get_zones(), get_sessions(), get_alerts(), get_alert_summary()),
-        inputs=[],
-        outputs=[zones_table, sessions_table, alerts_table, alert_summary_table],
-        queue=False,
-    )
-
-    demo.load(
-        fn=lambda: (get_zones(), get_sessions(), get_alerts(), get_alert_summary()),
-        inputs=[],
-        outputs=[zones_table, sessions_table, alerts_table, alert_summary_table],
-    )
-
-    gr.HTML(FOOTER_HTML)
-
-# Mount Gradio on a FastAPI app with MJPEG endpoint
+# ─── FastAPI app with MJPEG, data API, and dashboard ───
 app = FastAPI()
+
+
+@app.get("/", response_class=HTMLResponse)
+def dashboard():
+    return DASHBOARD_HTML
 
 
 @app.get("/mjpeg")
@@ -595,7 +576,21 @@ def mjpeg_feed():
     )
 
 
-app = gr.mount_gradio_app(app, demo, path="/")
+@app.get("/api/data")
+def api_data():
+    """JSON endpoint polled by the dashboard JavaScript every 3 seconds."""
+    def _df_to_records(df):
+        if df is None or df.empty:
+            return []
+        return df.to_dict(orient="records")
+
+    return {
+        "zones": _df_to_records(_cached_zones),
+        "sessions": _df_to_records(_cached_sessions),
+        "alerts": _df_to_records(_cached_alerts),
+        "alert_summary": _df_to_records(_cached_alert_summary),
+    }
+
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=7860)

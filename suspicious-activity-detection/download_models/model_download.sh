@@ -22,7 +22,7 @@ MODELS_DIR="${PROJECT_ROOT}/models"
 ###############################################
 ENV_EXAMPLE="${PROJECT_ROOT}/configs/.env.example"
 ENV_FILE="${PROJECT_ROOT}/docker/.env"
-AI_KEYS_REGEX='^(VLM_ENABLED|VLM_MODEL_NAME|VLM_PRECISION|TARGET_DEVICE|YOLO_MODEL_NAME|DETECT_MODEL|REID_MODEL)='
+AI_KEYS_REGEX='^(VLM_ENABLED|VLM_MODEL_NAME|VLM_PRECISION|TARGET_DEVICE|YOLO_MODEL_NAME|DETECT_MODEL|DETECT_MODEL_PRECISION|REID_MODEL|REID_MODEL_PRECISION)='
 
 SOURCE_FILE=""
 if [ -f "${ENV_EXAMPLE}" ]; then
@@ -48,8 +48,10 @@ VLM_MODEL_NAME="${VLM_MODEL_NAME:-Qwen/Qwen2.5-VL-7B-Instruct}"
 VLM_PRECISION="${VLM_PRECISION:-int8}"
 TARGET_DEVICE="${TARGET_DEVICE:-GPU}"
 YOLO_MODEL_NAME="${YOLO_MODEL_NAME:-yolo11n-pose}"
-DETECT_MODEL="${DETECT_MODEL:-yolo11s}"
+DETECT_MODEL="${DETECT_MODEL:-yolov8s}"
+DETECT_MODEL_PRECISION="${DETECT_MODEL_PRECISION:-FP16}"
 REID_MODEL="${REID_MODEL:-person-reidentification-retail-0277}"
+REID_MODEL_PRECISION="${REID_MODEL_PRECISION:-FP16}"
 
 # Model directories (unified paths)
 VLM_MODELS_DIR="${MODELS_DIR}/vlm_models"
@@ -72,8 +74,8 @@ echo "Model Setup — Suspicious Activity Detection"
 echo "=========================================="
 echo "  VLM Model:     ${VLM_MODEL_NAME} (${VLM_PRECISION}, ${TARGET_DEVICE})"
 echo "  YOLO Pose:     ${YOLO_MODEL_NAME}"
-echo "  Detect Model:  ${DETECT_MODEL}"
-echo "  ReID Model:    ${REID_MODEL}"
+echo "  Detect Model:  ${DETECT_MODEL} (${DETECT_MODEL_PRECISION})"
+echo "  ReID Model:    ${REID_MODEL} (${REID_MODEL_PRECISION})"
 echo "  Models Dir:    ${MODELS_DIR}"
 echo ""
 
@@ -279,10 +281,10 @@ echo "[2/4] Detect Model: ${DETECT_MODEL}"
 echo "------------------------------------------"
 
 mkdir -p "${DETECT_DIR}"
-local target_dir="${DETECT_DIR}/${DETECT_MODEL}"
+local target_dir="${DETECT_DIR}/${DETECT_MODEL}/${DETECT_MODEL_PRECISION}"
 
 if [ -f "${target_dir}/${DETECT_MODEL}.xml" ] && [ -f "${target_dir}/${DETECT_MODEL}.bin" ]; then
-    echo "  ✓ Detect model already exists"
+    echo "  ✓ Detect model already exists (${DETECT_MODEL_PRECISION})"
 else
     if [[ "${DETECT_MODEL}" == yolo* ]]; then
         # --- YOLO model: export via ultralytics ---
@@ -305,7 +307,7 @@ else
             echo "  ✓ YOLO detect dependencies cached"
         fi
 
-        DETECT_DIR="${DETECT_DIR}" DETECT_MODEL="${DETECT_MODEL}" \
+        DETECT_DIR="${DETECT_DIR}" DETECT_MODEL="${DETECT_MODEL}" DETECT_MODEL_PRECISION="${DETECT_MODEL_PRECISION}" \
         python3 - << 'PYEOF'
 import os, shutil
 from pathlib import Path
@@ -313,9 +315,11 @@ from ultralytics import YOLO
 
 models_dir = Path(os.environ["DETECT_DIR"])
 model_name = os.environ["DETECT_MODEL"]
+prec = os.environ.get('DETECT_MODEL_PRECISION', 'FP16').upper()
 model_pt = models_dir / f"{model_name}.pt"
 export_dir = models_dir / f"{model_name}_openvino_model"
-target_dir = models_dir / model_name
+int8_dir = models_dir / f"{model_name}_int8_openvino_model"
+target_dir = models_dir / model_name / prec
 
 if not model_pt.exists():
     print(f"  Downloading {model_name}.pt ...")
@@ -325,21 +329,25 @@ if not model_pt.exists():
     os.chdir(orig)
     print(f"  ✓ Downloaded: {model_pt}")
 
-if not export_dir.exists() and not target_dir.exists():
-    print(f"  Exporting to OpenVINO FP16 ...")
+if not export_dir.exists() and not int8_dir.exists() and not target_dir.exists():
+    print(f"  Exporting to OpenVINO {prec} ...")
     orig = os.getcwd()
     os.chdir(str(models_dir))
-    YOLO(str(model_pt)).export(format="openvino", dynamic=False, half=True, imgsz=640)
+    half = prec in ('FP16', 'INT8')
+    do_int8 = prec == 'INT8'
+    YOLO(str(model_pt)).export(format="openvino", dynamic=False, half=half, int8=do_int8, imgsz=640)
     os.chdir(orig)
 
-if export_dir.exists():
+# Check for INT8 export dir first, then FP16/FP32 fallback
+actual_export = int8_dir if int8_dir.exists() else (export_dir if export_dir.exists() else None)
+if actual_export is not None:
     target_dir.mkdir(parents=True, exist_ok=True)
     for ext in ("*.xml", "*.bin"):
-        for f in export_dir.glob(ext):
+        for f in actual_export.glob(ext):
             dest = target_dir / f"{model_name}{f.suffix}"
             shutil.move(str(f), str(dest))
             print(f"  ✓ Moved {f.name} -> {dest}")
-    shutil.rmtree(str(export_dir))
+    shutil.rmtree(str(actual_export))
 
 if model_pt.exists():
     model_pt.unlink()
@@ -349,7 +357,7 @@ PYEOF
         deactivate 2>/dev/null || true
     else
         # --- OpenVINO Model Zoo: download via wget ---
-        local prec="${MODEL_PRECISION:-FP32}"
+        local prec="${DETECT_MODEL_PRECISION:-FP16}"
         echo "  Downloading ${DETECT_MODEL} (${prec}) from OpenVINO Model Zoo..."
         mkdir -p "${target_dir}"
         wget -nv -O "${target_dir}/${DETECT_MODEL}.xml" \
@@ -359,25 +367,26 @@ PYEOF
     fi
 
     if [ -f "${target_dir}/${DETECT_MODEL}.xml" ] && [ -f "${target_dir}/${DETECT_MODEL}.bin" ]; then
-        echo "  ✓ Detect model ready"
+        echo "  ✓ Detect model ready (${DETECT_MODEL_PRECISION})"
     else
         echo "  ✗ Detect model download/export failed"
         return 1
     fi
 fi
 
-# Copy model-proc file
+# Copy model-proc and labels to model base dir (shared across precisions)
+local model_base_dir="${DETECT_DIR}/${DETECT_MODEL}"
 if [[ "${DETECT_MODEL}" == yolo* ]]; then
     # YOLO models use yolo-v8.json
-    if [ ! -f "${target_dir}/yolo-v8.json" ]; then
+    if [ ! -f "${model_base_dir}/yolo-v8.json" ]; then
         local MODELPROC_SRC="${MODEL_PROC_DIR}/yolo-v8.json"
         if [ -f "${MODELPROC_SRC}" ]; then
-            cp "${MODELPROC_SRC}" "${target_dir}/yolo-v8.json"
+            cp "${MODELPROC_SRC}" "${model_base_dir}/yolo-v8.json"
             echo "  ✓ yolo-v8.json model-proc copied"
         else
             local container_image="docker.io/intel/dlstreamer-pipeline-server:${DLSTREAMER_VERSION:-2026.1.0-20260331-weekly-ubuntu24}"
             if docker create --name modelproctmp "${container_image}" true >/dev/null 2>&1; then
-                docker cp "modelproctmp:/opt/intel/dlstreamer/samples/gstreamer/model_proc/public/yolo-v8.json" "${target_dir}/yolo-v8.json" 2>/dev/null && \
+                docker cp "modelproctmp:/opt/intel/dlstreamer/samples/gstreamer/model_proc/public/yolo-v8.json" "${model_base_dir}/yolo-v8.json" 2>/dev/null && \
                     echo "  ✓ yolo-v8.json extracted from DLStreamer image" || \
                     echo "  ⚠ Failed to extract yolo-v8.json"
                 docker rm modelproctmp >/dev/null 2>&1
@@ -388,23 +397,23 @@ if [[ "${DETECT_MODEL}" == yolo* ]]; then
     fi
     # Copy labels.txt
     local LABELS_SRC="${MODEL_PROC_DIR}/labels.txt"
-    if [ -f "${LABELS_SRC}" ] && [ ! -f "${target_dir}/labels.txt" ]; then
-        cp "${LABELS_SRC}" "${target_dir}/labels.txt"
+    if [ -f "${LABELS_SRC}" ] && [ ! -f "${model_base_dir}/labels.txt" ]; then
+        cp "${LABELS_SRC}" "${model_base_dir}/labels.txt"
         echo "  ✓ labels.txt copied"
-    elif [ -f "${target_dir}/labels.txt" ]; then
+    elif [ -f "${model_base_dir}/labels.txt" ]; then
         echo "  ✓ labels.txt already exists"
     fi
 else
     # OpenVINO models use {model_name}.json
-    if [ ! -f "${target_dir}/${DETECT_MODEL}.json" ]; then
+    if [ ! -f "${model_base_dir}/${DETECT_MODEL}.json" ]; then
         local MODELPROC_SRC="${MODEL_PROC_DIR}/${DETECT_MODEL}.json"
         if [ -f "${MODELPROC_SRC}" ]; then
-            cp "${MODELPROC_SRC}" "${target_dir}/${DETECT_MODEL}.json"
+            cp "${MODELPROC_SRC}" "${model_base_dir}/${DETECT_MODEL}.json"
             echo "  ✓ ${DETECT_MODEL}.json model-proc copied"
         else
             local container_image="docker.io/intel/dlstreamer-pipeline-server:${DLSTREAMER_VERSION:-2026.1.0-20260331-weekly-ubuntu24}"
             if docker create --name modelproctmp "${container_image}" true >/dev/null 2>&1; then
-                docker cp "modelproctmp:/opt/intel/dlstreamer/samples/gstreamer/model_proc/intel/${DETECT_MODEL}.json" "${target_dir}/${DETECT_MODEL}.json" 2>/dev/null && \
+                docker cp "modelproctmp:/opt/intel/dlstreamer/samples/gstreamer/model_proc/intel/${DETECT_MODEL}.json" "${model_base_dir}/${DETECT_MODEL}.json" 2>/dev/null && \
                     echo "  ✓ ${DETECT_MODEL}.json extracted from DLStreamer image" || \
                     echo "  ⚠ Failed to extract ${DETECT_MODEL}.json"
                 docker rm modelproctmp >/dev/null 2>&1
@@ -420,16 +429,24 @@ fi
 download_reid() {
 echo ""
 echo "------------------------------------------"
-echo "[3/4] ReID Model: ${REID_MODEL}"
+echo "[3/4] ReID Model: ${REID_MODEL} (${REID_MODEL_PRECISION})"
 echo "------------------------------------------"
 
 mkdir -p "${REID_DIR}"
-local target_dir="${REID_DIR}/${REID_MODEL}"
+local target_dir="${REID_DIR}/${REID_MODEL}/${REID_MODEL_PRECISION}"
 
 if [ -f "${target_dir}/${REID_MODEL}.xml" ] && [ -f "${target_dir}/${REID_MODEL}.bin" ]; then
-    echo "  ✓ ReID model already exists"
-else
-    local prec="${MODEL_PRECISION:-FP32}"
+    # Validate that the XML is a real OpenVINO IR (not an HTML error page)
+    if head -c 5 "${target_dir}/${REID_MODEL}.xml" | grep -q '<?xml'; then
+        echo "  ✓ ReID model already exists (${REID_MODEL_PRECISION})"
+    else
+        echo "  ⚠ ReID model XML is invalid (corrupted download), re-downloading..."
+        rm -f "${target_dir}/${REID_MODEL}.xml" "${target_dir}/${REID_MODEL}.bin"
+    fi
+fi
+
+if [ ! -f "${target_dir}/${REID_MODEL}.xml" ] || [ ! -f "${target_dir}/${REID_MODEL}.bin" ]; then
+    local prec="${REID_MODEL_PRECISION:-FP16}"
     echo "  Downloading ${REID_MODEL} (${prec}) from OpenVINO Model Zoo..."
     mkdir -p "${target_dir}"
     wget -nv -O "${target_dir}/${REID_MODEL}.xml" \
@@ -438,7 +455,7 @@ else
         "${OMZ_BASE_URL}/${REID_MODEL}/${prec}/${REID_MODEL}.bin"
 
     if [ -f "${target_dir}/${REID_MODEL}.xml" ] && [ -f "${target_dir}/${REID_MODEL}.bin" ]; then
-        echo "  ✓ ReID model ready"
+        echo "  ✓ ReID model ready (${REID_MODEL_PRECISION})"
     else
         echo "  ✗ ReID model download failed"
         return 1

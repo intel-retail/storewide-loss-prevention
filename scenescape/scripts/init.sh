@@ -200,7 +200,7 @@ DLSTREAMER_OUTPUT_DIR="${SCENESCAPE_DIR}/dlstreamer-pipeline-server"
 
 # ---- Source AI-model settings from configs/.env.example (single source of truth) ----
 ENV_EXAMPLE="${APP_DIR}/configs/.env.example"
-AI_KEYS_REGEX='^(VLM_ENABLED|VLM_MODEL_NAME|VLM_PRECISION|TARGET_DEVICE|YOLO_MODEL_NAME|DETECT_MODEL|REID_MODEL|OVMS_IMAGE_TAG|MODEL_PRECISION|SCENESCAPE_REGISTRY|SCENESCAPE_VERSION|DLSTREAMER_VERSION)='
+AI_KEYS_REGEX='^(VLM_ENABLED|VLM_MODEL_NAME|VLM_PRECISION|TARGET_DEVICE|YOLO_MODEL_NAME|DETECT_MODEL|DETECT_MODEL_PRECISION|REID_MODEL|REID_MODEL_PRECISION|OVMS_IMAGE_TAG|MODEL_PRECISION|SCENESCAPE_REGISTRY|SCENESCAPE_VERSION|DLSTREAMER_VERSION)='
 if [ -f "${ENV_EXAMPLE}" ]; then
     AI_ENV_TMP="$(mktemp)"
     grep -E "${AI_KEYS_REGEX}" "${ENV_EXAMPLE}" > "${AI_ENV_TMP}" || true
@@ -228,7 +228,9 @@ fi
 DETECT_DEVICE="${DETECT_DEVICE:-GPU}"
 REID_DEVICE="${REID_DEVICE:-CPU}"
 DETECT_MODEL="${DETECT_MODEL:-yolo11s}"
+DETECT_MODEL_PRECISION="${DETECT_MODEL_PRECISION:-FP16}"
 REID_MODEL="${REID_MODEL:-person-reidentification-retail-0277}"
+REID_MODEL_PRECISION="${REID_MODEL_PRECISION:-FP16}"
 
 # Auto-derive model-proc and labels: YOLO models need both, OpenVINO models skip labels
 if [[ "${DETECT_MODEL}" == yolo* ]]; then
@@ -239,6 +241,8 @@ else
     DETECT_LABELS=""
 fi
 MODEL_PRECISION="${MODEL_PRECISION:-FP32}"
+
+echo "  Detect: ${DETECT_MODEL} (${DETECT_MODEL_PRECISION}) on ${DETECT_DEVICE}  ReID: ${REID_MODEL} (${REID_MODEL_PRECISION}) on ${REID_DEVICE}"
 
 # Defaults for pipeline element variables (if not set by resource config)
 DECODE="${DECODE:-rtph264depay ! h264parse ! vah264dec ! vapostproc ! video/x-raw(memory:VAMemory)}"
@@ -253,7 +257,6 @@ DETECT_THRESHOLD="${DETECT_THRESHOLD:-0.5}"
 INFERENCE_INTERVAL="${INFERENCE_INTERVAL:-3}"
 
 echo "  Resource config: ${RESOURCE_CONFIG}"
-echo "  Detect: ${DETECT_MODEL} on ${DETECT_DEVICE}  ReID: ${REID_MODEL} on ${REID_DEVICE}"
 
 # Build !-delimited element chains; insert leading " ! " only when non-empty
 POST_DETECT_CHAIN=""
@@ -271,8 +274,10 @@ sed -e "s|{{CAMERA_NAME}}|${CAMERA_NAME}|g" \
     -e "s|{{DETECT_MODEL_PROC}}|${DETECT_MODEL_PROC}|g" \
     -e "s|{{DETECT_LABELS}}|${DETECT_LABELS}|g" \
     -e "s|{{DETECT_MODEL}}|${DETECT_MODEL}|g" \
+    -e "s|{{DETECT_MODEL_PRECISION}}|${DETECT_MODEL_PRECISION}|g" \
     -e "s|{{DETECT_DEVICE}}|${DETECT_DEVICE}|g" \
     -e "s|{{REID_MODEL}}|${REID_MODEL}|g" \
+    -e "s|{{REID_MODEL_PRECISION}}|${REID_MODEL_PRECISION}|g" \
     -e "s|{{REID_DEVICE}}|${REID_DEVICE}|g" \
     -e "s|{{MODEL_PRECISION}}|${MODEL_PRECISION}|g" \
     -e "s|{{DECODE}}|${DECODE}|g" \
@@ -297,8 +302,10 @@ if [ -n "${CAMERA_NAME_2}" ]; then
         -e "s|{{DETECT_MODEL_PROC}}|${DETECT_MODEL_PROC}|g" \
         -e "s|{{DETECT_LABELS}}|${DETECT_LABELS}|g" \
         -e "s|{{DETECT_MODEL}}|${DETECT_MODEL}|g" \
+        -e "s|{{DETECT_MODEL_PRECISION}}|${DETECT_MODEL_PRECISION}|g" \
         -e "s|{{DETECT_DEVICE}}|${DETECT_DEVICE}|g" \
         -e "s|{{REID_MODEL}}|${REID_MODEL}|g" \
+        -e "s|{{REID_MODEL_PRECISION}}|${REID_MODEL_PRECISION}|g" \
         -e "s|{{REID_DEVICE}}|${REID_DEVICE}|g" \
         -e "s|{{MODEL_PRECISION}}|${MODEL_PRECISION}|g" \
         -e "s|{{DECODE}}|${DECODE}|g" \
@@ -418,7 +425,9 @@ VLM_PRECISION=${VLM_PRECISION:-int8}
 TARGET_DEVICE=${TARGET_DEVICE:-GPU}
 YOLO_MODEL_NAME=${YOLO_MODEL_NAME:-yolo26n-pose}
 DETECT_MODEL=${DETECT_MODEL}
+DETECT_MODEL_PRECISION=${DETECT_MODEL_PRECISION}
 REID_MODEL=${REID_MODEL}
+REID_MODEL_PRECISION=${REID_MODEL_PRECISION}
 OVMS_IMAGE_TAG=${OVMS_IMAGE_TAG:-2026.1-gpu}
 
 # ---- Device Resource Config ----

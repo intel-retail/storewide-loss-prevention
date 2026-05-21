@@ -45,7 +45,20 @@ Before starting, ensure these files are in place:
 > SceneScape scene (for example, `lp-camera1.mp4` corresponds to camera
 > `lp-camera1`).
 
-## 4. Download AI Models
+## 4. Download Sample Video
+
+Download the sample video defined in `configs/zone_config.json` (`video_url`)
+to `../scenescape/sample_data/`:
+
+```bash
+make download-sample-data
+```
+
+The video is saved with the filename specified by the `video_file` key in
+`zone_config.json` (for example, `lp-camera1.mp4`). If the file already
+exists, the download is skipped.
+
+## 5. Download AI Models
 
 The first run requires downloading the OpenVINO and VLM models:
 
@@ -70,7 +83,7 @@ suspicious-activity-detection/models/
 └── yolo_models/
 ```
 
-## 5. Run the Sample
+## 6. Run the Sample
 
 ### Run Everything (SceneScape + LP)
 
@@ -129,13 +142,13 @@ continue to run normally.
 8. Imports the scene map into SceneScape.
 
 
-## 6. View Logs
+## 7. View Logs
 
 ```bash
 make logs
 ```
 
-## 7. Stop Services
+## 8. Stop Services
 
 ```bash
 # Stop everything
@@ -143,7 +156,7 @@ make down
 
 ```
 
-## 8. Access the UI
+## 9. Access the UI
 
 Once running:
 
@@ -157,7 +170,7 @@ Once running:
 From the Gradio dashboard you can observe live alerts, evidence frames, and
 session state across all configured cameras.
 
-## 9. Inspect Alerts and Sessions via REST
+## 10. Inspect Alerts and Sessions via REST
 
 ```bash
 # Health check
@@ -173,7 +186,7 @@ curl http://localhost:8082/api/v1/lp/sessions
 curl http://localhost:8082/api/v1/lp/status
 ```
 
-## 10. Tune Detection Behavior
+## 11. Tune Detection Behavior
 
 Detection thresholds, dedup scope, and severity escalation are defined
 declaratively in `configs/rules.yaml`. Edit the file and restart the

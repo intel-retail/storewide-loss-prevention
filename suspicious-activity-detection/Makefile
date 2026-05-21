@@ -59,6 +59,11 @@ download-models:
 	@echo "Downloading models for Suspicious Activity Detection..."
 	bash download_models/model_download.sh
 
+.PHONY: download-sample-data
+download-sample-data:
+	@echo "Downloading sample video..."
+	bash download_models/download_sample_video.sh
+
 
 # ---- Initialization ----
 
@@ -368,6 +373,7 @@ help:
 	@echo "    make run-scenescape  - Single command: init + models + start"
 	@echo "    make demo            - Initialize and start everything"
 	@echo "    make download-models - Download OpenVINO AI models"
+	@echo "    make download-sample-data - Download sample video from CAMERA_URL"
 	@echo "    make down            - Stop all services"
 	@echo "    make down-scenescape - Stop SceneScape only"
 	@echo "    make logs            - Follow logs"
