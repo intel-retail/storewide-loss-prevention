@@ -53,14 +53,17 @@ class AlertService:
             log.debug("Alert already sent for object=%s poi=%s, skipping", event.object_id, poi_id)
             return
 
-        # Log start time for performance metrics — uses the wall-clock time
-        # when the MQTT message was received by POI backend (not the DLStreamer
-        # frame timestamp).  This measures POI application latency only.
-        # DLStreamer pipeline latency is logged separately in mqtt_consumer.py.
-        if user_log_start_time and event.mqtt_receive_time_ms:
+        # Log start time for performance metrics — uses the DLStreamer frame
+        # timestamp for true end-to-end latency (frame capture → alert dispatch).
+        if user_log_start_time and event.timestamp:
             try:
+                frame_ts_ms = int(
+                    datetime.fromisoformat(
+                        event.timestamp.replace("Z", "+00:00")
+                    ).timestamp() * 1000
+                )
                 user_log_start_time(
-                    event.mqtt_receive_time_ms, "USECASE_1", "person-of-interest"
+                    frame_ts_ms, "USECASE_1", "person-of-interest"
                 )
             except Exception:
                 log.debug("Failed to log start time for alert=%s", event.alert.alert_id)
