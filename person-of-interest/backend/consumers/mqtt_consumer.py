@@ -171,7 +171,13 @@ class EventConsumer:
                         pipeline_latency_ms, camera_id,
                     )
             except Exception:
-                pass
+                log.debug(
+                    "Failed to parse frame timestamp for latency calculation: "
+                    "timestamp=%s camera=%s",
+                    timestamp,
+                    camera_id,
+                    exc_info=True,
+                )
 
         objects = payload.get("objects", {})
         if isinstance(objects, dict):

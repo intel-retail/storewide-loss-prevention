@@ -99,6 +99,33 @@ class TestAlertPayload:
         assert d["severity"] == "high"
         assert d["status"] == "New"
         assert "dispatched_at" in d
+        assert "mqtt_received_at" not in d
+
+    def test_to_dict_with_mqtt_received_at(self):
+        alert = AlertPayload(
+            alert_id="alert-002",
+            poi_id="poi-def",
+            severity="medium",
+            timestamp="2025-01-15T12:00:00Z",
+            match={"camera_id": "cam2", "similarity_score": 0.85},
+            poi_metadata={"notes": "test"},
+            mqtt_received_at="2025-01-15T12:00:05.123+00:00",
+        )
+        d = alert.to_dict()
+        assert d["mqtt_received_at"] == "2025-01-15T12:00:05.123+00:00"
+
+    def test_to_dict_omits_empty_mqtt_received_at(self):
+        alert = AlertPayload(
+            alert_id="alert-003",
+            poi_id="poi-ghi",
+            severity="low",
+            timestamp="2025-01-15T12:00:00Z",
+            match={"camera_id": "cam3", "similarity_score": 0.7},
+            poi_metadata={},
+            mqtt_received_at="",
+        )
+        d = alert.to_dict()
+        assert "mqtt_received_at" not in d
 
 
 class TestMovementEvent:

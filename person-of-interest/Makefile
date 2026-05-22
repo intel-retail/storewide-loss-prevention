@@ -142,8 +142,8 @@ benchmark-stream-density: _benchmark-fresh-start _benchmark-enroll ## Stream den
 _benchmark-fresh-start:
 	@echo "$(BLUE)=== Cleaning up previous benchmark state ===$(NC)"
 	@$(MAKE) --no-print-directory down 2>/dev/null || true
-	@echo "$(BLUE)=== Removing FAISS and Redis volumes ===$(NC)"
-	@docker volume rm -f person-of-interest_faiss-data person-of-interest_redis-data 2>/dev/null || true
+	@echo "$(BLUE)=== Removing POI Compose volumes ===$(NC)"
+	@$(COMPOSE_POI) down -v --remove-orphans 2>/dev/null || true
 
 # Internal: ensure services are running, then enroll sample POI before benchmark
 .PHONY: _benchmark-enroll
@@ -491,8 +491,8 @@ clean-faiss: ## Remove FAISS index files and reset detection counter
 	@if docker exec poi-backend rm -f /data/faiss/poi.index /data/faiss/id_map.json 2>/dev/null; then \
 		echo "$(GREEN)FAISS indexes removed. Restart poi-backend to take effect.$(NC)"; \
 	else \
-		echo "  Container not running — removing FAISS volume"; \
-		docker volume rm -f person-of-interest_faiss-data 2>/dev/null || true; \
+		echo "  Container not running — removing POI Compose volumes"; \
+		$(COMPOSE_POI) down -v >/dev/null 2>&1 || true; \
 		echo "$(GREEN)FAISS volume removed. Will be recreated on next start.$(NC)"; \
 	fi
 
