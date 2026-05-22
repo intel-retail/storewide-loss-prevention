@@ -40,9 +40,6 @@ RETRY_DELAY = 3  # seconds
 _mqtt_alerts: deque = deque(maxlen=800)
 _mqtt_lock = threading.Lock()
 
-# Running totals — never reset, never capped
-_alert_totals: dict = {}  # {alert_type: count}
-
 # Thread-safe live video frame + detections
 _latest_frame = {}      # {camera_id: base64_jpeg}
 _latest_detections = []  # list of objects from regulated scene data
@@ -106,8 +103,6 @@ def _on_mqtt_message(client, userdata, msg):
             return
         with _mqtt_lock:
             _mqtt_alerts.appendleft(payload)
-            atype = payload.get("alert_type", "UNKNOWN")
-            _alert_totals[atype] = _alert_totals.get(atype, 0) + 1
 
 
 def _start_mqtt_listener():
@@ -402,13 +397,11 @@ def _refresh_data_cache():
                         })
                     if rows:
                         _cached_alerts = pd.DataFrame(rows)
-                    # --- Alert Summary (running totals) ---
-                    with _mqtt_lock:
-                        counts = dict(_alert_totals)
-                    if not counts:
-                        for alert in data:
-                            atype = alert.get("alert_type", "UNKNOWN")
-                            counts[atype] = counts.get(atype, 0) + 1
+                    # --- Alert Summary ---
+                    counts = {}
+                    for alert in data:
+                        atype = alert.get("alert_type", "UNKNOWN")
+                        counts[atype] = counts.get(atype, 0) + 1
                     srows = [{"Alert Type": k, "Count": v} for k, v in counts.items()]
                     if srows:
                         _cached_alert_summary = pd.DataFrame(srows)
