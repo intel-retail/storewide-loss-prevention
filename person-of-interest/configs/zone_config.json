@@ -17,8 +17,8 @@
   "scenescape": {
     "registry": "",
     "version": "latest",
-    "controller_image": "scenescape-controller",
-    "manager_image": "scenescape-manager",
+    "controller_image": "intel/scenescape-controller",
+    "manager_image": "intel/scenescape-manager",
     "dlstreamer_version": "2026.1.0-ubuntu24-rc1.1",
     "api_user": "admin"
   },
