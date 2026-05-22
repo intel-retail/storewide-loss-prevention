@@ -24,16 +24,17 @@ class AlertPayload:
     alert_id: str
     poi_id: str
     severity: str
-    timestamp: str  # MQTT detection timestamp (when camera saw the person)
+    timestamp: str  # DLStreamer frame timestamp (when camera captured the frame)
     match: dict
     poi_metadata: dict
     status: str = "New"
     dispatched_at: str = field(
         default_factory=lambda: datetime.now(timezone.utc).isoformat(timespec="milliseconds")
     )
+    mqtt_received_at: str = ""  # When POI backend received the MQTT message
 
     def to_dict(self) -> dict:
-        return {
+        d = {
             "event_type": "poi_match_alert",
             "timestamp": self.timestamp,
             "dispatched_at": self.dispatched_at,
@@ -44,3 +45,6 @@ class AlertPayload:
             "poi_metadata": self.poi_metadata,
             "status": self.status,
         }
+        if self.mqtt_received_at:
+            d["mqtt_received_at"] = self.mqtt_received_at
+        return d

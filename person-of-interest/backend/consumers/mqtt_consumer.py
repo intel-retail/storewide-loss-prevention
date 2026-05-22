@@ -36,6 +36,7 @@ import json
 import logging
 import re
 import struct
+import time
 from typing import List, Optional
 
 from backend.observer.events import EventBus, MatchFoundEvent
@@ -43,11 +44,6 @@ from backend.service.alert_service import AlertService
 from backend.service.event_service import EventService
 from backend.service.matching_service import MatchingService
 from backend.utils.thumbnail import grab_frame_now, submit_capture
-
-try:
-    from vlm_metrics_logger import user_log_start_time
-except ImportError:
-    user_log_start_time = None
 
 log = logging.getLogger("poi.consumer")
 
@@ -157,19 +153,25 @@ class EventConsumer:
         if not m:
             return
 
+        mqtt_receive_time_ms = int(time.time() * 1000)
         camera_id = m.group("camera_id")
         timestamp = payload.get("timestamp", "")
 
-        # Log detection start time for performance metrics
-        if user_log_start_time and timestamp:
+        # Log DLStreamer pipeline latency (frame decode → MQTT arrival)
+        if timestamp:
             try:
                 from datetime import datetime as _dt
-                ts_ms = int(
+                frame_ts_ms = int(
                     _dt.fromisoformat(timestamp.replace("Z", "+00:00")).timestamp() * 1000
                 )
-                user_log_start_time(ts_ms, "USECASE_1", "person-of-interest")
+                pipeline_latency_ms = mqtt_receive_time_ms - frame_ts_ms
+                if pipeline_latency_ms > 1000:
+                    log.info(
+                        "DLStreamer pipeline latency: %dms camera=%s",
+                        pipeline_latency_ms, camera_id,
+                    )
             except Exception:
-                log.debug("Failed to log start time for ts=%s", timestamp)
+                pass
 
         objects = payload.get("objects", {})
         if isinstance(objects, dict):
@@ -326,6 +328,7 @@ class EventConsumer:
                 camera_id=camera_id,
                 confidence=best_face_conf,
                 bounding_box=person_bbox,
+                mqtt_receive_time_ms=mqtt_receive_time_ms,
             )
 
     # ── Secondary: external topic (monitoring / UUID tracking only) ──────────
@@ -422,6 +425,7 @@ class EventConsumer:
         camera_id: Optional[str],
         confidence: float,
         bounding_box,
+        mqtt_receive_time_ms: int = 0,
     ) -> None:
         """Run FAISS lookup and emit alerts for a confirmed detection."""
         display_camera = camera_id or "unknown"
@@ -467,20 +471,25 @@ class EventConsumer:
             self._event_repo.set_match_metadata(object_id, match_meta, ttl=3600)
             log.debug("Match metadata written to Redis for uuid=%s", object_id)
 
-        # Capture thumbnail from RTSP — only when we have a valid camera_id
+        # Capture thumbnail — prefer instant MQTT ring-buffer lookup, fall
+        # back to thread-pool RTSP capture only when MQTT has no frame.
         thumbnail_path = ""
         if camera_id and self._event_repo and self._event_repo.claim_thumbnail(object_id, ttl=30):
-            future = submit_capture(camera_id, bounding_box)
-            try:
-                b64 = future.result(timeout=6)
-                if b64:
-                    self._event_repo.store_thumbnail(object_id, b64, ttl=3600)
-                    thumbnail_path = f"/api/v1/thumbnail/{object_id}"
-                    log.info("Thumbnail captured for uuid=%s camera=%s", object_id, camera_id)
-                else:
-                    log.warning("Thumbnail returned no data for uuid=%s camera=%s", object_id, camera_id)
-            except Exception:
-                log.warning("Thumbnail timed out or failed for uuid=%s camera=%s", object_id, camera_id)
+            b64 = grab_frame_now(camera_id, timestamp)
+            if b64 is None:
+                # MQTT ring buffer empty — fall back to async RTSP capture
+                future = submit_capture(camera_id, bounding_box, timestamp)
+                try:
+                    b64 = future.result(timeout=6)
+                except Exception:
+                    b64 = None
+                    log.warning("Thumbnail timed out or failed for uuid=%s camera=%s", object_id, camera_id)
+            if b64:
+                self._event_repo.store_thumbnail(object_id, b64, ttl=3600)
+                thumbnail_path = f"/api/v1/thumbnail/{object_id}"
+                log.info("Thumbnail captured for uuid=%s camera=%s", object_id, camera_id)
+            else:
+                log.warning("Thumbnail returned no data for uuid=%s camera=%s", object_id, camera_id)
         elif not camera_id:
             log.warning("No camera_id for uuid=%s — thumbnail skipped (visibility empty)", object_id)
         elif self._event_repo and self._event_repo.get_thumbnail(object_id):
@@ -495,6 +504,7 @@ class EventConsumer:
             confidence=confidence,
             center_of_mass=bounding_box,
             thumbnail_path=thumbnail_path,
+            mqtt_receive_time_ms=mqtt_receive_time_ms,
         )
 
         # Update movement event with the matched poi_id and thumbnail
@@ -511,4 +521,5 @@ class EventConsumer:
             alert=alert,
             object_id=object_id,
             timestamp=timestamp,
+            mqtt_receive_time_ms=mqtt_receive_time_ms,
         ))

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 
 from backend.core.config import get_config
@@ -14,9 +14,10 @@ from backend.domain.interfaces.repository import EventRepository, POIRepository
 from backend.observer.events import EventBus, MatchFoundEvent
 
 try:
-    from vlm_metrics_logger import log_end_time
+    from vlm_metrics_logger import log_end_time, user_log_start_time
 except ImportError:
     log_end_time = None
+    user_log_start_time = None
 
 log = logging.getLogger("poi.service.alert")
 
@@ -53,6 +54,18 @@ class AlertService:
             log.debug("Alert already sent for object=%s poi=%s, skipping", event.object_id, poi_id)
             return
 
+        # Log start time for performance metrics — uses the wall-clock time
+        # when the MQTT message was received by POI backend (not the DLStreamer
+        # frame timestamp).  This measures POI application latency only.
+        # DLStreamer pipeline latency is logged separately in mqtt_consumer.py.
+        if user_log_start_time and event.mqtt_receive_time_ms:
+            try:
+                user_log_start_time(
+                    event.mqtt_receive_time_ms, "USECASE_1", "person-of-interest"
+                )
+            except Exception:
+                log.debug("Failed to log start time for alert=%s", event.alert.alert_id)
+
         # Dispatch to all strategies; only mark sent if ALL succeed
         all_delivered = True
         for strategy in self._strategies:
@@ -85,6 +98,7 @@ class AlertService:
         confidence: float,
         center_of_mass: Optional[dict] = None,
         thumbnail_path: str = "",
+        mqtt_receive_time_ms: int = 0,
     ) -> AlertPayload:
         """Build an AlertPayload from a match result."""
         poi = self._poi_repo.get(match.poi_id)
@@ -107,6 +121,13 @@ class AlertService:
 
         alert_id = f"alert-{datetime.utcnow().strftime('%Y%m%d-%H%M%S')}-{match.poi_id}"
 
+        # Convert mqtt_receive_time_ms to ISO timestamp
+        mqtt_received_at = ""
+        if mqtt_receive_time_ms:
+            mqtt_received_at = datetime.fromtimestamp(
+                mqtt_receive_time_ms / 1000, tz=timezone.utc
+            ).isoformat(timespec="milliseconds")
+
         return AlertPayload(
             alert_id=alert_id,
             poi_id=match.poi_id,
@@ -126,6 +147,7 @@ class AlertService:
                 "enrollment_date": enrollment_date,
                 "total_previous_matches": total_previous,
             },
+            mqtt_received_at=mqtt_received_at,
         )
 
     def get_recent_alerts(self, limit: int = 50) -> list[dict]:
