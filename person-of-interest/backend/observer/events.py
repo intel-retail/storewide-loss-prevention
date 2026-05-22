@@ -19,6 +19,7 @@ class MatchFoundEvent:
     alert: AlertPayload
     object_id: str
     timestamp: str
+    mqtt_receive_time_ms: int = 0  # wall-clock ms when MQTT message was received
 
 
 class EventBus:

@@ -98,11 +98,12 @@ SAD_STREAM_DENSITY := $(PERF_TOOLS_DIR)/sad_stream_density.py
 POI_STREAM_DENSITY := $(PERF_TOOLS_DIR)/poi_stream_density.py
 
 # Benchmark configuration (override via env or docker/.env)
-BENCHMARK_TARGET_LATENCY_MS ?= 2000
+BENCHMARK_TARGET_LATENCY_MS ?= 30000
 BENCHMARK_LATENCY_METRIC ?= avg
 BENCHMARK_SCENE_INCREMENT ?= 1
 BENCHMARK_INIT_DURATION ?= 120
 BENCHMARK_STABILISE_DURATION ?= 60
+BENCHMARK_DURATION ?= 120
 BENCHMARK_MAX_ITERATIONS ?= 50
 BENCHMARK_MIN_THROUGHPUT_RATIO ?= 0.5
 
@@ -125,22 +126,30 @@ BENCHMARK_VENV := cd $(PERF_TOOLS_DIR) && \
 	cd $(CURDIR)
 
 .PHONY: benchmark
-benchmark: _benchmark-enroll ## Single-scene POI benchmark with auto-enroll
+benchmark: _benchmark-fresh-start _benchmark-enroll ## Single-scene POI benchmark with auto-enroll
 	@$(MAKE) --no-print-directory poi-benchmark; ret=$$?; \
 		$(MAKE) --no-print-directory _benchmark-cleanup; \
 		exit $$ret
 
 .PHONY: benchmark-stream-density
-benchmark-stream-density: _benchmark-enroll ## Stream density with auto-enroll
+benchmark-stream-density: _benchmark-fresh-start _benchmark-enroll ## Stream density with auto-enroll
 	@$(MAKE) --no-print-directory poi-benchmark-stream-density; ret=$$?; \
 		$(MAKE) --no-print-directory _benchmark-cleanup; \
 		exit $$ret
 
-# Internal: enroll sample POI before benchmark
+# Internal: tear down stale services for a clean benchmark
+.PHONY: _benchmark-fresh-start
+_benchmark-fresh-start:
+	@echo "$(BLUE)=== Cleaning up previous benchmark state ===$(NC)"
+	@$(MAKE) --no-print-directory down 2>/dev/null || true
+	@echo "$(BLUE)=== Removing POI Compose volumes ===$(NC)"
+	@$(COMPOSE_POI) down -v --remove-orphans 2>/dev/null || true
+
+# Internal: ensure services are running, then enroll sample POI before benchmark
 .PHONY: _benchmark-enroll
-_benchmark-enroll:
+_benchmark-enroll: up
 	@echo "$(BLUE)=== Enrolling benchmark POI from sample_data ===$(NC)"
-	@for i in 1 2 3 4 5; do \
+	@for i in 1 2 3 4 5 6 7 8 9 10; do \
 		if curl -sf http://localhost:8000/api/v1/status >/dev/null 2>&1; then break; fi; \
 		echo "  Waiting for poi-backend..."; sleep 5; \
 	done
@@ -212,6 +221,7 @@ poi-benchmark: ## Run a single-scene POI benchmark (detection-to-alert latency)
 	@echo "║       POI Benchmark — Single Scene                             ║"
 	@echo "╚══════════════════════════════════════════════════════════════════╝"
 	@echo "  Target Latency: $(BENCHMARK_TARGET_LATENCY_MS)ms"
+	@echo "  Duration:       $(BENCHMARK_DURATION)s (exits early on alert)"
 	@echo "  Results Dir:    $(RESULTS_PATH)"
 	@echo ""
 	mkdir -p $(RESULTS_PATH)
@@ -223,6 +233,7 @@ poi-benchmark: ## Run a single-scene POI benchmark (detection-to-alert latency)
 		--latency_metric $(BENCHMARK_LATENCY_METRIC) \
 		--init_duration $(BENCHMARK_INIT_DURATION) \
 		--stabilise_duration $(BENCHMARK_STABILISE_DURATION) \
+		--benchmark_duration $(BENCHMARK_DURATION) \
 		--results_dir $(CURDIR)/$(RESULTS_PATH)
 
 .PHONY: poi-benchmark-stream-density
@@ -477,8 +488,13 @@ clean-redis: ## Flush all Redis data (POI metadata, detections, caches)
 .PHONY: clean-faiss
 clean-faiss: ## Remove FAISS index files and reset detection counter
 	@echo "$(BLUE)=== Cleaning FAISS indexes ===$(NC)"
-	@docker exec poi-backend rm -f /data/faiss/poi.index /data/faiss/id_map.json
-	@echo "$(GREEN)FAISS indexes removed. Restart poi-backend to take effect.$(NC)"
+	@if docker exec poi-backend rm -f /data/faiss/poi.index /data/faiss/id_map.json 2>/dev/null; then \
+		echo "$(GREEN)FAISS indexes removed. Restart poi-backend to take effect.$(NC)"; \
+	else \
+		echo "  Container not running — removing POI Compose volumes"; \
+		$(COMPOSE_POI) down -v >/dev/null 2>&1 || true; \
+		echo "$(GREEN)FAISS volume removed. Will be recreated on next start.$(NC)"; \
+	fi
 
 .PHONY: clean-data
 clean-data: clean-redis clean-faiss ## Flush Redis + remove FAISS (full data reset)

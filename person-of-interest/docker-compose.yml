@@ -28,10 +28,13 @@ services:
       - ENROLL_FACE_SQUARE=false
       - ENROLL_EMBEDDING_STRATEGY=mean
       - MEDIAMTX_WEBRTC_PORT=${MEDIAMTX_WEBRTC_PORT:-8889}
+      - USECASE_1=${USECASE_1:-Person-of-Interest}
+      - CONTAINER_RESULTS_PATH=/app/results
     volumes:
       - faiss-data:/data/faiss
       - ./data/uploads:/data/uploads
       - ./models/intel/intel:/models/intel:ro
+      - ./results:/app/results
     depends_on:
       redis:
         condition: service_healthy
