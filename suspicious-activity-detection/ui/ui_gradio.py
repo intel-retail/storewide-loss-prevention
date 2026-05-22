@@ -8,6 +8,7 @@ import threading
 import base64
 import io
 from collections import deque
+from datetime import datetime, timezone
 
 import paho.mqtt.client as mqtt
 from PIL import Image, ImageDraw, ImageFont
@@ -44,6 +45,18 @@ _latest_frame = {}      # {camera_id: base64_jpeg}
 _latest_detections = []  # list of objects from regulated scene data
 _video_lock = threading.Lock()
 _last_camera_ts = 0.0  # throttle: timestamp of last accepted camera frame
+
+
+def _fmt_local_ts(iso_str: str) -> str:
+    """Convert a UTC ISO timestamp to local time for display."""
+    if not iso_str:
+        return ""
+    try:
+        dt = datetime.fromisoformat(iso_str)
+        local_dt = dt.astimezone()  # converts to system local TZ
+        return local_dt.strftime("%Y-%m-%d %H:%M:%S")
+    except Exception:
+        return iso_str
 
 
 def _on_mqtt_connect(client, userdata, flags, rc):
@@ -380,7 +393,7 @@ def _refresh_data_cache():
                             "Person": (alert.get("object_id") or meta.get("person_id", ""))[:8],
                             "Region": alert.get("region_name") or meta.get("zone_name", "N/A"),
                             "Details": json.dumps(detail_keys) if detail_keys else "{}",
-                            "Timestamp": alert.get("timestamp", ""),
+                            "Timestamp": _fmt_local_ts(alert.get("timestamp", "")),
                         })
                     if rows:
                         _cached_alerts = pd.DataFrame(rows)

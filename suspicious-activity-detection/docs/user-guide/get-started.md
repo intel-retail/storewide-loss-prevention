@@ -91,12 +91,18 @@ suspicious-activity-detection/models/
 make up
 ```
 
-By default this uses the **GPU detect + CPU re-identification** configuration
-(`all-gpu-cpu.env`). To select a different device profile, pass the `DEVICE`
+By default this uses the **NPU detect + CPU re-identification** configuration
+(`all-npu-cpu.env`). To select a different device profile, pass the `DEVICE`
 parameter:
 
 ```bash
-# GPU detect + CPU reid (default)
+# NPU detect + CPU reid (default — recommended for long-running deployments)
+make up DEVICE=all-npu-cpu.env
+
+# NPU detect + NPU reid
+make up DEVICE=all-npu.env
+
+# GPU detect + CPU reid
 make up DEVICE=all-gpu-cpu.env
 
 # All GPU (detect + reid on GPU)
@@ -231,8 +237,8 @@ make clean-all
 
 - Learn more about [How It Works](./how-it-works.md) for a high-level
   architectural overview.
-- Experiment with different `VLM_DEVICE` values to compare CPU, GPU, and NPU
-  behavior.
+- Experiment with different device profiles (`all-npu-cpu.env`,
+  `all-gpu-cpu.env`, `all-cpu.env`) to compare NPU, GPU, and CPU behavior.
 - Replace the sample video, zone map, or rules with your own assets by
   updating the `configs/`, `models/`, and `videos` volumes.
 

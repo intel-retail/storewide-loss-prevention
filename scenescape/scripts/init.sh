@@ -200,7 +200,7 @@ DLSTREAMER_OUTPUT_DIR="${SCENESCAPE_DIR}/dlstreamer-pipeline-server"
 
 # ---- Source AI-model settings from configs/.env.example (single source of truth) ----
 ENV_EXAMPLE="${APP_DIR}/configs/.env.example"
-AI_KEYS_REGEX='^(VLM_ENABLED|VLM_MODEL_NAME|VLM_PRECISION|TARGET_DEVICE|YOLO_MODEL_NAME|DETECT_MODEL|DETECT_MODEL_PRECISION|REID_MODEL|REID_MODEL_PRECISION|OVMS_IMAGE_TAG|MODEL_PRECISION|SCENESCAPE_REGISTRY|SCENESCAPE_VERSION|DLSTREAMER_VERSION)='
+AI_KEYS_REGEX='^(VLM_ENABLED|VLM_MODEL_NAME|VLM_PRECISION|TARGET_DEVICE|YOLO_MODEL_NAME|DETECT_MODEL|DETECT_MODEL_PRECISION|REID_MODEL|REID_MODEL_PRECISION|OVMS_IMAGE_TAG|MODEL_PRECISION|SCENESCAPE_REGISTRY|SCENESCAPE_VERSION|DLSTREAMER_VERSION|TZ)='
 if [ -f "${ENV_EXAMPLE}" ]; then
     AI_ENV_TMP="$(mktemp)"
     grep -E "${AI_KEYS_REGEX}" "${ENV_EXAMPLE}" > "${AI_ENV_TMP}" || true
@@ -247,6 +247,7 @@ echo "  Detect: ${DETECT_MODEL} (${DETECT_MODEL_PRECISION}) on ${DETECT_DEVICE} 
 # Defaults for pipeline element variables (if not set by resource config)
 DECODE="${DECODE:-rtph264depay ! h264parse ! vah264dec ! vapostproc ! video/x-raw(memory:VAMemory)}"
 PRE_PROCESS="${PRE_PROCESS:-pre-process-backend=va-surface-sharing}"
+PRE_PROCESS_CONFIG="${PRE_PROCESS_CONFIG:-}"
 DETECTION_OPTIONS="${DETECTION_OPTIONS:-ie-config=GPU_THROUGHPUT_STREAMS=2 nireq=2}"
 REID_PRE_PROCESS="${REID_PRE_PROCESS:-pre-process-backend=opencv}"
 REID_OPTIONS="${REID_OPTIONS:-nireq=2}"
@@ -282,6 +283,7 @@ sed -e "s|{{CAMERA_NAME}}|${CAMERA_NAME}|g" \
     -e "s|{{MODEL_PRECISION}}|${MODEL_PRECISION}|g" \
     -e "s|{{DECODE}}|${DECODE}|g" \
     -e "s|{{PRE_PROCESS}}|${PRE_PROCESS}|g" \
+    -e "s|{{PRE_PROCESS_CONFIG}}|${PRE_PROCESS_CONFIG}|g" \
     -e "s|{{DETECTION_OPTIONS}}|${DETECTION_OPTIONS}|g" \
     -e "s|{{REID_PRE_PROCESS}}|${REID_PRE_PROCESS}|g" \
     -e "s|{{REID_OPTIONS}}|${REID_OPTIONS}|g" \
@@ -310,6 +312,7 @@ if [ -n "${CAMERA_NAME_2}" ]; then
         -e "s|{{MODEL_PRECISION}}|${MODEL_PRECISION}|g" \
         -e "s|{{DECODE}}|${DECODE}|g" \
         -e "s|{{PRE_PROCESS}}|${PRE_PROCESS}|g" \
+        -e "s|{{PRE_PROCESS_CONFIG}}|${PRE_PROCESS_CONFIG}|g" \
         -e "s|{{DETECTION_OPTIONS}}|${DETECTION_OPTIONS}|g" \
         -e "s|{{REID_PRE_PROCESS}}|${REID_PRE_PROCESS}|g" \
         -e "s|{{REID_OPTIONS}}|${REID_OPTIONS}|g" \
@@ -398,6 +401,7 @@ STORE_ID=${STORE_ID}
 # ---- Services (from zone_config.json) ----
 LP_SERVICE_PORT=${LP_SERVICE_PORT}
 LOG_LEVEL=${LOG_LEVEL}
+TZ=${TZ:-UTC}
 
 # ---- SeaweedFS (from zone_config.json) ----
 SEAWEEDFS_S3_PORT=${SEAWEEDFS_S3_PORT}

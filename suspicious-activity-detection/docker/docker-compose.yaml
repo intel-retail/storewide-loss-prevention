@@ -8,6 +8,10 @@ services:
       swlp-suscpicious-ui:
         condition: service_healthy
         required: false
+    devices:
+      - /dev/accel:/dev/accel
+    device_cgroup_rules:
+      - "c 261:* rmw"    
     volumes:
       - ${MODEL_PATH:-./models}/detect_models:/home/pipeline-server/models/detect:ro
       - ${MODEL_PATH:-./models}/reid_models:/home/pipeline-server/models/reid:ro
@@ -154,6 +158,7 @@ services:
       - MQTT_HOST=${MQTT_HOST:-broker.scenescape.intel.com}
       - MQTT_PORT=${MQTT_PORT:-1883}
       - MQTT_ALERT_TOPIC=alerts/#
+      - TZ=${TZ:-UTC}
       - no_proxy=swlp-service,broker.scenescape.intel.com,localhost,127.0.0.1,10.0.0.0/8,172.16.0.0/12
       - NO_PROXY=swlp-service,broker.scenescape.intel.com,localhost,127.0.0.1,10.0.0.0/8,172.16.0.0/12
       - http_proxy=

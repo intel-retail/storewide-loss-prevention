@@ -38,8 +38,8 @@ REGISTRY_LOWER := $(shell echo $(REGISTRY) | tr A-Z a-z)
 # Auto-shutdown timeout in minutes (0 = disabled)
 AUTO_STOP_MINUTES ?= 15
 
-# Device resource config: pass DEVICE=all-gpu-cpu.env (default), all-gpu.env, or all-cpu.env
-DEVICE ?= all-gpu-cpu.env
+# Device resource config: pass DEVICE=all-gpu-cpu.env, all-gpu.env, all-cpu.env, or all-npu-cpu.env
+DEVICE ?= all-npu-cpu.env
 RESOURCE_CONFIG := configs/res/$(DEVICE)
 
 

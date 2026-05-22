@@ -23,7 +23,7 @@ init:
 		exit 1; \
 	fi
 	@chmod +x $(SCENESCAPE_DIR)/scripts/init.sh
-	@$(SCENESCAPE_DIR)/scripts/init.sh $(APP_DIR)
+	@$(SCENESCAPE_DIR)/scripts/init.sh $(APP_DIR) $(RESOURCE_CONFIG)
 
 # ---- Sample Data Volume ----
 
