@@ -262,11 +262,27 @@ class BAQueueConsumer:
                     f"(confidence={result.confidence:.3f}), calling VLM"
                 )
                 if self.settings.vlm_enabled and self.pose_analyzer.vlm_client:
-                    async with self._vlm_sem:
-                        result = await self.pose_analyzer.analyze_with_vlm(
-                            frames=pose_frames,
-                            pose_result=result,
+                    # Timeout on semaphore wait so one hung VLM call
+                    # doesn't block all other entities from progressing.
+                    sem_timeout = self.settings.vlm_timeout
+                    try:
+                        acquired = await asyncio.wait_for(
+                            self._vlm_sem.acquire(), timeout=sem_timeout,
                         )
+                    except asyncio.TimeoutError:
+                        acquired = False
+                        logger.warning(
+                            f"Entity {person_id}: VLM semaphore acquire "
+                            f"timed out after {sem_timeout}s, skipping VLM"
+                        )
+                    if acquired:
+                        try:
+                            result = await self.pose_analyzer.analyze_with_vlm(
+                                frames=pose_frames,
+                                pose_result=result,
+                            )
+                        finally:
+                            self._vlm_sem.release()
                     if result.vlm_metrics:
                         log_ovms_performance_metric(
                             "USECASE_1", result.vlm_metrics
