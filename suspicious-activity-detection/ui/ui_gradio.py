@@ -37,7 +37,7 @@ MAX_RETRIES = 5
 RETRY_DELAY = 3  # seconds
 
 # Thread-safe alert store fed by MQTT
-_mqtt_alerts: deque = deque(maxlen=500)
+_mqtt_alerts: deque = deque(maxlen=800)
 _mqtt_lock = threading.Lock()
 
 # Thread-safe live video frame + detections
