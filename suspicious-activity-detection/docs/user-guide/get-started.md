@@ -182,9 +182,6 @@ session state across all configured cameras.
 # Health check
 curl http://localhost:8082/health
 
-# Recent alerts (filterable)
-curl "http://localhost:8082/api/v1/lp/alerts?alert_type=CONCEALMENT"
-
 # Active sessions
 curl http://localhost:8082/api/v1/lp/sessions
 
