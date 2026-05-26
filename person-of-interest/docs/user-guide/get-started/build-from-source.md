@@ -5,8 +5,14 @@ container images from source code. Whether you are customizing the application o
 troubleshooting deployment issues, this guide walks you through the complete build process.
 
 > **Note:** Pre-built images are available on Docker Hub (`intel/poi-backend` and
-> `intel/poi-ui`). Building from source is only required if you need to customize
-> the application. See [Get Started](../get-started.md) for the default pull-based setup.
+> `intel/poi-ui`). To use them instead of building from source, pull and tag:
+>
+> ```bash
+> docker pull intel/poi-backend:2026.1.0-rc1 && docker tag intel/poi-backend:2026.1.0-rc1 poi-backend
+> docker pull intel/poi-ui:2026.1.0-rc1 && docker tag intel/poi-ui:2026.1.0-rc1 poi-ui
+> ```
+>
+> See [Get Started](../get-started.md) for the full setup guide.
 
 ## Overview
 
@@ -45,10 +51,10 @@ make build REGISTRY=false
 
 This builds the following images locally:
 
-| Image                              | Dockerfile               | Description          |
-| ---------------------------------- | ------------------------ | -------------------- |
-| `person-of-interest-poi-backend`   | `backend/Dockerfile`     | Backend API server   |
-| `person-of-interest-ui`            | `ui/Dockerfile`          | React UI             |
+| Image                | Dockerfile               | Description          |
+| -------------------- | ------------------------ | -------------------- |
+| `poi-backend`        | `backend/Dockerfile`     | Backend API server   |
+| `poi-ui`             | `ui/Dockerfile`          | React UI             |
 
 ### Registry Build
 

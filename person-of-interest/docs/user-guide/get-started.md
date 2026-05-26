@@ -135,21 +135,26 @@ The `zone_config.json` file defines:
 - `services{}` for ports, log level, and SeaweedFS settings
 - `benchmark{}` for stream-density benchmark parameters
 
-### Step 5: Pull Pre-built Images
+### Step 5: Pull or Build Images
 
 Pre-built container images are available on Docker Hub. Pull them with:
 
 ```bash
-docker compose pull poi-backend ui
+docker pull intel/poi-backend:2026.1.0-rc1
+docker pull intel/poi-ui:2026.1.0-rc1
+docker tag intel/poi-backend:2026.1.0-rc1 poi-backend
+docker tag intel/poi-ui:2026.1.0-rc1 poi-ui
 ```
 
-| Image                                    | Description        |
-| ---------------------------------------- | ------------------ |
-| `intel/poi-backend:2026.1.0-rc1`         | Backend API server |
-| `intel/poi-ui:2026.1.0-rc1`              | React UI (nginx)   |
+Alternatively, build from source:
 
-> **Note:** To build from source instead, run `make build REGISTRY=false`.
-> See [Build from Source](./get-started/build-from-source.md) for details.
+```bash
+make build REGISTRY=false
+```
+
+Both approaches produce the same local image names (`poi-backend`, `poi-ui`) used by
+`docker-compose.yml`. See [Build from Source](./get-started/build-from-source.md) for
+detailed build options.
 
 ### Step 6: Download Models
 
@@ -193,12 +198,12 @@ make demo
 
 This launches the following containers:
 
-| Container            | Image                                    | Port  |
-| -------------------- | ---------------------------------------- | ----- |
-| `poi-backend`        | `intel/poi-backend:2026.1.0-rc1`         | 8000  |
-| `poi-ui`             | `intel/poi-ui:2026.1.0-rc1`              | 3000  |
-| `poi-redis`          | `redis:8.6.2`                            | 6379  |
-| `poi-alert-service`  | `intel/alert-service:0.0.1`              | 8001  |
+| Container            | Image                        | Port  |
+| -------------------- | ---------------------------- | ----- |
+| `poi-backend`        | `poi-backend`                | 8000  |
+| `poi-ui`             | `poi-ui`                     | 3000  |
+| `poi-redis`          | `redis:8.6.2`                | 6379  |
+| `poi-alert-service`  | `intel/alert-service:0.0.1`  | 8001  |
 
 > **Note:** Use `make up` for subsequent starts after the initial setup. SceneScape must
 > be running (either started by `make up` automatically, or via `make run-scenescape`
