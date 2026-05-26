@@ -1,9 +1,6 @@
 # ── Stage 1: Build ────────────────────────────────────────
 FROM node:20-alpine AS builder
 
-# Patch Alpine OS-level packages (libssl3, libcrypto3, libxml2 CVEs)
-RUN apk upgrade --no-cache
-
 WORKDIR /app
 
 COPY ui/package.json ui/tsconfig.json ui/vite.config.ts ./
@@ -15,8 +12,10 @@ RUN npm run build
 # ── Stage 2: Serve ───────────────────────────────────────
 FROM nginx:1.27-alpine
 
-# Patch Alpine OS-level packages (libssl3, libcrypto3, libxml2 CVEs)
-RUN apk upgrade --no-cache
+# Pin patched Alpine packages for CVE remediation:
+#   libcrypto3/libssl3 >=3.3.7 (CVE-2026-31789, CVE-2025-15467)
+#   libxml2 >=2.13.9 (CVE-2025-49794, CVE-2025-49796)
+RUN apk add --no-cache libcrypto3 libssl3 libxml2
 
 COPY --from=builder /app/dist /usr/share/nginx/html
 
