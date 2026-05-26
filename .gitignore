@@ -2,10 +2,11 @@ scenescape/sample_data/*.mp4
 
 # POI application secrets
 person-of-interest/.env
-person-of-interest/mcp_server/claude_desktop_config.local.json
 
-# MCP local overrides (contain tokens)
-.github/mcp/mcp.local.json
+# MCP server and config (local-only, not for remote)
+person-of-interest/mcp_server/
+.github/mcp/
+.github/instructions/
 
 # Auto-generated env file (contains passwords)
 suspicious-activity-detection/docker/.env
