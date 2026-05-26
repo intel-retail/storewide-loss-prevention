@@ -86,7 +86,8 @@ SceneScape container images are controlled by two variables in
 SCENESCAPE_REGISTRY=
 
 # Image tag for SceneScape containers (controller, manager, etc.)
-SCENESCAPE_VERSION=v2026.1.0-rc1
+# Must match the deployed SceneScape release — see configs/.env.example for the current value
+SCENESCAPE_VERSION=
 ```
 
 - **`SCENESCAPE_REGISTRY`**: Set to a registry URL if pulling from a private
@@ -101,11 +102,11 @@ The DLStreamer pipeline server supports multiple inference device
 configurations. Select a profile via the `DEVICE` parameter:
 
 ```bash
-make up DEVICE=all-gpu-cpu.env    # GPU detect + CPU re-id (default)
+make up DEVICE=all-gpu-cpu.env    # GPU detect + CPU re-id 
 make up DEVICE=all-gpu.env        # All GPU
 make up DEVICE=all-cpu.env        # All CPU
 make up DEVICE=all-npu-cpu.env    # NPU detect + CPU re-id
-make up DEVICE=all-npu.env        # All NPU
+make up DEVICE=all-npu.env        # All NPU (default)
 ```
 
 Profiles are defined in `configs/res/` and control:
@@ -117,16 +118,33 @@ Profiles are defined in `configs/res/` and control:
 
 ## Running SceneScape Independently
 
-To start only the SceneScape stack (without LP services):
+To start only the SceneScape stack (without LP services), run from the
+`suspicious-activity-detection/` directory:
 
 ```bash
+cd suspicious-activity-detection/
 make run-scenescape
+```
+
+> **Note:** `APP_DIR` is passed automatically by the application's Makefile.
+> Always run this command from the `suspicious-activity-detection/` directory.
+
+Alternatively, you can run directly from the `scenescape/` directory by
+passing `APP_DIR` explicitly:
+
+```bash
+cd scenescape/
+make run APP_DIR=$(realpath ../suspicious-activity-detection)
 ```
 
 To stop SceneScape:
 
 ```bash
+# From suspicious-activity-detection/
 make down-scenescape
+
+# Or from scenescape/
+make down APP_DIR=$(realpath ../suspicious-activity-detection)
 ```
 
 ## Scene Import
@@ -147,6 +165,16 @@ The scene archive contains:
 SceneScape tracks persons across frames and camera views using a
 re-identification model. The ReID descriptor store uses VDMS (Vector Data
 Management System).
+
+If ReID tracking stops working (persons are not re-identified across zone
+entries), reset the VDMS descriptor schema:
+
+```bash
+make fix-reid
+```
+
+This wipes the corrupt descriptor set and graph metadata, then restarts the
+controller so it recreates the schema cleanly.
 
 
 ## MQTT Authentication
@@ -239,6 +267,7 @@ These are generated automatically by `init.sh` — do not edit them manually.
 | `DETECT_MODEL_PRECISION` | Detection model precision. | `FP16` |
 | `REID_MODEL` | Person re-identification model name. | `person-reidentification-retail-0277` |
 | `REID_MODEL_PRECISION` | ReID model precision. | `FP16` |
+| `RENDER_GROUP_ID` | Linux render group GID for GPU access inside containers. Find your host value with `getent group render \| cut -d: -f3`. | `992` |
 
 ## Troubleshooting
 
