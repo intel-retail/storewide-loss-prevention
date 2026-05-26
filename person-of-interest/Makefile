@@ -383,9 +383,11 @@ help:
 
 COMPOSE_POI := docker compose -f docker-compose.yml
 REGISTRY ?= false
+RESET_SCENESCAPE_DB ?= false
 
 BLUE := \033[1;34m
 GREEN := \033[1;32m
+YELLOW := \033[1;33m
 NC := \033[0m
 
 .PHONY: build
@@ -398,8 +400,8 @@ ifeq ($(REGISTRY),false)
 	$(COMPOSE_POI) build poi-backend ui
 else
 	$(COMPOSE_POI) build poi-backend ui
-	docker tag person-of-interest-poi-backend $(REGISTRY)/poi-backend:latest
-	docker tag person-of-interest-ui $(REGISTRY)/poi-ui:latest
+	docker tag poi-backend $(REGISTRY)/poi-backend:latest
+	docker tag poi-ui $(REGISTRY)/poi-ui:latest
 endif
 	@echo "$(GREEN)Build complete.$(NC)"
 
@@ -409,9 +411,47 @@ up:
 		echo "$(BLUE)=== Creating .env from .env.example ===$(NC)"; \
 		cp .env.example .env; \
 	fi
+	@# If storewide-lp exists without proper Compose labels, remove it so Compose recreates it correctly
+	@if docker network inspect storewide-lp >/dev/null 2>&1 && \
+	   [ "$$(docker network inspect storewide-lp --format '{{index .Labels "com.docker.compose.network"}}')" != "storewide-lp" ]; then \
+		$(COMPOSE_POI) down 2>/dev/null || true; \
+		if docker network rm storewide-lp 2>/dev/null; then \
+			echo "$(BLUE)=== Removed stale storewide-lp network (missing Compose labels) ===$(NC)"; \
+		else \
+			echo "$(YELLOW)=== WARNING: storewide-lp network has missing Compose labels but could not be removed (in use by other containers?) ===$(NC)"; \
+		fi; \
+	fi
 	@# Let SceneScape Compose create and label storewide-lp before POI attaches to it
 	@echo "$(BLUE)=== Starting SceneScape services ===$(NC)"
 	-$(COMPOSE_SCENESCAPE) up -d --no-recreate
+	@# If the web container is unhealthy due to a DB password mismatch (stale volume),
+	@# reset the storewide-lp DB volumes and restart.  Gated behind RESET_SCENESCAPE_DB=true
+	@# to avoid accidental data loss; also verifies the failure is a password auth error.
+	@# Poll health status past the start_period (10s) + several intervals (10s each).
+	@echo "  Waiting for SceneScape web health check..."; \
+	attempts=0; \
+	while [ $$attempts -lt 15 ]; do \
+		status=$$(docker inspect storewide-lp-web-1 --format='{{.State.Health.Status}}' 2>/dev/null || echo "missing"); \
+		if [ "$$status" = "healthy" ]; then break; fi; \
+		if [ "$$status" = "unhealthy" ]; then \
+			if docker logs storewide-lp-pgserver-1 2>&1 | tail -20 | grep -q 'password authentication failed'; then \
+				if [ "$(RESET_SCENESCAPE_DB)" = "true" ]; then \
+					echo "$(BLUE)=== SceneScape DB password mismatch — resetting stale DB volumes ===$(NC)"; \
+					$(COMPOSE_SCENESCAPE) stop pgserver web scene scene-import 2>/dev/null || true; \
+					docker volume rm storewide-lp_vol-db storewide-lp_vol-migrations 2>/dev/null && \
+						echo "  Removed storewide-lp_vol-db and storewide-lp_vol-migrations" || true; \
+					$(COMPOSE_SCENESCAPE) up -d; \
+				else \
+					echo "$(YELLOW)=== SceneScape web unhealthy (DB password mismatch). Run 'make up RESET_SCENESCAPE_DB=true' to auto-reset volumes ===$(NC)"; \
+				fi; \
+			else \
+				echo "$(YELLOW)=== SceneScape web unhealthy (not a DB password issue) — check logs with: docker logs storewide-lp-web-1 ===$(NC)"; \
+			fi; \
+			break; \
+		fi; \
+		attempts=$$((attempts + 1)); \
+		sleep 10; \
+	done
 	@echo ""
 	@echo "$(BLUE)=== Resolving SCENE_UID ===$(NC)"
 	@bash scripts/resolve_scene_uid.sh

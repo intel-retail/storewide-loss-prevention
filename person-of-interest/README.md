@@ -15,6 +15,7 @@ The POI Re-identification system is a real-time retail loss-prevention applicati
   - [Troubleshooting](./docs/user-guide/troubleshooting.md): Support and troubleshooting information.
 
 - **Deployment**
+  - [Get Started](./docs/user-guide/get-started.md): Step-by-step guide including pre-built Docker Hub images.
   - [Build from Source](./docs/user-guide/get-started/build-from-source.md): Instructions for building from source code.
 
 - **Technical Reference**

@@ -156,8 +156,8 @@ Delete poi by poi id
 List Camera
 This should return a list of cameras internally it will call scenescape camera api 
 Here is the scenescape api which fetches camera list 
-postman request 'https://10.223.23.34/api/v1/cameras' \
-  --header 'Authorization: Token f3ba12f7de0e0ea63d5feaa2ac5bf7a53f9f7c07'
+postman request '<SCENESCAPE_API_URL>/api/v1/cameras' \
+  --header 'Authorization: Token <SCENESCAPE_API_TOKEN>'
 Historical Search api
 
 This api request will have one image and start time and end time 

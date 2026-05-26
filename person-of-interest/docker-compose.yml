@@ -1,6 +1,7 @@
 services:
   # ── POI Backend ────────────────────────────────────────
   poi-backend:
+    image: poi-backend
     build:
       context: .
       dockerfile: backend/Dockerfile
@@ -44,6 +45,7 @@ services:
 
   # ── UI ─────────────────────────────────────────────────
   ui:
+    image: poi-ui
     build:
       context: .
       dockerfile: ui/Dockerfile

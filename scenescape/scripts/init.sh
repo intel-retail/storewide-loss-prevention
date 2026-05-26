@@ -96,6 +96,10 @@ print(f'SCENESCAPE_MANAGER_IMAGE=\"{ss.get(\"manager_image\", \"intel/scenescape
 print(f'DLSTREAMER_VERSION=\"{ss.get(\"dlstreamer_version\", \"2026.1.0-20260331-weekly-ubuntu24\")}\"')
 print(f'SCENESCAPE_API_USER=\"{ss.get(\"api_user\", \"admin\")}\"')
 
+# SceneScape API
+api = cfg.get('scenescape_api', {})
+print(f'SCENESCAPE_API_URL=\"{api.get(\"base_url\", \"https://localhost\")}\"')
+
 # Store
 store = cfg.get('store', {})
 print(f'STORE_NAME=\"{store.get(\"name\", \"Retail\")}\"')
@@ -343,10 +347,14 @@ CONTROLLER_AUTH=$(cat "${SECRETS_DIR}/controller.auth" 2>/dev/null || echo "")
 USER_UID=$(id -u)
 USER_GID=$(id -g)
 
-# If secrets were freshly generated, remove stale DB volumes
+# If secrets were freshly generated, remove stale DB volumes so PostgreSQL
+# reinitializes with the new password.  Only remove volumes belonging to the
+# storewide-lp compose project (set in scenescape/docker-compose.yaml).
 if [ "${SECRETS_GENERATED}" = "1" ]; then
     echo "  New secrets generated — removing stale DB volumes..."
-    docker volume rm storewide-lp_vol-db storewide-lp_vol-migrations 2>/dev/null || true
+    for vol in storewide-lp_vol-db storewide-lp_vol-migrations; do
+        docker volume rm "$vol" 2>/dev/null && echo "    Removed $vol" || true
+    done
 fi
 
 mkdir -p "$(dirname "${ENV_FILE}")"
@@ -410,7 +418,8 @@ SEAWEEDFS_S3_PORT=${SEAWEEDFS_S3_PORT}
 SEAWEEDFS_MASTER_PORT=${SEAWEEDFS_MASTER_PORT}
 SEAWEEDFS_VOLUME_PORT=${SEAWEEDFS_VOLUME_PORT}
 
-# ---- SceneScape API (from zone_config.json) ----
+# ---- SceneScape API (from zone_config.json scenescape_api.base_url) ----
+SCENESCAPE_API_URL=${SCENESCAPE_API_URL}
 SCENESCAPE_API_USER=${SCENESCAPE_API_USER}
 SCENESCAPE_API_PASSWORD=${SUPASS}
 
