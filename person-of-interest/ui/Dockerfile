@@ -1,6 +1,9 @@
 # ── Stage 1: Build ────────────────────────────────────────
 FROM node:20-alpine AS builder
 
+# Patch Alpine OS-level packages (libssl3, libcrypto3, libxml2 CVEs)
+RUN apk update && apk upgrade --no-cache
+
 WORKDIR /app
 
 COPY ui/package.json ui/tsconfig.json ui/vite.config.ts ./
@@ -11,6 +14,9 @@ RUN npm run build
 
 # ── Stage 2: Serve ───────────────────────────────────────
 FROM nginx:1.27-alpine
+
+# Patch Alpine OS-level packages (libssl3, libcrypto3, libxml2 CVEs)
+RUN apk update && apk upgrade --no-cache
 
 COPY --from=builder /app/dist /usr/share/nginx/html
 
