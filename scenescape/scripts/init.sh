@@ -222,7 +222,9 @@ if [ -f "${RESOURCE_CONFIG_PATH}" ]; then
     . "${RESOURCE_CONFIG_PATH}"
     set +a
 else
-    echo -e "${YELLOW}WARNING: Resource config not found at ${RESOURCE_CONFIG_PATH}, using defaults${NC}"
+    echo -e "${RED}ERROR: Resource config not found at ${RESOURCE_CONFIG_PATH}${NC}"
+    echo "Valid options: $(ls -1 "${APP_DIR}/configs/res/"*.env 2>/dev/null | xargs -I{} basename {} | tr '\n' ' ')"
+    exit 1
 fi
 
 DETECT_DEVICE="${DETECT_DEVICE:-GPU}"
