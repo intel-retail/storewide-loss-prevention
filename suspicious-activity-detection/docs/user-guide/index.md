@@ -24,11 +24,13 @@ visualized for a retail loss-prevention scenario.
 
 ## Supporting Resources
 
-- [Get Started](./get-started.md) – Step-by-step instructions to build and
-  run the application using `make` and Docker.
 - [System Requirements](./get-started/system-requirements.md) – Hardware,
   software, and network requirements, plus an overview of the AI models used
   by each workload.
+- [SceneScape Setup](./scenescape-setup.md) – How SceneScape is configured,
+  initialized, and managed within the application stack.
+- [Get Started](./get-started.md) – Step-by-step instructions to build and
+  run the application using `make` and Docker.
 - [How It Works](./how-it-works.md) – High-level architecture, service
   responsibilities, and data/control flows.
 - [Pattern Authoring Guide](./pattern-authoring-guide.md) – How to define
