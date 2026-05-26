@@ -42,6 +42,16 @@ AUTO_STOP_MINUTES ?= 15
 DEVICE ?= all-npu-cpu.env
 RESOURCE_CONFIG := configs/res/$(DEVICE)
 
+# Validate DEVICE before doing anything
+.PHONY: validate-device
+validate-device:
+	@if [ ! -f "$(RESOURCE_CONFIG)" ]; then \
+		echo "\033[1;31mERROR: Invalid DEVICE='$(DEVICE)'. File '$(RESOURCE_CONFIG)' not found.\033[0m"; \
+		echo "Valid options:"; \
+		ls -1 configs/res/*.env 2>/dev/null | xargs -I{} basename {} | sed 's/^/  - /'; \
+		exit 1; \
+	fi
+
 
 # ---- Submodules ----
 
@@ -75,7 +85,7 @@ init:
 
 .PHONY: up
 
-up:
+up: validate-device
 	@$(MAKE) -C $(SCENESCAPE_DIR) APP_DIR=$(CURDIR) RESOURCE_CONFIG=$(RESOURCE_CONFIG) init init-sample-data download-models init-volumes
 	@$(MAKE) patch-device
 	@mkdir -p $(RESULTS_PATH) $(RESULTS_PATH)/ba $(RESULTS_PATH)/swlp
