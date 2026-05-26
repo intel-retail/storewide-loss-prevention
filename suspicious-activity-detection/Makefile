@@ -132,23 +132,6 @@ down:
 	-$(COMPOSE_ALL) --profile ui down  --remove-orphans
 	-docker volume rm storewide-lp_seaweedfs-data 2>/dev/null || true
 
-# Wipes the corrupt VDMS reid_vector descriptor set + graph metadata that
-# SceneScape's first-init creates without dimensions, then bounces the
-# controller so it re-creates the schema cleanly. Without this, ReID stays
-# stuck in pending_collection/empty-chain forever and re-entries are not
-# tracked. Safe to run any time the stack is up.
-.PHONY: fix-reid
-fix-reid:
-	@docker ps --format '{{.Names}}' | grep -q '^storewide-lp-vdms-1$$' || { echo "vdms not running — skipping"; exit 0; }
-	@echo "=== Wiping corrupt VDMS reid_vector descriptor + graph ==="
-	-@docker stop storewide-lp-scene-1 storewide-lp-swlp-service-1 >/dev/null 2>&1 || true
-	@docker exec storewide-lp-vdms-1 sh -c 'rm -rf /vdms/build/db/descriptors/reid_vector /vdms/build/db/graph && mkdir -p /vdms/build/db/descriptors /vdms/build/db/graph'
-	@docker restart storewide-lp-vdms-1 >/dev/null
-	@sleep 4
-	-@docker start storewide-lp-scene-1 >/dev/null 2>&1 || true
-	@sleep 6
-	-@docker start storewide-lp-swlp-service-1 >/dev/null 2>&1 || true
-	@echo "=== ReID schema reset complete ==="
 
 # SceneScape only (without LP services)
 .PHONY: run-scenescape
