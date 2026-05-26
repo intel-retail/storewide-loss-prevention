@@ -6,10 +6,15 @@ services:
       - ../scenescape/controller/patches/moving_object.py:/usr/local/lib/python3.11/site-packages/controller/moving_object.py:ro
       - ../scenescape/controller/patches/vdms_adapter.py:/usr/local/lib/python3.11/site-packages/controller/vdms_adapter.py:ro
 
-  # Expose WebRTC ICE port for browser playback
+  # Fix WebRTC playback in Docker: MediaMTX must use a fixed UDP port for
+  # ICE media (default is random ephemeral ports which Docker can't forward).
   mediaserver:
     ports:
       - "8189:8189/udp"
+      - "8189:8189/tcp"
+    environment:
+      - MTX_WEBRTCICEUDPMUXADDRESS=:8189
+      - MTX_WEBRTCICETCPMUXADDRESS=:8189
 
   # Re-encode to baseline H264 (no B-frames) so WebRTC playback works
   lp-cams:
