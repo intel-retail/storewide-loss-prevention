@@ -420,13 +420,13 @@ up:
 	@echo "$(BLUE)=== Starting SceneScape services ===$(NC)"
 	-$(COMPOSE_SCENESCAPE) up -d --no-recreate
 	@# If the web container is unhealthy due to a DB password mismatch (stale volume),
-	@# reset the DB volumes and restart so fresh clones don't hit this on first run.
+	@# reset the storewide-lp DB volumes and restart so fresh clones don't hit this on first run.
 	@sleep 5; \
 	if docker inspect storewide-lp-web-1 --format='{{.State.Health.Status}}' 2>/dev/null | grep -q unhealthy; then \
 		echo "$(BLUE)=== SceneScape web unhealthy — resetting stale DB volumes ===$(NC)"; \
 		$(COMPOSE_SCENESCAPE) stop pgserver web scene scene-import 2>/dev/null || true; \
-		docker volume ls --format '{{.Name}}' | grep -E '_vol-db$$|_vol-migrations$$' \
-			| while read vol; do docker volume rm "$$vol" 2>/dev/null && echo "  Removed $$vol" || true; done; \
+		docker volume rm storewide-lp_vol-db storewide-lp_vol-migrations 2>/dev/null && \
+			echo "  Removed storewide-lp_vol-db and storewide-lp_vol-migrations" || true; \
 		$(COMPOSE_SCENESCAPE) up -d; \
 	fi
 	@echo ""

@@ -39,7 +39,7 @@ SCENESCAPE_API_USER=$(grep '^SCENESCAPE_API_USER=' "${DOCKER_ENV}" 2>/dev/null |
 SCENESCAPE_API_PASSWORD=$(grep '^SCENESCAPE_API_PASSWORD=' "${DOCKER_ENV}" 2>/dev/null | cut -d= -f2- || echo "")
 
 if [ -z "${SCENESCAPE_API_URL}" ]; then
-    echo -e "${YELLOW}WARNING: SCENESCAPE_API_URL not set in ${ENV_FILE} — skipping scene UID resolution${NC}"
+    echo -e "${YELLOW}WARNING: SCENESCAPE_API_URL not set in ${DOCKER_ENV} or ${ENV_FILE} — skipping scene UID resolution${NC}"
     exit 0
 fi
 
