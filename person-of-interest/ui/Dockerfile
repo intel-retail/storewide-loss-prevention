@@ -12,10 +12,10 @@ RUN npm run build
 # ── Stage 2: Serve ───────────────────────────────────────
 FROM nginx:1.27-alpine
 
-# Pin patched Alpine packages for CVE remediation:
-#   libcrypto3/libssl3 >=3.3.7 (CVE-2026-31789, CVE-2025-15467)
-#   libxml2 >=2.13.9 (CVE-2025-49794, CVE-2025-49796)
-RUN apk add --no-cache libcrypto3 libssl3 libxml2
+# Upgrade specific Alpine packages for CVE remediation:
+#   libcrypto3/libssl3 3.3.7-r0 (CVE-2026-31789, CVE-2025-15467)
+#   libxml2 2.13.9-r0 (CVE-2025-49794, CVE-2025-49796)
+RUN apk add --no-cache libcrypto3=3.3.7-r0 libssl3=3.3.7-r0 libxml2=2.13.9-r0
 
 COPY --from=builder /app/dist /usr/share/nginx/html
 
