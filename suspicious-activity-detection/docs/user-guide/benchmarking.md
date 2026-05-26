@@ -8,15 +8,14 @@ within a given latency budget.
 
 ## Prerequisites
 
-Before running benchmarks, ensure:
-
-- AI models have been downloaded (`make download-models`).
-- Python 3 with `venv` support is available on the host.
-- The `performance-tools` submodule is cloned:
+Before running benchmarks, ensure the following setup steps are completed:
 
 ```bash
-make update-submodules
+make update-submodules      # clones performance-tools submodule
+make download-sample-data   # downloads video to scenescape/sample_data/
+make download-models        # downloads models to models/ (detect_models/, reid_models/, vlm_models/)
 ```
+
 
 ## Quick Start
 
