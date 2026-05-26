@@ -92,6 +92,24 @@ make benchmark-stream-density \
 Set `REGISTRY=false` to force a local build when running `make benchmark` or
 `make benchmark-stream-density`.
 
+### Device Profile
+
+Both `make benchmark` and `make benchmark-stream-density` use the `DEVICE`
+parameter to select an inference device profile (same as `make up`). The
+profile controls the DLStreamer decode chain, detection device, and
+re-identification device:
+
+```bash
+make benchmark DEVICE=all-gpu-cpu.env           # GPU detect + CPU re-id
+make benchmark-stream-density DEVICE=all-gpu.env # All GPU
+make benchmark-stream-density DEVICE=all-cpu.env # All CPU
+make benchmark-stream-density DEVICE=all-npu-cpu.env  # NPU detect + CPU re-id (default)
+```
+
+Available profiles are in `configs/res/`. See
+[SceneScape Setup — Device Profiles](./scenescape-setup.md#device-profiles)
+for details.
+
 ## Results and Metrics
 
 Results are written to `RESULTS_PATH` (default `./results`) in both JSON and
