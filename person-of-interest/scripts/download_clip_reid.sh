@@ -18,30 +18,37 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(dirname "${SCRIPT_DIR}")"
 VOLUME_NAME="storewide-lp_vol-models"
 MODEL_NAME="clip-reid-market1501"
-PRECISION="FP32"
-DEST="/models/intel/${MODEL_NAME}/${PRECISION}"
+PRECISIONS="${1:-FP32,FP16}"
 
 # Google Drive file ID for ViT-CLIP-ReID Market-1501 checkpoint
 # Source: https://github.com/Syliz517/CLIP-ReID README → Trained models → ViT-CLIP-ReID → Market column
 GDRIVE_FILE_ID="1GnyAVeNOg3Yug1KBBWMKKbT2x43O5Ch7"
 
 echo "=== CLIP-ReID Model Download & Export ==="
-echo "  Model:     ${MODEL_NAME}"
-echo "  Precision: ${PRECISION}"
-echo "  Volume:    ${VOLUME_NAME}"
+echo "  Model:      ${MODEL_NAME}"
+echo "  Precisions: ${PRECISIONS}"
+echo "  Volume:     ${VOLUME_NAME}"
 echo ""
 
 # Ensure volume exists
 docker volume create "${VOLUME_NAME}" 2>/dev/null || true
 
-# Check if model already exists
-EXISTING=$(docker run --rm -v "${VOLUME_NAME}":/models alpine:3.23 \
-    sh -c "[ -f ${DEST}/${MODEL_NAME}.xml ] && [ -f ${DEST}/${MODEL_NAME}.bin ] && echo yes || echo no")
+# Check if all requested precisions already exist
+ALL_EXIST=true
+IFS=',' read -ra PREC_ARR <<< "${PRECISIONS}"
+for PREC in "${PREC_ARR[@]}"; do
+    DEST="/models/intel/${MODEL_NAME}/${PREC}"
+    EXISTING=$(docker run --rm -v "${VOLUME_NAME}":/models alpine:3.23 \
+        sh -c "[ -f ${DEST}/${MODEL_NAME}.xml ] && [ -f ${DEST}/${MODEL_NAME}.bin ] && echo yes || echo no")
+    if [ "${EXISTING}" != "yes" ]; then
+        ALL_EXIST=false
+    fi
+done
 
-if [ "${EXISTING}" = "yes" ]; then
-    echo "  Model already exists at ${DEST}. Skipping download."
+if [ "${ALL_EXIST}" = "true" ]; then
+    echo "  All requested precisions already exist. Skipping download."
     echo "  To re-download, remove the model first:"
-    echo "    docker run --rm -v ${VOLUME_NAME}:/models alpine:3.23 rm -rf ${DEST}"
+    echo "    docker run --rm -v ${VOLUME_NAME}:/models alpine:3.23 rm -rf /models/intel/${MODEL_NAME}"
     exit 0
 fi
 
@@ -154,22 +161,33 @@ print('  ONNX export complete: clip_reid_market1501.onnx')
 \" 2>/dev/null
 
 echo '--- Converting to OpenVINO IR ---'
-mkdir -p ${DEST}
+
+# Export FP32
+DEST_FP32=/models/intel/${MODEL_NAME}/FP32
+mkdir -p \${DEST_FP32}
 ovc clip_reid_market1501.onnx \
-    --output_model ${DEST}/${MODEL_NAME}.xml \
+    --output_model \${DEST_FP32}/${MODEL_NAME}.xml \
     --compress_to_fp16=False 2>/dev/null | tail -3
+echo '  FP32 export complete'
+
+# Export FP16 (for GPU inference)
+DEST_FP16=/models/intel/${MODEL_NAME}/FP16
+mkdir -p \${DEST_FP16}
+ovc clip_reid_market1501.onnx \
+    --output_model \${DEST_FP16}/${MODEL_NAME}.xml \
+    --compress_to_fp16=True 2>/dev/null | tail -3
+echo '  FP16 export complete'
 
 echo ''
 echo '--- Verifying output ---'
-ls -la ${DEST}/
+ls -la \${DEST_FP32}/
+ls -la \${DEST_FP16}/
 echo ''
 echo '=== CLIP-ReID model export complete ==='
-echo '  ${DEST}/${MODEL_NAME}.xml'
-echo '  ${DEST}/${MODEL_NAME}.bin'
 "
 
 echo ""
 echo "=== Done ==="
 echo "Model installed to Docker volume '${VOLUME_NAME}' at:"
-echo "  intel/${MODEL_NAME}/${PRECISION}/${MODEL_NAME}.xml"
-echo "  intel/${MODEL_NAME}/${PRECISION}/${MODEL_NAME}.bin"
+echo "  intel/${MODEL_NAME}/FP32/${MODEL_NAME}.xml"
+echo "  intel/${MODEL_NAME}/FP16/${MODEL_NAME}.xml"

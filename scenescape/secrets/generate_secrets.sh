@@ -123,4 +123,12 @@ echo "Generating SUPASS..."
 SUPASS=$(openssl rand -base64 16)
 echo -n "$SUPASS" > "$SECRETSDIR/supass"
 
+# ---- Fix key permissions for Docker Compose ----
+# Docker Compose file-based secrets preserve host permissions. Private keys
+# are generated with 0600 (owner-only) by openssl, but the container process
+# (e.g., Apache in the web container) runs as a different UID and cannot read
+# them. Set 0644 so any UID inside the container can read the keys.
+# These files remain local to the host and are only bind-mounted into containers.
+chmod 644 "$SECRETSDIR"/certs/*.key "$SECRETSDIR"/ca/*.key 2>/dev/null || true
+
 echo "=== Secrets generated in $SECRETSDIR ==="

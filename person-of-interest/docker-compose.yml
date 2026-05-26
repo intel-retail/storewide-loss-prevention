@@ -7,6 +7,7 @@ services:
       dockerfile: backend/Dockerfile
     container_name: poi-backend
     restart: unless-stopped
+    user: "${HOST_UID:-1000}:${HOST_GID:-1000}"
     ports:
       - "8000:8000"
     env_file:
@@ -31,8 +32,13 @@ services:
       - MEDIAMTX_WEBRTC_PORT=${MEDIAMTX_WEBRTC_PORT:-8889}
       - USECASE_1=${USECASE_1:-Person-of-Interest}
       - CONTAINER_RESULTS_PATH=/app/results
+      - SCENESCAPE_API_URL=${SCENESCAPE_API_URL:-}
+      - SCENESCAPE_API_USER=${SCENESCAPE_API_USER:-}
+      - SCENESCAPE_API_PASSWORD=${SCENESCAPE_API_PASSWORD:-}
+      - NO_PROXY=localhost,127.0.0.1,web.scenescape.intel.com,*.intel.com,172.18.0.0/16,172.19.0.0/16,10.*,134.*
+      - no_proxy=localhost,127.0.0.1,web.scenescape.intel.com,*.intel.com,172.18.0.0/16,172.19.0.0/16,10.*,134.*
     volumes:
-      - faiss-data:/data/faiss
+      - ./data/faiss:/data/faiss
       - ./data/uploads:/data/uploads
       - ./models/intel/intel:/models/intel:ro
       - ./results:/app/results
@@ -99,7 +105,6 @@ services:
 
 volumes:
   redis-data:
-  faiss-data:
 
 networks:
   poi-net:

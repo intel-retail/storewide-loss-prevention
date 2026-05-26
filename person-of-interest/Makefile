@@ -17,17 +17,41 @@ COMPOSE_ALL := $(if $(wildcard $(CAMERAS_OVERRIDE)),$(COMPOSE_ALL) -f $(CAMERAS_
 
 RESULTS_PATH ?= ./results
 
+# Device resource config: pass DEVICE=all-cpu.env, all-gpu-cpu.env, all-gpu.env, all-npu-cpu.env, or all-npu.env
+DEVICE ?= all-cpu.env
+RESOURCE_CONFIG := configs/res/$(DEVICE)
+
 # ---- Initialization ----
 
 .PHONY: init
 init:
-	@$(MAKE) -C $(SCENESCAPE_DIR) APP_DIR=$(CURDIR) init
+	@if [ ! -f "$(RESOURCE_CONFIG)" ]; then \
+		echo "\033[1;31mERROR: Invalid DEVICE='$(DEVICE)'. File '$(RESOURCE_CONFIG)' not found.\033[0m"; \
+		echo "Valid options: $$(ls -1 configs/res/*.env 2>/dev/null | xargs -I{} basename {} | tr '\n' ' ')"; \
+		exit 1; \
+	fi
+	@if [ -z "$(HOST_IP)" ]; then \
+		echo ""; \
+		echo "\033[1;31mERROR: HOST_IP is not set.\033[0m"; \
+		echo ""; \
+		echo "  HOST_IP is required for WebRTC camera streams to work in the Live Alerts UI."; \
+		echo "  Set it to the network-reachable IP of this machine before running make init:"; \
+		echo ""; \
+		echo "    export HOST_IP=\$$(hostname -I | awk '{print \$$1}') && make init"; \
+		echo ""; \
+		exit 1; \
+	fi
+	@echo "  HOST_IP=$(HOST_IP) (used for WebRTC ICE candidates)"
+	@$(MAKE) -C $(SCENESCAPE_DIR) APP_DIR=$(CURDIR) RESOURCE_CONFIG=$(RESOURCE_CONFIG) init
+	@# Pre-create bind-mounted directories as the host user so poi-backend
+	@# (which runs as HOST_UID:HOST_GID) can write uploads and results.
+	@mkdir -p data/uploads data/faiss results
 
 # ---- Full Stack (SceneScape + LP) ----
 
 .PHONY: demo
 demo:
-	@$(MAKE) -C $(SCENESCAPE_DIR) APP_DIR=$(CURDIR) init init-sample-data download-models init-volumes
+	@$(MAKE) -C $(SCENESCAPE_DIR) APP_DIR=$(CURDIR) RESOURCE_CONFIG=$(RESOURCE_CONFIG) init init-sample-data download-models init-volumes
 	@echo ""
 	@echo "=== Building POI images ==="
 	$(COMPOSE_POI) build poi-backend ui
@@ -87,8 +111,8 @@ down-lp:
 
 .PHONY: download-models
 download-models:
-	@echo "Downloading models for Person of Interest..."
-	@bash $(SCENESCAPE_DIR)/scripts/download_models.sh
+	@echo "Downloading models for Person of Interest (FP32 + FP16 for multi-device support)..."
+	@bash $(SCENESCAPE_DIR)/scripts/download_models.sh --precisions FP32,FP16,FP16-INT8
 	@bash scripts/download_clip_reid.sh
 
 # ---- Stream Density & Benchmarking ----
@@ -118,6 +142,9 @@ ifdef SCENE_INCREMENT
 BENCHMARK_SCENE_INCREMENT := $(SCENE_INCREMENT)
 endif
 
+# Resolve the resource-config path once so it can be forwarded to poi_stream_density.py
+BENCHMARK_RESOURCE_CONFIG := $(CURDIR)/$(RESOURCE_CONFIG)
+
 BENCHMARK_VENV := cd $(PERF_TOOLS_DIR) && \
 	python3 -m venv venv 2>/dev/null && \
 	. venv/bin/activate && \
@@ -127,13 +154,13 @@ BENCHMARK_VENV := cd $(PERF_TOOLS_DIR) && \
 
 .PHONY: benchmark
 benchmark: _benchmark-fresh-start _benchmark-enroll ## Single-scene POI benchmark with auto-enroll
-	@$(MAKE) --no-print-directory poi-benchmark; ret=$$?; \
+	@$(MAKE) --no-print-directory poi-benchmark BENCHMARK_RESOURCE_CONFIG=$(BENCHMARK_RESOURCE_CONFIG); ret=$$?; \
 		$(MAKE) --no-print-directory _benchmark-cleanup; \
 		exit $$ret
 
 .PHONY: benchmark-stream-density
 benchmark-stream-density: _benchmark-fresh-start _benchmark-enroll ## Stream density with auto-enroll
-	@$(MAKE) --no-print-directory poi-benchmark-stream-density; ret=$$?; \
+	@$(MAKE) --no-print-directory poi-benchmark-stream-density BENCHMARK_RESOURCE_CONFIG=$(BENCHMARK_RESOURCE_CONFIG); ret=$$?; \
 		$(MAKE) --no-print-directory _benchmark-cleanup; \
 		exit $$ret
 
@@ -141,9 +168,12 @@ benchmark-stream-density: _benchmark-fresh-start _benchmark-enroll ## Stream den
 .PHONY: _benchmark-fresh-start
 _benchmark-fresh-start:
 	@echo "$(BLUE)=== Cleaning up previous benchmark state ===$(NC)"
+	@echo "  Device: $(DEVICE)  Resource config: $(RESOURCE_CONFIG)"
 	@$(MAKE) --no-print-directory down 2>/dev/null || true
 	@echo "$(BLUE)=== Removing POI Compose volumes ===$(NC)"
 	@$(COMPOSE_POI) down -v --remove-orphans 2>/dev/null || true
+	@echo "$(BLUE)=== Initializing with DEVICE=$(DEVICE) ===$(NC)"
+	@$(MAKE) --no-print-directory init
 
 # Internal: ensure services are running, then enroll sample POI before benchmark
 .PHONY: _benchmark-enroll
@@ -220,11 +250,19 @@ poi-benchmark: ## Run a single-scene POI benchmark (detection-to-alert latency)
 	@echo "╔══════════════════════════════════════════════════════════════════╗"
 	@echo "║       POI Benchmark — Single Scene                             ║"
 	@echo "╚══════════════════════════════════════════════════════════════════╝"
+	@echo "  Device:         $(DEVICE)"
 	@echo "  Target Latency: $(BENCHMARK_TARGET_LATENCY_MS)ms"
 	@echo "  Duration:       $(BENCHMARK_DURATION)s (exits early on alert)"
 	@echo "  Results Dir:    $(RESULTS_PATH)"
 	@echo ""
 	mkdir -p $(RESULTS_PATH)
+	@# Fix ownership if results/ was created by a Docker container (root-owned).
+	@# Uses docker run (no sudo needed) to chown inside a container that has access.
+	@if [ "$$(stat -c '%U' $(RESULTS_PATH) 2>/dev/null)" != "$$(id -un)" ]; then \
+		docker run --rm -v "$(CURDIR)/$(RESULTS_PATH)":/r alpine:3.23 \
+			chown -R "$(shell id -u):$(shell id -g)" /r && \
+		echo "  Fixed ownership of $(RESULTS_PATH)"; \
+	fi
 	$(BENCHMARK_VENV) && \
 	python3 $(POI_STREAM_DENSITY) run $(CURDIR) \
 		--single_run \
@@ -234,6 +272,7 @@ poi-benchmark: ## Run a single-scene POI benchmark (detection-to-alert latency)
 		--init_duration $(BENCHMARK_INIT_DURATION) \
 		--stabilise_duration $(BENCHMARK_STABILISE_DURATION) \
 		--benchmark_duration $(BENCHMARK_DURATION) \
+		--resource_config $(BENCHMARK_RESOURCE_CONFIG) \
 		--results_dir $(CURDIR)/$(RESULTS_PATH)
 
 .PHONY: poi-benchmark-stream-density
@@ -241,6 +280,7 @@ poi-benchmark-stream-density: ## Iteratively increase scenes until POI latency t
 	@echo "╔══════════════════════════════════════════════════════════════════╗"
 	@echo "║       POI Stream Density — Detection-to-Alert Scaling          ║"
 	@echo "╚══════════════════════════════════════════════════════════════════╝"
+	@echo "  Device:           $(DEVICE)"
 	@echo "  Target Latency:   $(BENCHMARK_TARGET_LATENCY_MS)ms"
 	@echo "  Latency Metric:   $(BENCHMARK_LATENCY_METRIC)"
 	@echo "  Scene Increment:  +$(BENCHMARK_SCENE_INCREMENT) per iteration"
@@ -250,6 +290,13 @@ poi-benchmark-stream-density: ## Iteratively increase scenes until POI latency t
 	@echo "  Results Dir:      $(RESULTS_PATH)"
 	@echo ""
 	mkdir -p $(RESULTS_PATH)
+	@# Fix ownership if results/ was created by a Docker container (root-owned).
+	@# Uses docker run (no sudo needed) to chown inside a container that has access.
+	@if [ "$$(stat -c '%U' $(RESULTS_PATH) 2>/dev/null)" != "$$(id -un)" ]; then \
+		docker run --rm -v "$(CURDIR)/$(RESULTS_PATH)":/r alpine:3.23 \
+			chown -R "$(shell id -u):$(shell id -g)" /r && \
+		echo "  Fixed ownership of $(RESULTS_PATH)"; \
+	fi
 	$(BENCHMARK_VENV) && \
 	python3 $(POI_STREAM_DENSITY) run $(CURDIR) \
 		--target_latency_ms $(BENCHMARK_TARGET_LATENCY_MS) \
@@ -258,6 +305,7 @@ poi-benchmark-stream-density: ## Iteratively increase scenes until POI latency t
 		--init_duration $(BENCHMARK_INIT_DURATION) \
 		--stabilise_duration $(BENCHMARK_STABILISE_DURATION) \
 		--max_iterations $(BENCHMARK_MAX_ITERATIONS) \
+		--resource_config $(BENCHMARK_RESOURCE_CONFIG) \
 		--results_dir $(CURDIR)/$(RESULTS_PATH)
 
 .PHONY: poi-stream-density
@@ -381,9 +429,8 @@ help:
 # POI Re-identification System
 # ========================================================================
 
-COMPOSE_POI := docker compose -f docker-compose.yml
+COMPOSE_POI := docker compose --env-file docker/.env -f docker-compose.yml
 REGISTRY ?= false
-RESET_SCENESCAPE_DB ?= false
 
 BLUE := \033[1;34m
 GREEN := \033[1;32m
@@ -422,11 +469,43 @@ up:
 		fi; \
 	fi
 	@# Let SceneScape Compose create and label storewide-lp before POI attaches to it
+	@# Pre-flight: if this is a fresh deployment (no web container) but stale DB volumes
+	@# exist from a previous run, remove them to prevent password mismatch on first start.
+	@if ! docker inspect storewide-lp-web-1 >/dev/null 2>&1; then \
+		if docker volume inspect storewide-lp_vol-db >/dev/null 2>&1; then \
+			echo "$(BLUE)=== Removing orphan DB volumes (fresh deployment with stale volumes) ===$(NC)"; \
+			docker volume rm storewide-lp_vol-db storewide-lp_vol-migrations 2>/dev/null && \
+				echo "  Removed storewide-lp_vol-db and storewide-lp_vol-migrations" || true; \
+		fi; \
+	fi
+	@# Validate HOST_IP is set — required for WebRTC ICE candidates (camera streams)
+	@HOST_IP_VAL="$$(grep -E '^HOST_IP=.+' docker/.env 2>/dev/null | cut -d= -f2-)"; \
+	if [ -z "$$HOST_IP_VAL" ]; then \
+		echo ""; \
+		echo "$(RED)ERROR: HOST_IP is not set in docker/.env$(NC)"; \
+		echo ""; \
+		echo "  HOST_IP is required for WebRTC camera streams to work in the UI."; \
+		echo "  Set it before running make init:"; \
+		echo ""; \
+		echo "    export HOST_IP=\$$(hostname -I | awk '{print \$$1}') && make init"; \
+		echo ""; \
+		echo "  Or for a specific IP:"; \
+		echo ""; \
+		echo "    export HOST_IP=192.168.1.100 && make init"; \
+		echo ""; \
+		exit 1; \
+	fi
+	@# Ensure sample videos are copied into the Docker volume before starting cameras
+	@$(MAKE) -C $(SCENESCAPE_DIR) APP_DIR=$(CURDIR) init-sample-data
+	@# Ensure TLS key files are readable inside Docker containers (fixes SSL
+	@# Permission denied when container UID differs from host UID)
+	@chmod 644 $(SCENESCAPE_DIR)/secrets/certs/*.key $(SCENESCAPE_DIR)/secrets/ca/*.key 2>/dev/null || true
 	@echo "$(BLUE)=== Starting SceneScape services ===$(NC)"
 	-$(COMPOSE_SCENESCAPE) up -d --no-recreate
 	@# If the web container is unhealthy due to a DB password mismatch (stale volume),
-	@# reset the storewide-lp DB volumes and restart.  Gated behind RESET_SCENESCAPE_DB=true
-	@# to avoid accidental data loss; also verifies the failure is a password auth error.
+	@# auto-reset the storewide-lp DB volumes and restart.  Only resets when pgserver
+	@# logs confirm "password authentication failed" — safe for first-run scenarios
+	@# where stale volumes exist from a previous deployment on the same machine.
 	@# Poll health status past the start_period (10s) + several intervals (10s each).
 	@echo "  Waiting for SceneScape web health check..."; \
 	attempts=0; \
@@ -435,15 +514,11 @@ up:
 		if [ "$$status" = "healthy" ]; then break; fi; \
 		if [ "$$status" = "unhealthy" ]; then \
 			if docker logs storewide-lp-pgserver-1 2>&1 | tail -20 | grep -q 'password authentication failed'; then \
-				if [ "$(RESET_SCENESCAPE_DB)" = "true" ]; then \
-					echo "$(BLUE)=== SceneScape DB password mismatch — resetting stale DB volumes ===$(NC)"; \
-					$(COMPOSE_SCENESCAPE) stop pgserver web scene scene-import 2>/dev/null || true; \
-					docker volume rm storewide-lp_vol-db storewide-lp_vol-migrations 2>/dev/null && \
-						echo "  Removed storewide-lp_vol-db and storewide-lp_vol-migrations" || true; \
-					$(COMPOSE_SCENESCAPE) up -d; \
-				else \
-					echo "$(YELLOW)=== SceneScape web unhealthy (DB password mismatch). Run 'make up RESET_SCENESCAPE_DB=true' to auto-reset volumes ===$(NC)"; \
-				fi; \
+				echo "$(BLUE)=== SceneScape DB password mismatch — resetting stale DB volumes ===$(NC)"; \
+				$(COMPOSE_SCENESCAPE) stop pgserver web scene scene-import 2>/dev/null || true; \
+				docker volume rm storewide-lp_vol-db storewide-lp_vol-migrations 2>/dev/null && \
+					echo "  Removed storewide-lp_vol-db and storewide-lp_vol-migrations" || true; \
+				$(COMPOSE_SCENESCAPE) up -d; \
 			else \
 				echo "$(YELLOW)=== SceneScape web unhealthy (not a DB password issue) — check logs with: docker logs storewide-lp-web-1 ===$(NC)"; \
 			fi; \

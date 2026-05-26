@@ -16,7 +16,7 @@
   "model_precision": "FP32",
   "scenescape": {
     "registry": "",
-    "version": "2026.1.0",
+    "version": "v2026.1.0-rc1",
     "controller_image": "intel/scenescape-controller",
     "manager_image": "intel/scenescape-manager",
     "dlstreamer_version": "2026.1.0-ubuntu24-rc1.1",
@@ -34,7 +34,7 @@
     "seaweedfs_volume_port": 8080
   },
   "scenescape_api": {
-    "base_url": "https://localhost",
+    "base_url": "https://web.scenescape.intel.com",
     "auth_path": "/api/v1/auth",
     "scenes_path": "/api/v1/scenes",
     "regions_path": "/api/v1/regions",

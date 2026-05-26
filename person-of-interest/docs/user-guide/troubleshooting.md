@@ -198,3 +198,27 @@ make up
     curl -k https://<scenescape-host>/api/v1/cameras \
       -H "Authorization: Token <api-token>"
     ```
+
+### 4. Live Camera Feed Shows "Stream Not Found"
+
+- **Issue**: The Live Camera Feeds panel in the UI shows *"stream not found, retrying in a few seconds"*.
+- **Cause**: MediaMTX can only advertise WebRTC ICE candidates that the browser can
+  actually reach. Without `HOST_IP`, it only knows its Docker-internal IP
+  (`172.x.x.x`), which is unreachable from a browser.
+- **Solution**: Ensure `HOST_IP` is set to the network-reachable IP of this machine
+  before running `make init`:
+
+  ```bash
+  export HOST_IP=$(hostname -I | awk '{print $1}')
+  make init
+  make up
+  ```
+
+  Verify `HOST_IP` is present and non-empty in `docker/.env`:
+
+  ```bash
+  grep HOST_IP docker/.env
+  ```
+
+  If `HOST_IP` is missing or empty, re-run `make init` with `HOST_IP` exported.
+  `make up` will refuse to start if `HOST_IP` is not set.

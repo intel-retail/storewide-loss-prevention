@@ -2,6 +2,29 @@
 
 The POI Re-identification system is a real-time retail loss-prevention application that detects enrolled Persons of Interest (POIs) across multiple cameras using Intel® OpenVINO™ face re-identification and FAISS vector search. Integrated with Intel® SceneScape spatial computing, it delivers instant security alerts and supports offline historical investigation to trace suspect movements across all cameras and time ranges.
 
+## Quick Start
+
+```bash
+git clone https://github.com/intel-retail/storewide-loss-prevention.git
+cd storewide-loss-prevention/person-of-interest
+
+# Initialize submodules
+make update-submodules
+
+# Pull pre-built images from Docker Hub
+docker pull intel/poi-backend:2026.1.0-rc1
+docker pull intel/poi-ui:2026.1.0-rc1
+docker tag intel/poi-backend:2026.1.0-rc1 poi-backend
+docker tag intel/poi-ui:2026.1.0-rc1 poi-ui
+
+# Initialize environment and start
+make init
+make up
+```
+
+For the full setup guide, including device profile selection and building from
+source, see [Get Started](./docs/user-guide/get-started.md).
+
 ## Documentation
 
 - **Overview**

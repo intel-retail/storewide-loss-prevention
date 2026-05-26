@@ -72,6 +72,8 @@ class Config:
     # SceneScape API
     scenescape_api_url: str = ""
     scenescape_api_token: str = ""
+    scenescape_api_user: str = ""
+    scenescape_api_password: str = ""
 
     # Alert
     alert_webhook_url: str = ""
@@ -157,6 +159,8 @@ class Config:
             api_port=int(os.getenv("API_PORT", "8000")),
             scenescape_api_url=os.getenv("SCENESCAPE_API_URL", ""),
             scenescape_api_token=os.getenv("SCENESCAPE_API_TOKEN", ""),
+            scenescape_api_user=os.getenv("SCENESCAPE_API_USER", ""),
+            scenescape_api_password=os.getenv("SCENESCAPE_API_PASSWORD", ""),
             alert_webhook_url=os.getenv("ALERT_WEBHOOK_URL", ""),
             alert_service_url=os.getenv("ALERT_SERVICE_URL", "http://alert-service:8000"),
             delivery_handlers=handlers,

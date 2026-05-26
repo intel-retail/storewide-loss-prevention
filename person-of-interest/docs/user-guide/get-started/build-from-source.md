@@ -27,8 +27,8 @@ The POI Re-identification application consists of multiple components that work 
 ## Step 1: Clone the Repository
 
 ```bash
-git clone https://github.com/sainijit/storewide-loss-prevention-retail.git
-cd storewide-loss-prevention-retail/person-of-interest
+git clone https://github.com/intel-retail/storewide-loss-prevention.git
+cd storewide-loss-prevention/person-of-interest
 ```
 
 ## Step 2: Initialize Environment

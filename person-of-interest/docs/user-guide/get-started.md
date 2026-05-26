@@ -1,100 +1,54 @@
 # Get Started
 
-## Overview
+This guide walks you through deploying and running the POI Re-identification
+system, including the POI backend, React UI, alert service, and the supporting
+SceneScape stack.
 
-POI Re-identification is a real-time retail loss-prevention system that detects enrolled
-Persons of Interest across multiple cameras using face re-identification and FAISS vector
-search. This guide walks you through deploying and configuring the application.
+Before you begin, review the
+[System Requirements](./get-started/system-requirements.md) to ensure your
+environment meets the recommended hardware and software prerequisites.
 
-## Prerequisites
+## 1. Clone the Repository
 
-### System Requirements
-
-- System must meet [minimum requirements](./get-started/system-requirements.md).
-- Intel® SceneScape must be deployed and running with DLStreamer pipelines configured.
-
-The POI system operates alongside Intel® SceneScape in a distributed architecture:
-
-| Service          | Port  | Purpose                                           |
-| ---------------- | ----- | ------------------------------------------------- |
-| POI Backend      | 8000  | REST API, MQTT consumer, FAISS matching            |
-| POI UI           | 3000  | React operator interface                           |
-| Redis            | 6379  | Metadata, events, cache                            |
-| Alert Service    | 8001  | Alert fan-out (WebSocket, MQTT, log)               |
-| SceneScape       | 8443  | Spatial scene management + DLStreamer pipelines     |
-
-### Software Dependencies
-
-- **Docker**: [Installation Guide](https://docs.docker.com/get-docker/)
-  - Must be configured to run without sudo ([Post-install guide](https://docs.docker.com/engine/install/linux-postinstall/))
-- **Git**: [Installation Guide](https://git-scm.com/book/en/v2/Getting-Started-Installing-Git)
-- **Make**: Required for build and deployment commands
-
-### Required Services
-
-Before setting up the POI system, ensure these services are running:
-
-#### 1. Intel® SceneScape
-
-SceneScape provides the upstream inference pipeline (DLStreamer) and spatial scene management:
-
-- Person detection via `person-detection-retail-0013`
-- Face detection via `face-detection-retail-0004`
-- Face re-identification via `face-reidentification-retail-0095` (256-d embeddings)
-- Region tracking via regulated scene events
-
-Refer to the [SceneScape documentation](../../../scenescape/README.md) for setup instructions.
-
-#### 2. MQTT Broker
-
-SceneScape's MQTT broker must be accessible from the POI backend. The default configuration
-connects to the broker bundled with SceneScape.
-
-## Quick Start
-
-### Step 1: Clone the Repository
+> **Note:** Make sure you are in the `person-of-interest`
+> directory before running the commands in this guide.
 
 ```bash
-git clone https://github.com/sainijit/storewide-loss-prevention-retail.git
-cd storewide-loss-prevention-retail/person-of-interest
+git clone https://github.com/intel-retail/storewide-loss-prevention.git
+cd storewide-loss-prevention/person-of-interest
 ```
 
-### Step 2: Update Submodules
+## 2. Initialize Submodules
 
-Pull the latest shared dependencies (SceneScape, performance-tools, etc.):
+Clone the required submodules (for example, `performance-tools`):
 
 ```bash
 make update-submodules
 ```
 
-### Step 3: Place Video Files
+## 3. Provide Required Assets
 
-Place your camera video files in the `scenescape/sample_data/` directory. The filenames
-must match the `video` entries in `configs/zone_config.json`:
+Before starting, ensure these files are in place:
 
-```bash
-../scenescape/sample_data/Camera_01.mp4
-../scenescape/sample_data/Camera_02.mp4
-```
+| File | Purpose |
+|------|---------|
+| `configs/zone_config.json` | Central configuration: scene, cameras, models, SceneScape images, zones |
+| `configs/res/*.env` | Device resource configs for DLStreamer pipeline (GPU, CPU, NPU profiles) |
+| `configs/pipeline-config.json` | DLStreamer pipeline template (rendered per camera by `init.sh`) |
+| `../scenescape/webserver/conference-room.zip` | Scene map + zone definitions imported into SceneScape |
+| `../scenescape/sample_data/Camera_01.mp4` | Sample video used by the camera replay |
 
-> **Note:** Without video files, the cameras will appear offline in both the SceneScape
-> and POI UIs. Any MP4 video containing people can be used for testing.
+> **Note:** The video file names must match the `video` entries in
+> `configs/zone_config.json` (for example, `Camera_01.mp4` corresponds to
+> camera `Camera_01`).
 
-### Step 4: Initialize Environment
+### `zone_config.json` Reference
 
-All application configuration is centralized in `configs/zone_config.json`. Edit that file
-first, then run `make init` to generate `docker/.env`, secrets, and per-camera pipeline
-configuration automatically.
+All application configuration is centralized in `configs/zone_config.json`.
+Edit this file first, then run `make init` to generate `docker/.env`, secrets,
+and per-camera pipeline configurations automatically.
 
-```bash
-# Edit the configuration file with your camera and scene details
-nano configs/zone_config.json
-
-# Initialize environment (generates docker/.env, secrets, pipeline configs)
-make init
-```
-
-Minimal `configs/zone_config.json` example:
+Minimal example:
 
 ```json
 {
@@ -106,21 +60,14 @@ Minimal `configs/zone_config.json` example:
   "models": "person-detection-retail-0013,face-detection-retail-0004,face-reidentification-retail-0095",
   "scenescape": {
     "registry": "",
-    "version": "latest",
-    "controller_image": "scenescape-controller",
-    "manager_image": "scenescape-manager"
+    "version": "v2026.1.0-rc1",
+    "controller_image": "intel/scenescape-controller",
+    "manager_image": "intel/scenescape-manager",
+    "dlstreamer_version": "2026.1.0-ubuntu24-rc1.1"
   },
   "store": {
     "name": "Retail",
     "id": "store_001"
-  },
-  "services": {
-    "lp_service_port": 8082,
-    "log_level": "INFO"
-  },
-  "benchmark": {
-    "target_latency_ms": 2000,
-    "latency_metric": "avg"
   }
 }
 ```
@@ -130,12 +77,68 @@ The `zone_config.json` file defines:
 - `scene_name`, `scene_zip` for SceneScape scene setup
 - `cameras[]` as an array of `{name, video}` camera entries
 - `models` as the comma-separated OpenVINO model list
-- `scenescape{}` for registry, version, and controller/manager images
+- `scenescape{}` for registry, version, and controller/manager image tags
 - `store{}` for store name and ID
 - `services{}` for ports, log level, and SeaweedFS settings
+- `scenescape_api{}` for SceneScape REST API endpoint settings
 - `benchmark{}` for stream-density benchmark parameters
 
-### Step 5: Pull or Build Images
+## 4. Initialize Environment
+
+Before running `make init`, set `HOST_IP` to the network-reachable IP address of
+this machine. MediaMTX uses it to advertise the correct WebRTC ICE candidates so
+browsers can connect to the live camera streams.
+
+```bash
+# Set HOST_IP (required for WebRTC camera streams)
+export HOST_IP=$(hostname -I | awk '{print $1}')
+
+# Or set a specific IP if the auto-detected one is not correct:
+# export HOST_IP=192.168.1.100
+
+# Edit the configuration file with your camera and scene details
+nano configs/zone_config.json
+
+# Initialize environment with default device profile (CPU)
+make init
+
+# Or select a specific device profile:
+make init DEVICE=all-gpu-cpu.env
+```
+
+### Device Profiles
+
+The `DEVICE` parameter selects which hardware to use for inference. Device
+profiles are defined in `configs/res/` and control the GStreamer decode chain,
+inference device, pre-process backend, model precision, and throughput options.
+
+| Profile | Decode | Detection | Re-ID | Precision | Command |
+|---------|--------|-----------|-------|-----------|---------|
+| `all-cpu.env` (default) | CPU (`avdec_h264`) | CPU | CPU | FP32 | `make init DEVICE=all-cpu.env` |
+| `all-gpu-cpu.env` | GPU (`vah264dec`) | GPU | CPU | FP16 | `make init DEVICE=all-gpu-cpu.env` |
+| `all-gpu.env` | GPU (`vah264dec`) | GPU | GPU | FP16 | `make init DEVICE=all-gpu.env` |
+| `all-npu-cpu.env` | GPU (`vah264dec`) | NPU | CPU | FP16-INT8 | `make init DEVICE=all-npu-cpu.env` |
+| `all-npu.env` | GPU (`vah264dec`) | NPU | NPU | FP16-INT8 | `make init DEVICE=all-npu.env` |
+
+> **Note:** GPU profiles require an Intel integrated or discrete GPU with
+> VA-API support. NPU profiles require an Intel NPU (available on Meteor Lake
+> and later platforms). The `all-cpu.env` profile works on any x86 system.
+
+> **Note:** `HOST_IP` must be exported **before** running `make init`. It is
+> written into `docker/.env` during initialization. If it is not set, `make init`
+> will print an error and exit. `make up` will also exit with an error if
+> `HOST_IP` is missing from `docker/.env`.
+>
+> After changing `DEVICE`, always re-run `make init` to regenerate the pipeline
+> configs with the correct device settings.
+
+`make init` generates the following from `configs/zone_config.json`:
+
+- `docker/.env` — all environment variables for Docker Compose
+- SceneScape TLS certificates and secrets
+- Per-camera DLStreamer pipeline configuration files
+
+## 5. Pull or Build Images
 
 Pre-built container images are available on Docker Hub. Pull them with:
 
@@ -156,7 +159,7 @@ Both approaches produce the same local image names (`poi-backend`, `poi-ui`) use
 `docker-compose.yml`. See [Build from Source](./get-started/build-from-source.md) for
 detailed build options.
 
-### Step 6: Download Models
+## 6. Download Models
 
 The OpenVINO face detection and re-identification models are required for both enrollment
 and DLStreamer inference:
@@ -166,35 +169,47 @@ make download-models
 ```
 
 This downloads `face-detection-retail-0004`, `face-reidentification-retail-0095`,
-`person-detection-retail-0013`, and `person-reidentification-retail-0277` into the
-`models/` directory.
+`person-detection-retail-0013`, and `person-reidentification-retail-0277` in FP32,
+FP16, and FP16-INT8 precisions. It also exports `clip-reid-market1501` (body re-ID)
+in both FP32 and FP16.
 
-### Step 7: Launch the Application
-
-The POI system connects to SceneScape via a shared Docker network. Create it if it
-doesn't exist:
+## 7. Launch the Application
 
 ```bash
-docker network create storewide-lp 2>/dev/null || true
-```
-
-Then start the services:
-
-```bash
-# Start SceneScape + POI stack
 make up
 ```
 
-For a complete first-time setup (init + models + build + start all services including
-the Storewide LP pipeline), you can use:
+> **Note:** `make up` auto-detects the host machine's IP address and writes
+> `HOST_IP` to `docker/.env` for WebRTC camera feeds. If accessing the UI from
+> a different machine, verify `HOST_IP` in `docker/.env` is set to the correct
+> network-reachable IP.
+
+The DLStreamer pipeline runs four inference stages using the device and precision
+selected by `DEVICE` during `make init`:
+
+- **Person detection**: `person-detection-retail-0013`
+- **Body re-ID**: `clip-reid-market1501`
+- **Face detection**: `face-detection-retail-0004`
+- **Face re-ID**: `face-reidentification-retail-0095`
+
+The pipeline template (`configs/pipeline-config.json`) is rendered at init time
+with the selected device profile settings (decode chain, device, precision,
+pre-process backend, throughput options).
+
+For a complete first-time setup (init + models + build + start all services), you
+can use:
 
 ```bash
 make demo
 ```
 
-> **Note:** `make demo` starts the full Storewide LP stack (swlp-service,
-> behavioral-analysis, gradio-ui) in addition to SceneScape. For the POI system only,
-> use `docker compose pull poi-backend ui && make up`.
+`make up` performs the following steps automatically:
+
+1. Detects and cleans stale Docker networks (if present).
+2. Starts SceneScape services (manager, controller, broker, DLStreamer, etc.).
+3. Polls SceneScape web health (up to 150 seconds).
+4. Resolves the SceneScape scene UID for the POI backend.
+5. Starts POI services (backend, UI, Redis, alert service).
 
 This launches the following containers:
 
@@ -205,30 +220,32 @@ This launches the following containers:
 | `poi-redis`          | `redis:8.6.2`                | 6379  |
 | `poi-alert-service`  | `intel/alert-service:0.0.1`  | 8001  |
 
-> **Note:** Use `make up` for subsequent starts after the initial setup. SceneScape must
-> be running (either started by `make up` automatically, or via `make run-scenescape`
-> separately).
+> **Note:** Use `make up` for subsequent starts after the initial setup. SceneScape
+> is started automatically by the `up` target.
 
-### Step 8: Access the Interface
-
-Open your browser and navigate to:
-
-```text
-http://<host-ip>:3000
-```
-
-The POI Backend API is available at:
-
-```text
-http://<host-ip>:8000/docs
-```
-
-### Step 9: Stop Services
+## 8. View Logs
 
 ```bash
-# Stop all services
+make logs
+```
+
+## 9. Stop Services
+
+```bash
+# Stop everything
 make down
 ```
+
+## 10. Access the Interface
+
+Once running:
+
+| Service | URL | Credentials |
+|---------|-----|-------------|
+| SceneScape UI | https://localhost | `admin` / password printed by `make init` |
+| POI UI | http://\<host-ip\>:3000 | — |
+| POI Backend API | http://\<host-ip\>:8000/docs | — |
+| POI logs | `make logs` | View all service logs |
 
 ## Advanced Configuration
 
@@ -248,8 +265,12 @@ All values in `docker/.env` are auto-generated from `configs/zone_config.json` b
 | `services{}` | `LP_SERVICE_PORT`, `LOG_LEVEL`, `SEAWEEDFS_*` | Service ports, logging, and SeaweedFS settings |
 | `benchmark{}` | `BENCHMARK_*`, `RESULTS_PATH` | Stream-density benchmark configuration |
 
-`make init` also injects generated secrets, user IDs, and pipeline-config paths into
-`docker/.env`.
+`make init` also injects generated secrets, user IDs, pipeline-config paths, and
+`HOST_IP` into `docker/.env`.
+
+> **Note:** `HOST_IP` must be exported before running `make init` (see Step 4).
+> It is **not** sourced from `zone_config.json` — it is read directly from your
+> shell environment.
 
 > **Note:** Benchmark-related environment variables are configured in the `benchmark`
 > section of `configs/zone_config.json` and written into `docker/.env` during initialization.
@@ -296,11 +317,116 @@ See [Build from Source](./get-started/build-from-source.md) for detailed build o
   `configs/pipeline-config.json` and writes them into
   `scenescape/dlstreamer-pipeline-server/`.
 
+## Clean Up
+
+```bash
+# Stop and remove all containers + volumes
+make clean
+
+# Also remove generated secrets and .env
+make clean-all
+```
+
+## Benchmarking
+
+The POI system includes two benchmark targets that measure end-to-end
+detection-to-alert latency. Both targets accept the same `DEVICE` parameter as
+`make init` so the benchmark always runs with the correct model precision and
+hardware profile.
+
+### `make benchmark` — Single-Scene Latency
+
+Measures how quickly a matched POI triggers an alert with **one camera scene**.
+
+```bash
+# CPU (default, FP32)
+make benchmark
+
+# GPU — detect+reid on GPU, FP16
+make benchmark DEVICE=all-gpu.env
+
+# GPU detect / CPU reid, FP16
+make benchmark DEVICE=all-gpu-cpu.env
+
+# NPU detect / CPU reid, FP16-INT8
+make benchmark DEVICE=all-npu-cpu.env
+
+# NPU detect+reid, FP16-INT8
+make benchmark DEVICE=all-npu.env
+```
+
+What it does:
+1. Tears down any running stack and removes stale POI volumes.
+2. Runs `make init DEVICE=<device>` to regenerate configs with the correct device and precision.
+3. Starts all services (`make up`).
+4. Enrolls a sample POI from `sample_data/poi_1.png`.
+5. Waits for a detection-to-alert event (exits early on first match).
+6. Deletes the benchmark POI and cleans up.
+
+Tune timing with:
+
+```bash
+make benchmark DEVICE=all-gpu.env \
+  BENCHMARK_TARGET_LATENCY_MS=5000 \
+  BENCHMARK_DURATION=180
+```
+
+### `make benchmark-stream-density` — Scaling Benchmark
+
+Iteratively increases the number of camera scenes until the detection-to-alert
+latency exceeds `BENCHMARK_TARGET_LATENCY_MS`, finding the maximum supported
+stream density.
+
+```bash
+# CPU
+make benchmark-stream-density
+
+# GPU
+make benchmark-stream-density DEVICE=all-gpu.env
+
+# GPU detect / CPU reid
+make benchmark-stream-density DEVICE=all-gpu-cpu.env \
+  BENCHMARK_SCENE_INCREMENT=2 \
+  BENCHMARK_TARGET_LATENCY_MS=3000
+```
+
+The `DEVICE` setting is propagated to every `init.sh` call during scale-up
+iterations — no manual re-init is required.
+
+### Benchmark Parameters
+
+| Parameter | Default | Description |
+|---|---|---|
+| `DEVICE` | `all-cpu.env` | Hardware profile — controls device, model precision, and pre-process backend |
+| `BENCHMARK_TARGET_LATENCY_MS` | `30000` | Latency threshold in ms |
+| `BENCHMARK_LATENCY_METRIC` | `avg` | Latency metric: `avg` or `max` |
+| `BENCHMARK_DURATION` | `120` | Max wait (seconds) for single-run benchmark |
+| `BENCHMARK_SCENE_INCREMENT` | `1` | Number of scenes added per iteration |
+| `BENCHMARK_INIT_DURATION` | `120` | Warm-up seconds after each scale step |
+| `BENCHMARK_STABILISE_DURATION` | `60` | Extra stabilisation wait after scale step |
+| `BENCHMARK_MAX_ITERATIONS` | `50` | Safety cap on stream-density iterations |
+| `RESULTS_PATH` | `./results` | Directory for CSV/JSON result files |
+
+All parameters can also be set in the `benchmark{}` section of
+`configs/zone_config.json` and are written to `docker/.env` during `make init`.
+
+### Result Files
+
+Results are written to `RESULTS_PATH` (default `./results/`) as both JSON and CSV:
+
+```
+results/
+  poi_stream_density_20260526_135000.json
+  poi_stream_density_20260526_135000.csv
+```
+
+Use `make consolidate-metrics` to merge results from multiple runs into a single CSV.
+
 ## Next Steps
 
-1. **Explore Features**: Learn about application capabilities in the [How to Use Guide](./how-to-use-application.md)
-2. **Troubleshooting**: If you encounter issues, check the [Troubleshooting Guide](./troubleshooting.md)
-3. **MQTT Pipeline**: Understand the data flow in the [MQTT Pipeline Design](./mqtt-pipeline-design.md)
+- Learn more about application capabilities in the [How to Use Guide](./how-to-use-application.md)
+- Understand the data flow in the [MQTT Pipeline Design](./mqtt-pipeline-design.md)
+- If you encounter issues, check the [Troubleshooting Guide](./troubleshooting.md)
 
 <!--hide_directive
 :::{toctree}

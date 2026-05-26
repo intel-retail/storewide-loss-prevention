@@ -8,13 +8,17 @@ services:
 
   # Fix WebRTC playback in Docker: MediaMTX must use a fixed UDP port for
   # ICE media (default is random ephemeral ports which Docker can't forward).
+  # HOST_IP is auto-detected during 'make init' (written to docker/.env) so
+  # MediaMTX advertises the host's real IP via webrtcAdditionalHosts, making
+  # ICE candidates reachable by the browser.
   mediaserver:
     ports:
       - "8189:8189/udp"
       - "8189:8189/tcp"
     environment:
-      - MTX_WEBRTCICEUDPMUXADDRESS=:8189
-      - MTX_WEBRTCICETCPMUXADDRESS=:8189
+      - MTX_WEBRTCLOCALUDPADDRESS=:8189
+      - MTX_WEBRTCLOCALTCPADDRESS=:8189
+      - MTX_WEBRTCADDITIONALHOSTS=${HOST_IP:-127.0.0.1}
 
   # Re-encode to baseline H264 (no B-frames) so WebRTC playback works
   lp-cams:

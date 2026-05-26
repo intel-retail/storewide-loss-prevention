@@ -48,6 +48,11 @@ else
     SECRETS_GENERATED=1
 fi
 
+# Ensure key files are readable inside Docker containers (fixes Permission denied
+# on /run/secrets/certs/scenescape-web.key when the container user differs from
+# the host user who generated the keys).
+chmod 644 "${SECRETS_DIR}"/certs/*.key "${SECRETS_DIR}"/ca/*.key 2>/dev/null || true
+
 # ---- Step 2: Read zone_config.json (single source of truth) ----
 echo -e "${YELLOW}[2/4] Reading zone_config.json...${NC}"
 if [ ! -f "${ZONE_CONFIG}" ]; then
@@ -254,6 +259,11 @@ echo "  Detect: ${DETECT_MODEL} (${DETECT_MODEL_PRECISION}) on ${DETECT_DEVICE} 
 DECODE="${DECODE:-rtph264depay ! h264parse ! vah264dec ! vapostproc ! video/x-raw(memory:VAMemory)}"
 PRE_PROCESS="${PRE_PROCESS:-pre-process-backend=va-surface-sharing}"
 PRE_PROCESS_CONFIG="${PRE_PROCESS_CONFIG:-}"
+# FACE_PRE_PROCESS: pre-process backend for face-detection gvadetect.
+# Face-detection runs after personreid which outputs system memory, so it must use
+# opencv (not va-surface-sharing) even in GPU mode.
+FACE_PRE_PROCESS="${FACE_PRE_PROCESS:-pre-process-backend=opencv}"
+FACE_PRE_PROCESS_CONFIG="${FACE_PRE_PROCESS_CONFIG:-}"
 DETECTION_OPTIONS="${DETECTION_OPTIONS:-ie-config=GPU_THROUGHPUT_STREAMS=2 nireq=2}"
 REID_PRE_PROCESS="${REID_PRE_PROCESS:-pre-process-backend=opencv}"
 REID_OPTIONS="${REID_OPTIONS:-nireq=2}"
@@ -290,6 +300,8 @@ sed -e "s|{{CAMERA_NAME}}|${CAMERA_NAME}|g" \
     -e "s|{{DECODE}}|${DECODE}|g" \
     -e "s|{{PRE_PROCESS}}|${PRE_PROCESS}|g" \
     -e "s|{{PRE_PROCESS_CONFIG}}|${PRE_PROCESS_CONFIG}|g" \
+    -e "s|{{FACE_PRE_PROCESS}}|${FACE_PRE_PROCESS}|g" \
+    -e "s|{{FACE_PRE_PROCESS_CONFIG}}|${FACE_PRE_PROCESS_CONFIG}|g" \
     -e "s|{{DETECTION_OPTIONS}}|${DETECTION_OPTIONS}|g" \
     -e "s|{{REID_PRE_PROCESS}}|${REID_PRE_PROCESS}|g" \
     -e "s|{{REID_OPTIONS}}|${REID_OPTIONS}|g" \
@@ -319,6 +331,8 @@ if [ -n "${CAMERA_NAME_2}" ]; then
         -e "s|{{DECODE}}|${DECODE}|g" \
         -e "s|{{PRE_PROCESS}}|${PRE_PROCESS}|g" \
         -e "s|{{PRE_PROCESS_CONFIG}}|${PRE_PROCESS_CONFIG}|g" \
+        -e "s|{{FACE_PRE_PROCESS}}|${FACE_PRE_PROCESS}|g" \
+        -e "s|{{FACE_PRE_PROCESS_CONFIG}}|${FACE_PRE_PROCESS_CONFIG}|g" \
         -e "s|{{DETECTION_OPTIONS}}|${DETECTION_OPTIONS}|g" \
         -e "s|{{REID_PRE_PROCESS}}|${REID_PRE_PROCESS}|g" \
         -e "s|{{REID_OPTIONS}}|${REID_OPTIONS}|g" \
@@ -458,6 +472,13 @@ POST_INFERENCE=${POST_INFERENCE}
 QUEUE_OPTIONS=${QUEUE_OPTIONS}
 DETECT_THRESHOLD=${DETECT_THRESHOLD}
 INFERENCE_INTERVAL=${INFERENCE_INTERVAL}
+
+# ---- WebRTC / MediaMTX ----
+HOST_IP=${HOST_IP}
+
+# ---- Host user identity (for Docker bind-mount file ownership) ----
+HOST_UID=$(id -u)
+HOST_GID=$(id -g)
 EOF
 
 echo ""
