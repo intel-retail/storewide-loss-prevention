@@ -409,9 +409,26 @@ up:
 		echo "$(BLUE)=== Creating .env from .env.example ===$(NC)"; \
 		cp .env.example .env; \
 	fi
+	@# If storewide-lp exists without proper Compose labels, remove it so Compose recreates it correctly
+	@if docker network inspect storewide-lp >/dev/null 2>&1 && \
+	   [ "$$(docker network inspect storewide-lp --format '{{index .Labels "com.docker.compose.network"}}')" != "storewide-lp" ]; then \
+		echo "$(BLUE)=== Removing stale storewide-lp network (missing Compose labels) ===$(NC)"; \
+		-$(COMPOSE_POI) down 2>/dev/null || true; \
+		-docker network rm storewide-lp 2>/dev/null || true; \
+	fi
 	@# Let SceneScape Compose create and label storewide-lp before POI attaches to it
 	@echo "$(BLUE)=== Starting SceneScape services ===$(NC)"
 	-$(COMPOSE_SCENESCAPE) up -d --no-recreate
+	@# If the web container is unhealthy due to a DB password mismatch (stale volume),
+	@# reset the DB volumes and restart so fresh clones don't hit this on first run.
+	@sleep 5; \
+	if docker inspect storewide-lp-web-1 --format='{{.State.Health.Status}}' 2>/dev/null | grep -q unhealthy; then \
+		echo "$(BLUE)=== SceneScape web unhealthy — resetting stale DB volumes ===$(NC)"; \
+		$(COMPOSE_SCENESCAPE) stop pgserver web scene scene-import 2>/dev/null || true; \
+		docker volume ls --format '{{.Name}}' | grep -E '_vol-db$$|_vol-migrations$$' \
+			| while read vol; do docker volume rm "$$vol" 2>/dev/null && echo "  Removed $$vol" || true; done; \
+		$(COMPOSE_SCENESCAPE) up -d; \
+	fi
 	@echo ""
 	@echo "$(BLUE)=== Resolving SCENE_UID ===$(NC)"
 	@bash scripts/resolve_scene_uid.sh

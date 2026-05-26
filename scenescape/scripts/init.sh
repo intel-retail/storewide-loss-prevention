@@ -341,10 +341,16 @@ CONTROLLER_AUTH=$(cat "${SECRETS_DIR}/controller.auth" 2>/dev/null || echo "")
 USER_UID=$(id -u)
 USER_GID=$(id -g)
 
-# If secrets were freshly generated, remove stale DB volumes
+# If secrets were freshly generated, remove stale DB volumes so PostgreSQL
+# reinitializes with the new password.  Volume names vary by compose project
+# name (scenescape_, storewide-lp_, person-of-interest_, etc.), so match by
+# suffix rather than hardcoding a prefix.
 if [ "${SECRETS_GENERATED}" = "1" ]; then
     echo "  New secrets generated — removing stale DB volumes..."
-    docker volume rm storewide-lp_vol-db storewide-lp_vol-migrations 2>/dev/null || true
+    docker volume ls --format '{{.Name}}' | grep -E '_vol-db$|_vol-migrations$' \
+        | while read -r vol; do
+            docker volume rm "$vol" 2>/dev/null && echo "    Removed $vol" || true
+        done
 fi
 
 mkdir -p "$(dirname "${ENV_FILE}")"
