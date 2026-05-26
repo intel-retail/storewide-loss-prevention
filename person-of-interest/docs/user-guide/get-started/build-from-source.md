@@ -4,6 +4,10 @@ This guide provides detailed instructions for building the POI Re-identification
 container images from source code. Whether you are customizing the application or
 troubleshooting deployment issues, this guide walks you through the complete build process.
 
+> **Note:** Pre-built images are available on Docker Hub (`intel/poi-backend` and
+> `intel/poi-ui`). Building from source is only required if you need to customize
+> the application. See [Get Started](../get-started.md) for the default pull-based setup.
+
 ## Overview
 
 The POI Re-identification application consists of multiple components that work together:
@@ -13,7 +17,6 @@ The POI Re-identification application consists of multiple components that work 
 - **React UI**: TypeScript/React single-page application for the operator interface.
 - **Alert Service**: Dedicated alert fan-out microservice (pre-built image).
 - **Redis**: In-memory data store for metadata, events, and caching.
-- **MCP Server**: FastMCP server exposing AI tools for LLM/VLM integration.
 
 ## Step 1: Clone the Repository
 
@@ -46,9 +49,6 @@ This builds the following images locally:
 | ---------------------------------- | ------------------------ | -------------------- |
 | `person-of-interest-poi-backend`   | `backend/Dockerfile`     | Backend API server   |
 | `person-of-interest-ui`            | `ui/Dockerfile`          | React UI             |
-
-> **Note:** The MCP server image (`person-of-interest-mcp-server`) is not built by default.
-> To build it, run `docker compose build mcp-server` separately.
 
 ### Registry Build
 

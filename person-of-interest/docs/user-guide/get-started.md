@@ -23,10 +23,6 @@ The POI system operates alongside Intel® SceneScape in a distributed architectu
 | Alert Service    | 8001  | Alert fan-out (WebSocket, MQTT, log)               |
 | SceneScape       | 8443  | Spatial scene management + DLStreamer pipelines     |
 
-> **Note:** The MCP Server (port 9000) is an optional service for AI-powered analysis via
-> Claude Desktop. It is not started by `make up` — start it separately with
-> `docker compose up -d mcp-server`.
-
 ### Software Dependencies
 
 - **Docker**: [Installation Guide](https://docs.docker.com/get-docker/)
@@ -139,12 +135,21 @@ The `zone_config.json` file defines:
 - `services{}` for ports, log level, and SeaweedFS settings
 - `benchmark{}` for stream-density benchmark parameters
 
-### Step 5: Build the Application
+### Step 5: Pull Pre-built Images
+
+Pre-built container images are available on Docker Hub. Pull them with:
 
 ```bash
-# Build POI backend and UI images locally
-make build REGISTRY=false
+docker compose pull poi-backend ui
 ```
+
+| Image                                    | Description        |
+| ---------------------------------------- | ------------------ |
+| `intel/poi-backend:2026.1.0-rc1`         | Backend API server |
+| `intel/poi-ui:2026.1.0-rc1`              | React UI (nginx)   |
+
+> **Note:** To build from source instead, run `make build REGISTRY=false`.
+> See [Build from Source](./get-started/build-from-source.md) for details.
 
 ### Step 6: Download Models
 
@@ -184,20 +189,20 @@ make demo
 
 > **Note:** `make demo` starts the full Storewide LP stack (swlp-service,
 > behavioral-analysis, gradio-ui) in addition to SceneScape. For the POI system only,
-> use `make build REGISTRY=false && make up`.
+> use `docker compose pull poi-backend ui && make up`.
 
 This launches the following containers:
 
-| Container            | Image                        | Port  |
-| -------------------- | ---------------------------- | ----- |
-| `poi-backend`        | `person-of-interest-poi-backend` | 8000  |
-| `poi-ui`             | `person-of-interest-ui`      | 3000  |
-| `poi-redis`          | `redis:8.6.2`                | 6379  |
-| `poi-alert-service`  | `intel/alert-service:0.0.1`  | 8001  |
+| Container            | Image                                    | Port  |
+| -------------------- | ---------------------------------------- | ----- |
+| `poi-backend`        | `intel/poi-backend:2026.1.0-rc1`         | 8000  |
+| `poi-ui`             | `intel/poi-ui:2026.1.0-rc1`              | 3000  |
+| `poi-redis`          | `redis:8.6.2`                            | 6379  |
+| `poi-alert-service`  | `intel/alert-service:0.0.1`              | 8001  |
 
-> **Note:** Use `make up` for subsequent starts after the initial build. SceneScape must
+> **Note:** Use `make up` for subsequent starts after the initial setup. SceneScape must
 > be running (either started by `make up` automatically, or via `make run-scenescape`
-> separately). To start the MCP server, run `docker compose up -d mcp-server` separately.
+> separately).
 
 ### Step 8: Access the Interface
 
