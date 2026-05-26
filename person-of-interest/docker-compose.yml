@@ -95,6 +95,43 @@ services:
       - poi-net
       - storewide-lp
 
+  # ── MCP Server ───────────────────────────────────────────
+  poi-mcp-server:
+    build:
+      context: .
+      dockerfile: mcp_server/Dockerfile
+    container_name: poi-mcp-server
+    restart: unless-stopped
+    ports:
+      - "9000:9000"
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      - MCP_TRANSPORT=streamable-http
+      - MCP_HOST=0.0.0.0
+      - MCP_PORT=9000
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - POI_BACKEND_URL=http://poi-backend:8000
+      - MQTT_HOST=${MQTT_HOST:-localhost}
+      - MQTT_PORT=${MQTT_PORT:-1883}
+      - SCENE_UID=${SCENE_UID:-}
+      - MCP_FILESYSTEM_ROOT=/workspace/person-of-interest
+      - MCP_ALLOW_MUTATIONS=${MCP_ALLOW_MUTATIONS:-false}
+      - MCP_ALLOW_EXTERNAL_AI=${MCP_ALLOW_EXTERNAL_AI:-false}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+    volumes:
+      - faiss-data:/data/faiss:ro
+      - ./data/uploads:/data/uploads:ro
+      - ./models/intel/intel:/models/intel:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - poi-net
+
 volumes:
   redis-data:
   faiss-data:
