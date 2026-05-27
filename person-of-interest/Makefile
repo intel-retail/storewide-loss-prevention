@@ -159,15 +159,55 @@ BENCHMARK_VENV := cd $(PERF_TOOLS_DIR) && \
 	pip3 install -q -e . && \
 	cd $(CURDIR)
 
+TAG ?= 2026.0.0
+REGISTRY_BENCHMARK ?= intel/retail-benchmark:$(TAG)
+
+.PHONY: fetch-benchmark
+fetch-benchmark: ## Pull benchmark metrics-collector image from registry
+	@echo "$(BLUE)Fetching benchmark image from registry...$(NC)"
+	docker pull $(REGISTRY_BENCHMARK)
+	@echo "$(GREEN)Benchmark image ready$(NC)"
+
+.PHONY: build-benchmark
+build-benchmark: ## Build benchmark metrics-collector Docker image
+	@echo "$(BLUE)Building benchmark Docker image...$(NC)"
+	@if [ "$(REGISTRY)" = "true" ]; then \
+		$(MAKE) fetch-benchmark; \
+	else \
+		cd ../performance-tools && $(MAKE) build-benchmark-docker; \
+	fi
+
+# Start metrics-collector (benchmark profile)
+.PHONY: _start-metrics-collector
+_start-metrics-collector:
+	@echo "$(BLUE)=== Starting metrics-collector ===$(NC)"
+	@if docker image inspect $(REGISTRY_BENCHMARK) >/dev/null 2>&1; then \
+		$(COMPOSE_POI) --profile benchmark up -d metrics-collector && \
+		echo "$(GREEN)  metrics-collector started$(NC)"; \
+	else \
+		echo "$(YELLOW)  metrics-collector image not found — skipping (run 'make build-benchmark' first)$(NC)"; \
+	fi
+
+# Stop metrics-collector
+.PHONY: _stop-metrics-collector
+_stop-metrics-collector:
+	@if docker ps -q -f name=poi-metrics-collector 2>/dev/null | grep -q .; then \
+		echo "$(BLUE)=== Stopping metrics-collector ===$(NC)"; \
+		$(COMPOSE_POI) --profile benchmark stop metrics-collector 2>/dev/null || true; \
+		$(COMPOSE_POI) --profile benchmark rm -f metrics-collector 2>/dev/null || true; \
+	fi
+
 .PHONY: benchmark
-benchmark: _benchmark-fresh-start _benchmark-enroll ## Single-scene POI benchmark with auto-enroll
+benchmark: _benchmark-fresh-start _benchmark-enroll _start-metrics-collector ## Single-scene POI benchmark with auto-enroll
 	@$(MAKE) --no-print-directory poi-benchmark BENCHMARK_RESOURCE_CONFIG=$(BENCHMARK_RESOURCE_CONFIG); ret=$$?; \
+		$(MAKE) --no-print-directory _stop-metrics-collector; \
 		$(MAKE) --no-print-directory _benchmark-cleanup; \
 		exit $$ret
 
 .PHONY: benchmark-stream-density
-benchmark-stream-density: _benchmark-fresh-start _benchmark-enroll ## Stream density with auto-enroll
+benchmark-stream-density: _benchmark-fresh-start _benchmark-enroll _start-metrics-collector ## Stream density with auto-enroll
 	@$(MAKE) --no-print-directory poi-benchmark-stream-density BENCHMARK_RESOURCE_CONFIG=$(BENCHMARK_RESOURCE_CONFIG); ret=$$?; \
+		$(MAKE) --no-print-directory _stop-metrics-collector; \
 		$(MAKE) --no-print-directory _benchmark-cleanup; \
 		exit $$ret
 
@@ -231,6 +271,17 @@ consolidate-metrics: ## Consolidate benchmark metrics from results/ into a CSV
 		--output $(CURDIR)/$(RESULTS_PATH)/consolidated_metrics.csv
 	@echo ""
 	@echo "Results written to: $(RESULTS_PATH)/consolidated_metrics.csv"
+
+.PHONY: plot-metrics
+plot-metrics: ## Generate plots from benchmark metrics
+	@echo "╔══════════════════════════════════════════════════════════════════╗"
+	@echo "║                   Generating Metrics Plots                     ║"
+	@echo "╚══════════════════════════════════════════════════════════════════╝"
+	$(BENCHMARK_VENV) && \
+	python3 $(PERF_TOOLS_DIR)/usage_graph_plot.py \
+		--dir $(CURDIR)/$(RESULTS_PATH)
+	@echo ""
+	@echo "Plots saved to: $(RESULTS_PATH)/"
 
 .PHONY: stream-density
 stream-density: benchmark-stream-density ## Alias for benchmark-stream-density
@@ -390,6 +441,7 @@ help:
 	@echo "    make benchmark                 - Single-scene benchmark (1 scene)"
 	@echo "    make benchmark-stream-density  - Increase scenes until latency threshold"
 	@echo "    make consolidate-metrics       - Consolidate metrics to CSV"
+	@echo "    make plot-metrics              - Generate plots from benchmark metrics"
 	@echo "    make stream-density            - Alias for benchmark-stream-density"
 	@echo "    make generate-stream-density   - Generate overrides only (no start)"
 	@echo "    make clean-stream-density      - Revert to single camera"
@@ -405,6 +457,8 @@ help:
 	@echo ""
 	@echo "  Build:"
 	@echo "    make lp-build        - Build LP container images"
+	@echo "    make build-benchmark - Build metrics-collector Docker image"
+	@echo "    make fetch-benchmark - Pull metrics-collector image from registry"
 	@echo ""
 	@echo "  Cleanup:"
 	@echo "    make clean           - Stop and remove containers + volumes"
