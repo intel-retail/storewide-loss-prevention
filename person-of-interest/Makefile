@@ -400,6 +400,7 @@ lp-build:
 clean:
 	-$(COMPOSE_SCENESCAPE) down -v
 	-$(COMPOSE_LP) down -v 2>/dev/null || true
+	rm -rf data/faiss/* data/uploads/*
 
 .PHONY: clean-secrets
 clean-secrets:

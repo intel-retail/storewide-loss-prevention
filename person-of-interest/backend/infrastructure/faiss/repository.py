@@ -145,6 +145,11 @@ class FAISSRepository(EmbeddingRepository):
         with self._search_lock:
             return self._id_map.get(faiss_id)
 
+    def get_indexed_poi_ids(self) -> set[str]:
+        """Return the set of poi_ids currently indexed in FAISS."""
+        with self._search_lock:
+            return set(self._id_map.values())
+
     def _save_to_disk_locked(self) -> None:
         """Persist index and id_map. Caller MUST hold _search_lock."""
         Path(self._index_path).parent.mkdir(parents=True, exist_ok=True)
