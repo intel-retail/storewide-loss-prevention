@@ -18,6 +18,9 @@ DIMENSIONS = int(os.getenv("REID_DIMENSIONS", "1280"))
 K_NEIGHBORS = 1
 SCHEMA_NAME = "reid_vector"
 SIMILARITY_METRIC = "L2"
+# Tolerance applied to the theoretical [-1, 1] IP score bounds to absorb
+# float32 rounding errors from VDMS normalization and inner-product computation.
+COSINE_SIMILARITY_TOLERANCE = 1e-6
 
 class VDMSDatabase(ReIDDatabase):
   def __init__(self, set_name=SCHEMA_NAME,
