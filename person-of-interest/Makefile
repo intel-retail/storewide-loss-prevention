@@ -514,6 +514,11 @@ else
 	docker tag poi-backend $(REGISTRY)/poi-backend:latest
 	docker tag poi-ui $(REGISTRY)/poi-ui:latest
 endif
+	@echo ""
+	@echo "$(BLUE)=== Pulling benchmark metrics-collector image ===$(NC)"
+	@docker pull $(REGISTRY_BENCHMARK) 2>/dev/null && \
+		echo "$(GREEN)  Benchmark image ready$(NC)" || \
+		echo "$(YELLOW)  Benchmark image not available — run 'make build-benchmark' to build locally$(NC)"
 	@echo "$(GREEN)Build complete.$(NC)"
 
 .PHONY: up
