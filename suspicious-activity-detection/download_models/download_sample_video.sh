@@ -84,7 +84,7 @@ if [ -f "${FORMAT_SCRIPT}" ]; then
 else
     # Fallback: direct download without conversion
     echo "  format_avc_mp4.sh not found, downloading raw video..."
-    wget -q --show-progress -O "${OUTPUT_PATH}" "${CAMERA_URL}"
+    curl -fL --progress-bar -o "${OUTPUT_PATH}" "${CAMERA_URL}"
 
     if [ -f "${OUTPUT_PATH}" ] && [ -s "${OUTPUT_PATH}" ]; then
         FILE_SIZE=$(du -h "${OUTPUT_PATH}" | cut -f1)

@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 # Download OpenVINO models required by the DLStreamer inference pipeline.
-# Models are downloaded via wget from the OpenVINO Model Zoo storage,
+# Models are downloaded via curl from the OpenVINO Model Zoo storage,
 # following the same approach as SceneScape's model_installer.
 #
 # Usage:
@@ -53,8 +53,8 @@ for model in "${MODELS[@]}"; do
         DOWNLOAD_CMDS+="else "
         DOWNLOAD_CMDS+="echo \"  Downloading ${model} (${prec})...\" && "
         DOWNLOAD_CMDS+="mkdir -p /models/intel/${model}/${prec} && "
-        DOWNLOAD_CMDS+="wget -nv -O /models/intel/${model}/${prec}/${model}.xml ${OMZ_BASE_URL}/${model}/${prec}/${model}.xml && "
-        DOWNLOAD_CMDS+="wget -nv -O /models/intel/${model}/${prec}/${model}.bin ${OMZ_BASE_URL}/${model}/${prec}/${model}.bin; "
+        DOWNLOAD_CMDS+="curl -fsSL -o /models/intel/${model}/${prec}/${model}.xml ${OMZ_BASE_URL}/${model}/${prec}/${model}.xml && "
+        DOWNLOAD_CMDS+="curl -fsSL -o /models/intel/${model}/${prec}/${model}.bin ${OMZ_BASE_URL}/${model}/${prec}/${model}.bin; "
         DOWNLOAD_CMDS+="fi && "
     done
 done
@@ -64,7 +64,7 @@ echo "[1/2] Downloading models into Docker volume '${VOLUME_NAME}'..."
 docker run --rm \
     -v "${VOLUME_NAME}":/models \
     alpine:3.23 \
-    sh -c "apk add --no-cache wget >/dev/null 2>&1 && ${DOWNLOAD_CMDS}"
+    sh -c "apk add --no-cache curl >/dev/null 2>&1 && ${DOWNLOAD_CMDS}"
 
 # Copy model-proc files (same as SceneScape's copy-config-files)
 echo "[2/2] Copying model-proc files..."
