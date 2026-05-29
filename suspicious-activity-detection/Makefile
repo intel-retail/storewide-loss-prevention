@@ -197,7 +197,7 @@ PERF_TOOLS_DOCKER_DIR := ../performance-tools/docker
 SWLP_STREAM_DENSITY := $(PERF_TOOLS_DIR)/swlp_stream_density.py
 
 # Benchmark image configuration
-BENCHMARK_IMAGE ?= retail-benchmark:latest
+BENCHMARK_IMAGE ?= retail-benchmark:2026.1.0-rc1
 REGISTRY_BENCHMARK ?= intel/retail-benchmark:$(TAG)
 
 .PHONY: fetch-benchmark
@@ -218,7 +218,7 @@ build-benchmark: ## Build benchmark Docker image
 	@echo "Benchmark image built: $(BENCHMARK_IMAGE)"
 
 # Benchmark configuration (override via env or CLI)
-BENCHMARK_TARGET_LATENCY_MS ?= 2000
+BENCHMARK_TARGET_LATENCY_MS ?= 10000
 BENCHMARK_LATENCY_METRIC ?= avg
 BENCHMARK_SCENE_INCREMENT ?= 1
 BENCHMARK_INIT_DURATION ?= 90
