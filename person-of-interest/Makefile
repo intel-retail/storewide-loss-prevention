@@ -222,6 +222,11 @@ _benchmark-fresh-start:
 	@echo "$(BLUE)=== Removing POI Compose volumes ===$(NC)"
 	@$(COMPOSE_POI) down -v --remove-orphans 2>/dev/null || true
 	@echo "$(BLUE)=== Clearing stale results ===$(NC)"
+	@mkdir -p $(RESULTS_PATH)
+	@if [ "$$(stat -c '%U' $(RESULTS_PATH) 2>/dev/null)" != "$$(id -un)" ]; then \
+		docker run --rm -v "$(CURDIR)/$(RESULTS_PATH)":/r alpine:3.20 \
+			chown -R "$$(id -u):$$(id -g)" /r; \
+	fi
 	@rm -f $(RESULTS_PATH)/cpu_usage.log $(RESULTS_PATH)/memory_usage.log \
 		$(RESULTS_PATH)/disk_bandwidth.log $(RESULTS_PATH)/pcm*.csv \
 		$(RESULTS_PATH)/pcm-power.log $(RESULTS_PATH)/qmassa*.json \
