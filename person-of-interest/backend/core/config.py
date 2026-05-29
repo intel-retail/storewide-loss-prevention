@@ -56,7 +56,7 @@ class Config:
 
     # Thresholds
     similarity_threshold: float = 0.6
-    search_similarity_threshold: float = 0.65
+    search_similarity_threshold: float = 0.55
     search_top_k: int = 10
 
     # Embedding / OpenVINO
