@@ -68,7 +68,7 @@ variables:
 
 | Parameter | Make Variable | Default | Description |
 |-----------|---------------|---------|-------------|
-| Target latency | `BENCHMARK_TARGET_LATENCY_MS` or `TARGET_LATENCY_MS` | `2000` | Latency threshold in milliseconds |
+| Target latency | `BENCHMARK_TARGET_LATENCY_MS` or `TARGET_LATENCY_MS` | `10000` | Latency threshold in milliseconds |
 | Latency metric | `BENCHMARK_LATENCY_METRIC` or `LATENCY_METRIC` | `avg` | Which statistic to compare: `avg` or `max` |
 | Scene increment | `BENCHMARK_SCENE_INCREMENT` or `SCENE_INCREMENT` | `1` | Number of scenes to add per iteration |
 | Init duration | `BENCHMARK_INIT_DURATION` | `90` | Warm-up seconds after service restart |
@@ -166,7 +166,7 @@ A typical stream-density result summary looks like:
 ```
 STREAM DENSITY RESULTS
 ======================================================================
-  Target Latency:  2000ms
+  Target Latency:  8000ms
   Max Scenes:      3
   Met Target:      Yes
   Best Latency:    1842ms @ 3 scene(s)
