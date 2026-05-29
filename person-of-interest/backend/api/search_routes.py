@@ -87,6 +87,10 @@ async def search_history(
     # ── Check rolling exit vectors for the same tracks ──
     exit_sims = _detection_index.search_exits(query_vector, list(best_entry.keys()))
 
+    # Discard exit matches below the search threshold — they are likely
+    # a different person captured as the track's "exit" frame.
+    exit_sims = {tid: sim for tid, sim in exit_sims.items() if sim >= threshold}
+
     # ── Build one grouped appearance per track (entry + exit on same card) ──
     appearances = []
     for track_id, entry in best_entry.items():
