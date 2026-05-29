@@ -11,13 +11,7 @@ cd storewide-loss-prevention/person-of-interest
 # Initialize submodules
 make update-submodules
 
-# Pull pre-built images from Docker Hub
-docker pull intel/poi-backend:2026.1.0-rc1
-docker pull intel/poi-ui:2026.1.0-rc1
-docker tag intel/poi-backend:2026.1.0-rc1 poi-backend
-docker tag intel/poi-ui:2026.1.0-rc1 poi-ui
-
-# Initialize environment and start
+# Initialize environment and start (pulls images from Docker Hub automatically)
 make init
 make up
 ```

@@ -140,24 +140,27 @@ inference device, pre-process backend, model precision, and throughput options.
 
 ## 5. Pull or Build Images
 
-Pre-built container images are available on Docker Hub. Pull them with:
+Pre-built container images are available on Docker Hub. The `docker-compose.yml`
+references them directly (`intel/poi-backend:2026.1.0-rc1` and
+`intel/poi-ui:2026.1.0-rc1`), so `make up` will pull them automatically if they
+are not already present locally.
+
+To explicitly pull before starting:
 
 ```bash
-docker pull intel/poi-backend:2026.1.0-rc1
-docker pull intel/poi-ui:2026.1.0-rc1
-docker tag intel/poi-backend:2026.1.0-rc1 poi-backend
-docker tag intel/poi-ui:2026.1.0-rc1 poi-ui
+docker compose --env-file docker/.env -f docker-compose.yml pull poi-backend ui
 ```
 
-Alternatively, build from source:
+To build from source instead of using pre-built images:
 
 ```bash
 make build REGISTRY=false
 ```
 
-Both approaches produce the same local image names (`poi-backend`, `poi-ui`) used by
-`docker-compose.yml`. See [Build from Source](./get-started/build-from-source.md) for
-detailed build options.
+When building locally with `REGISTRY=false`, the images are tagged as `poi-backend`
+and `poi-ui`, and the compose file uses them via the `POI_BACKEND_IMAGE` and
+`POI_UI_IMAGE` environment variables. See [Build from Source](./get-started/build-from-source.md)
+for detailed build options.
 
 ## 6. Download Models
 

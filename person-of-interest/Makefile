@@ -508,11 +508,9 @@ build:
 	@echo ""
 	@echo "$(BLUE)=== Building POI images ===$(NC)"
 ifeq ($(REGISTRY),false)
-	$(COMPOSE_POI) build poi-backend ui
+	POI_BACKEND_IMAGE=poi-backend POI_UI_IMAGE=poi-ui $(COMPOSE_POI) build poi-backend ui
 else
 	$(COMPOSE_POI) build poi-backend ui
-	docker tag poi-backend $(REGISTRY)/poi-backend:latest
-	docker tag poi-ui $(REGISTRY)/poi-ui:latest
 endif
 	@echo ""
 	@echo "$(BLUE)=== Pulling benchmark metrics-collector image ===$(NC)"
