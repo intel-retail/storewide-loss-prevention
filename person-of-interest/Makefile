@@ -275,6 +275,9 @@ consolidate-metrics: ## Consolidate benchmark metrics from results/ into a CSV
 	@echo "║                   Consolidating Metrics                        ║"
 	@echo "╚══════════════════════════════════════════════════════════════════╝"
 	$(BENCHMARK_VENV) && \
+	python3 $(PERF_TOOLS_DIR)/parse_qmassa_metrics_to_json.py \
+		-d $(CURDIR)/$(RESULTS_PATH) -k qmassa 2>/dev/null || true
+	$(BENCHMARK_VENV) && \
 	python3 $(PERF_TOOLS_DIR)/consolidate_multiple_run_of_metrics.py \
 		--root_directory $(CURDIR)/$(RESULTS_PATH) \
 		--output $(CURDIR)/$(RESULTS_PATH)/consolidated_metrics.csv
