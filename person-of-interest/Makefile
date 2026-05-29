@@ -193,7 +193,9 @@ _start-metrics-collector:
 _stop-metrics-collector:
 	@if docker ps -q -f name=poi-metrics-collector 2>/dev/null | grep -q .; then \
 		echo "$(BLUE)=== Stopping metrics-collector ===$(NC)"; \
-		$(COMPOSE_POI) --profile benchmark stop metrics-collector 2>/dev/null || true; \
+		echo "  Flushing metrics (10 s grace period)..."; \
+		sleep 10; \
+		docker stop -t 5 poi-metrics-collector 2>/dev/null || true; \
 		$(COMPOSE_POI) --profile benchmark rm -f metrics-collector 2>/dev/null || true; \
 	fi
 
@@ -219,6 +221,18 @@ _benchmark-fresh-start:
 	@$(MAKE) --no-print-directory down 2>/dev/null || true
 	@echo "$(BLUE)=== Removing POI Compose volumes ===$(NC)"
 	@$(COMPOSE_POI) down -v --remove-orphans 2>/dev/null || true
+	@echo "$(BLUE)=== Clearing stale results ===$(NC)"
+	@mkdir -p $(RESULTS_PATH)
+	@if [ "$$(stat -c '%U' $(RESULTS_PATH) 2>/dev/null)" != "$$(id -un)" ]; then \
+		docker run --rm -v "$(CURDIR)/$(RESULTS_PATH)":/r alpine:3.20 \
+			chown -R "$$(id -u):$$(id -g)" /r; \
+	fi
+	@rm -f $(RESULTS_PATH)/cpu_usage.log $(RESULTS_PATH)/memory_usage.log \
+		$(RESULTS_PATH)/disk_bandwidth.log $(RESULTS_PATH)/pcm*.csv \
+		$(RESULTS_PATH)/pcm-power.log $(RESULTS_PATH)/qmassa*.json \
+		$(RESULTS_PATH)/qmassa_error.log $(RESULTS_PATH)/npu_usage.csv \
+		$(RESULTS_PATH)/vlm_application_metrics*.txt \
+		$(RESULTS_PATH)/consolidated_metrics.csv 2>/dev/null || true
 	@echo "$(BLUE)=== Clearing stale FAISS index ===$(NC)"
 	@rm -f data/faiss/poi.index data/faiss/id_map.json
 	@echo "$(BLUE)=== Initializing with DEVICE=$(DEVICE) ===$(NC)"
@@ -265,6 +279,9 @@ consolidate-metrics: ## Consolidate benchmark metrics from results/ into a CSV
 	@echo "╔══════════════════════════════════════════════════════════════════╗"
 	@echo "║                   Consolidating Metrics                        ║"
 	@echo "╚══════════════════════════════════════════════════════════════════╝"
+	$(BENCHMARK_VENV) && \
+	python3 $(PERF_TOOLS_DIR)/parse_qmassa_metrics_to_json.py \
+		-d $(CURDIR)/$(RESULTS_PATH) -k qmassa 2>/dev/null || true
 	$(BENCHMARK_VENV) && \
 	python3 $(PERF_TOOLS_DIR)/consolidate_multiple_run_of_metrics.py \
 		--root_directory $(CURDIR)/$(RESULTS_PATH) \
