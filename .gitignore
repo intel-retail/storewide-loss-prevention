@@ -32,3 +32,5 @@ suspicious-activity-detection/docker/docker-compose.cameras.yaml
 # Performance metrics results
 suspicious-activity-detection/results/
 scenescape.zip
+person-of-interest/backend/**/__pycache__/
+**/__pycache__/
