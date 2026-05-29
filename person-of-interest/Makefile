@@ -18,7 +18,7 @@ COMPOSE_ALL := $(if $(wildcard $(CAMERAS_OVERRIDE)),$(COMPOSE_ALL) -f $(CAMERAS_
 RESULTS_PATH ?= ./results
 
 # Device resource config: pass DEVICE=all-cpu.env, all-gpu-cpu.env, all-gpu.env, all-npu-cpu.env, or all-npu.env
-DEVICE ?= all-cpu.env
+DEVICE ?= all-gpu.env
 RESOURCE_CONFIG := configs/res/$(DEVICE)
 
 # ---- Initialization ----
