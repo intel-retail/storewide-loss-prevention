@@ -1,6 +1,6 @@
 # SceneScape (Shared Component)
 
-This directory contains the configuration, scripts, and deployment files for [Intel SceneScape](https://github.com/intel/SceneScape) — the spatial intelligence layer used by applications under `storewide-loss-prevention/`.
+This directory contains the configuration, scripts, and deployment files for [Intel SceneScape](https://github.com/open-edge-platform/scenescape) — the spatial intelligence layer used by applications under `storewide-loss-prevention/`.
 
 SceneScape is a **shared component** — it is not run directly. Each application (e.g., `suspicious-activity-detection/`) invokes SceneScape through its own Makefile, passing its app-specific configs.
 
