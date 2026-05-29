@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import logging
 import re
+import threading
 import time
 from typing import Dict, Optional, Set
 
@@ -47,6 +48,7 @@ class ScenescapeRegionConsumer:
     def __init__(self, event_service: EventService, event_repo=None) -> None:
         self._event_service = event_service
         self._event_repo = event_repo  # RedisEventRepository for zone frame storage
+        self._lock = threading.Lock()
         # {object_id: (set of region_ids, last_seen_timestamp)}
         self._region_presence: Dict[str, Set[str]] = {}
         self._last_seen: Dict[str, float] = {}
@@ -58,8 +60,12 @@ class ScenescapeRegionConsumer:
             log.debug("Topic %s does not match regulated scene pattern, ignoring", topic)
             return
 
-        self._evict_stale()
+        with self._lock:
+            self._evict_stale_locked()
+            self._process_event(m, payload)
 
+    def _process_event(self, m, payload: dict) -> None:
+        """Process a regulated scene event. Caller MUST hold self._lock."""
         scene_id = m.group("scene_id")
         timestamp = payload.get("timestamp", "")
 
@@ -206,8 +212,8 @@ class ScenescapeRegionConsumer:
             )
             return None
 
-    def _evict_stale(self) -> None:
-        """Remove entries older than _PRESENCE_MAX_AGE to prevent unbounded growth."""
+    def _evict_stale_locked(self) -> None:
+        """Remove entries older than _PRESENCE_MAX_AGE. Caller MUST hold self._lock."""
         now = time.monotonic()
         if now - self._last_eviction < self._EVICTION_INTERVAL:
             return

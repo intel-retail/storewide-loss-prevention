@@ -199,7 +199,7 @@ services:
 
   # ---------- SeaweedFS (S3-compatible Object Storage) ----------
   seaweedfs:
-    image: chrislusf/seaweedfs:latest
+    image: chrislusf/seaweedfs:4.29
     ports:
       - "${SEAWEEDFS_S3_PORT:-8333}:8333"
       - "${SEAWEEDFS_MASTER_PORT:-9333}:9333"

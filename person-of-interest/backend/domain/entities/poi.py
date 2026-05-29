@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import uuid
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 from typing import Optional
 
@@ -36,7 +36,7 @@ class POI:
     reference_images: list[ReferenceImage]
     status: POIStatus = POIStatus.ACTIVE
     enrolled_by: str = "system"
-    created_at: str = field(default_factory=lambda: datetime.utcnow().isoformat() + "Z")
+    created_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
     embedding_ids: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict:

@@ -221,6 +221,15 @@ class EventConsumer:
                 log.debug("No face embedding for camera=%s person=%s — skipping FAISS", camera_id, person_int_id)
                 continue
 
+            # Validate embedding dimension before FAISS search
+            expected_dim = self._matching._cfg.faiss_dimension
+            if len(embedding_vector) != expected_dim:
+                log.warning(
+                    "Wrong embedding dimension: camera=%s person=%s dim=%d expected=%d — skipping",
+                    camera_id, person_int_id, len(embedding_vector), expected_dim,
+                )
+                continue
+
             log.info(
                 "Face embedding found: camera=%s person=%s conf=%.3f dim=%d",
                 camera_id, person_int_id, best_face_conf, len(embedding_vector),

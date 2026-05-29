@@ -121,7 +121,7 @@ class AlertService:
             # bounding_box_px uses top-left origin: [x1, y1, x2, y2]
             bbox = [x, y, x + w, y + h]
 
-        alert_id = f"alert-{datetime.utcnow().strftime('%Y%m%d-%H%M%S')}-{match.poi_id}"
+        alert_id = f"alert-{datetime.now(timezone.utc).strftime('%Y%m%d-%H%M%S')}-{match.poi_id}"
 
         # Convert mqtt_receive_time_ms to ISO timestamp
         mqtt_received_at = ""

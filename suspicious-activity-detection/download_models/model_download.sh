@@ -356,13 +356,13 @@ PYEOF
 
         deactivate 2>/dev/null || true
     else
-        # --- OpenVINO Model Zoo: download via wget ---
+        # --- OpenVINO Model Zoo: download via curl ---
         local prec="${DETECT_MODEL_PRECISION:-FP16}"
         echo "  Downloading ${DETECT_MODEL} (${prec}) from OpenVINO Model Zoo..."
         mkdir -p "${target_dir}"
-        wget -nv -O "${target_dir}/${DETECT_MODEL}.xml" \
+        curl -fsSL -o "${target_dir}/${DETECT_MODEL}.xml" \
             "${OMZ_BASE_URL}/${DETECT_MODEL}/${prec}/${DETECT_MODEL}.xml"
-        wget -nv -O "${target_dir}/${DETECT_MODEL}.bin" \
+        curl -fsSL -o "${target_dir}/${DETECT_MODEL}.bin" \
             "${OMZ_BASE_URL}/${DETECT_MODEL}/${prec}/${DETECT_MODEL}.bin"
     fi
 
@@ -449,9 +449,9 @@ if [ ! -f "${target_dir}/${REID_MODEL}.xml" ] || [ ! -f "${target_dir}/${REID_MO
     local prec="${REID_MODEL_PRECISION:-FP16}"
     echo "  Downloading ${REID_MODEL} (${prec}) from OpenVINO Model Zoo..."
     mkdir -p "${target_dir}"
-    wget -nv -O "${target_dir}/${REID_MODEL}.xml" \
+    curl -fsSL -o "${target_dir}/${REID_MODEL}.xml" \
         "${OMZ_BASE_URL}/${REID_MODEL}/${prec}/${REID_MODEL}.xml"
-    wget -nv -O "${target_dir}/${REID_MODEL}.bin" \
+    curl -fsSL -o "${target_dir}/${REID_MODEL}.bin" \
         "${OMZ_BASE_URL}/${REID_MODEL}/${prec}/${REID_MODEL}.bin"
 
     if [ -f "${target_dir}/${REID_MODEL}.xml" ] && [ -f "${target_dir}/${REID_MODEL}.bin" ]; then

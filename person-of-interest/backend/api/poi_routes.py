@@ -32,11 +32,25 @@ async def create_poi(
     if len(images) > 5:
         raise HTTPException(400, "Maximum 5 images allowed")
 
+    _ALLOWED_MIME = {"image/jpeg", "image/png", "image/webp"}
+    _MAX_IMAGE_BYTES = 10 * 1024 * 1024  # 10 MB per image
+
     image_bytes = []
     for img in images:
-        data = await img.read()
+        if img.content_type and img.content_type not in _ALLOWED_MIME:
+            raise HTTPException(
+                400,
+                f"Unsupported image type '{img.content_type}'. Allowed: {', '.join(sorted(_ALLOWED_MIME))}",
+            )
+        data = await img.read(_MAX_IMAGE_BYTES + 1)
         if not data:
             continue
+        if len(data) > _MAX_IMAGE_BYTES:
+            raise HTTPException(400, f"Image '{img.filename}' exceeds 10 MB size limit")
+        # Validate magic bytes as a secondary MIME check
+        is_webp = data[:4] == b"RIFF" and data[8:12] == b"WEBP"
+        if data[:2] != b"\xff\xd8" and data[:8] != b"\x89PNG\r\n\x1a\n" and not is_webp:
+            raise HTTPException(400, f"Image '{img.filename}' has invalid file header")
         image_bytes.append(data)
 
     if not image_bytes:

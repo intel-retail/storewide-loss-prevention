@@ -59,7 +59,9 @@ class MQTTAdapter:
                 cert_reqs=ssl.CERT_REQUIRED,
                 tls_version=ssl.PROTOCOL_TLS_CLIENT,
             )
-            self._client.tls_insecure_set(True)
+            # Skip hostname verification for self-signed certs (CN may not match broker hostname).
+            # Controlled by MQTT_TLS_INSECURE env var (default: true for SceneScape compatibility).
+            self._client.tls_insecure_set(self._cfg.mqtt_tls_insecure)
 
         log.info("Connecting to MQTT %s:%d", self._cfg.mqtt_host, self._cfg.mqtt_port)
         self._client.connect(self._cfg.mqtt_host, self._cfg.mqtt_port)

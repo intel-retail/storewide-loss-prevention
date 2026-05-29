@@ -44,21 +44,26 @@ class MatchingService:
         cached_poi = self._cache.get_poi_for_object(object_id)
         if cached_poi:
             cached_sim = getattr(self._cache, "get_similarity_for_object", lambda _: None)(object_id)
-            sim = cached_sim if cached_sim is not None else 1.0
-            # Re-check threshold — config may have changed since this was cached
-            if sim < self._cfg.similarity_threshold:
+            if cached_sim is None:
+                # Similarity missing (legacy entry or corrupt cache) — evict and re-query FAISS
+                log.debug("Cache hit without similarity: object=%s poi=%s — evicting, will re-query FAISS", object_id, cached_poi)
+                self._cache.delete_object(object_id)
+                # Fall through to FAISS search below
+            elif cached_sim < self._cfg.similarity_threshold:
+                # Threshold may have been raised since caching — evict and re-query FAISS
                 log.debug(
-                    "Cache hit below threshold: object=%s poi=%s sim=%.4f threshold=%.2f — evicting",
-                    object_id, cached_poi, sim, self._cfg.similarity_threshold,
+                    "Cache hit below threshold: object=%s poi=%s sim=%.4f threshold=%.2f — evicting, will re-query FAISS",
+                    object_id, cached_poi, cached_sim, self._cfg.similarity_threshold,
                 )
                 self._cache.delete_object(object_id)
-                return None
-            log.debug("Cache hit: object=%s → poi=%s similarity=%.4f", object_id, cached_poi, sim)
-            return MatchResult(
-                poi_id=cached_poi,
-                similarity_score=sim,
-                faiss_distance=0.0,
-            )
+                # Fall through to FAISS search below
+            else:
+                log.debug("Cache hit: object=%s → poi=%s similarity=%.4f", object_id, cached_poi, cached_sim)
+                return MatchResult(
+                    poi_id=cached_poi,
+                    similarity_score=cached_sim,
+                    faiss_distance=0.0,
+                )
 
         # Cache miss — search FAISS
         vector = np.array(embedding_vector, dtype=np.float32)

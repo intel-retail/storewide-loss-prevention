@@ -13,7 +13,11 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SCENESCAPE_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 APP_DIR="${1:-}"
-RESOURCE_CONFIG="${2:-}"
+# Accept resource config as $2 (positional arg) or RESOURCE_CONFIG env var.
+# Positional arg takes precedence, but only if non-empty.
+if [ -n "${2:-}" ]; then
+    RESOURCE_CONFIG="$2"
+fi
 
 if [ -z "${APP_DIR}" ]; then
     echo "Usage: $0 <app-dir>"

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 
 from backend.core.config import get_config
@@ -78,7 +78,7 @@ class RedisPOIRepository(POIRepository):
             ],
             status=POIStatus(data.get("status", "active")),
             enrolled_by=data.get("enrolled_by", "system"),
-            created_at=data.get("timestamp", datetime.utcnow().isoformat() + "Z"),
+            created_at=data.get("timestamp", datetime.now(timezone.utc).isoformat()),
             embedding_ids=[img.get("embedding_id", "") for img in data.get("reference_images", [])],
         )
 
@@ -303,12 +303,14 @@ class RedisEventRepository(EventRepository):
     # ── UUID ↔ camera bbox mapping (populated from regulated scene topic) ──
 
     def store_uuid_camera_bounds(
-        self, camera_id: str, uuid_bounds: dict[str, dict], ttl: int = 5,
+        self, camera_id: str, uuid_bounds: dict[str, dict], ttl: int = 15,
     ) -> None:
         """Store all UUID→bbox mappings for a camera as a single Redis hash.
 
         uuid_bounds: {uuid: {"x": int, "y": int, "width": int, "height": int}}
-        Short TTL (5s) because the regulated scene topic refreshes at ~3Hz.
+        TTL of 15s allows for MQTT jitter/lag while the regulated scene
+        topic refreshes at ~3Hz. Previous 5s was too aggressive and caused
+        UUID resolution failures during brief network stalls.
         """
         key = f"uuid:cam_bounds:{camera_id}"
         pipe = self._r.pipeline()

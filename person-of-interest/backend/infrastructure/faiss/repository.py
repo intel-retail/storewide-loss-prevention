@@ -69,6 +69,27 @@ class FAISSRepository(EmbeddingRepository):
         index = faiss.IndexIDMap(flat)
         return index
 
+    def reconcile(self, valid_poi_ids: set[str]) -> None:
+        """Remove FAISS vectors whose poi_id no longer exists in Redis.
+
+        Called at startup to prune stale vectors left from previous
+        deployments where Redis was wiped but the FAISS bind-mount persisted.
+        """
+        with self._search_lock:
+            stale_fids = [fid for fid, pid in self._id_map.items()
+                          if pid not in valid_poi_ids]
+            if not stale_fids:
+                return
+            stale_pois = {self._id_map[fid] for fid in stale_fids}
+            log.warning(
+                "Removing %d stale FAISS vectors for %d orphaned POI(s): %s",
+                len(stale_fids), len(stale_pois), stale_pois,
+            )
+            self._index.remove_ids(np.array(stale_fids, dtype=np.int64))
+            for fid in stale_fids:
+                del self._id_map[fid]
+            self._save_to_disk_locked()
+
     def add(self, poi_id: str, vectors: list[np.ndarray]) -> list[int]:
         ids_assigned = []
         vecs = []
@@ -76,19 +97,22 @@ class FAISSRepository(EmbeddingRepository):
             norm = np.linalg.norm(v)
             if norm > 0:
                 v = v / norm
-            fid = self._next_id
-            self._next_id += 1
-            self._id_map[fid] = poi_id
-            ids_assigned.append(fid)
             vecs.append(v.astype(np.float32))
 
-        if vecs:
+        if not vecs:
+            return ids_assigned
+
+        with self._search_lock:
+            for v in vecs:
+                fid = self._next_id
+                self._next_id += 1
+                self._id_map[fid] = poi_id
+                ids_assigned.append(fid)
             arr = np.vstack(vecs)
             id_arr = np.array(ids_assigned, dtype=np.int64)
-            with self._search_lock:
-                self._index.add_with_ids(arr, id_arr)
+            self._index.add_with_ids(arr, id_arr)
             log.info("Added %d vectors for poi=%s (ids=%s)", len(vecs), poi_id, ids_assigned)
-            self.save_to_disk()
+            self._save_to_disk_locked()
         return ids_assigned
 
     def search(self, vector: np.ndarray, top_k: int = 5) -> list[tuple[int, float]]:
@@ -100,31 +124,44 @@ class FAISSRepository(EmbeddingRepository):
             if self._index.ntotal == 0:
                 return []
             distances, ids = self._index.search(query, min(top_k, self._index.ntotal))
-        results = []
-        for dist, fid in zip(distances[0], ids[0]):
-            if fid >= 0:
-                results.append((int(fid), float(dist)))
+            # Copy id_map lookups while still under lock so results are consistent
+            results = []
+            for dist, fid in zip(distances[0], ids[0]):
+                if fid >= 0:
+                    results.append((int(fid), float(dist)))
         return results
 
     def remove(self, poi_id: str) -> None:
-        ids_to_remove = [fid for fid, pid in self._id_map.items() if pid == poi_id]
-        if ids_to_remove:
-            with self._search_lock:
+        with self._search_lock:
+            ids_to_remove = [fid for fid, pid in self._id_map.items() if pid == poi_id]
+            if ids_to_remove:
                 self._index.remove_ids(np.array(ids_to_remove, dtype=np.int64))
-            for fid in ids_to_remove:
-                del self._id_map[fid]
-            log.info("Removed %d vectors for poi=%s", len(ids_to_remove), poi_id)
-            self.save_to_disk()
+                for fid in ids_to_remove:
+                    del self._id_map[fid]
+                log.info("Removed %d vectors for poi=%s", len(ids_to_remove), poi_id)
+                self._save_to_disk_locked()
 
     def get_poi_id_for_faiss_id(self, faiss_id: int) -> Optional[str]:
-        return self._id_map.get(faiss_id)
+        with self._search_lock:
+            return self._id_map.get(faiss_id)
 
-    def save_to_disk(self) -> None:
+    def get_indexed_poi_ids(self) -> set[str]:
+        """Return the set of poi_ids currently indexed in FAISS."""
+        with self._search_lock:
+            return set(self._id_map.values())
+
+    def _save_to_disk_locked(self) -> None:
+        """Persist index and id_map. Caller MUST hold _search_lock."""
         Path(self._index_path).parent.mkdir(parents=True, exist_ok=True)
         faiss.write_index(self._index, self._index_path)
         with open(self._id_map_path, "w") as f:
             json.dump({str(k): v for k, v in self._id_map.items()}, f)
         log.info("FAISS index saved (%d vectors)", self._index.ntotal)
+
+    def save_to_disk(self) -> None:
+        """Public save — acquires lock. Prefer _save_to_disk_locked inside mutations."""
+        with self._search_lock:
+            self._save_to_disk_locked()
 
     def total_vectors(self) -> int:
         return self._index.ntotal

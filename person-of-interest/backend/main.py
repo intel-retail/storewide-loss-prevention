@@ -9,7 +9,9 @@ from __future__ import annotations
 import logging
 import os
 from contextlib import asynccontextmanager
+from pathlib import Path
 
+import numpy as np
 import uvicorn
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -66,6 +68,40 @@ async def lifespan(app: FastAPI):
     cache_repo = RedisCacheRepository()
     event_repo = RedisEventRepository()
     mapping_repo = RedisEmbeddingMappingRepository()
+
+    # Reconcile FAISS with Redis — prune stale vectors from previous deploys
+    # where Redis was wiped (volume removed) but FAISS bind-mount persisted.
+    valid_poi_ids = {p.poi_id for p in poi_repo.list_all()}
+    faiss_repo.reconcile(valid_poi_ids)
+
+    # Reverse reconciliation — re-embed POIs that exist in Redis but are
+    # missing from FAISS (e.g. FAISS data wiped but Redis volume persisted).
+    indexed_poi_ids = faiss_repo.get_indexed_poi_ids()
+    missing_pois = [p for p in poi_repo.list_all() if p.poi_id not in indexed_poi_ids]
+    if missing_pois:
+        log.info("Re-embedding %d POI(s) missing from FAISS...", len(missing_pois))
+        upload_dir = Path(os.getenv("UPLOAD_DIR", "/data/uploads"))
+        model = EmbeddingModelFactory.create()
+        for poi in missing_pois:
+            embeddings = []
+            for img in poi.reference_images:
+                # image_path is relative like /uploads/poi-xxx/ref_0.jpg
+                img_file = upload_dir / poi.poi_id / Path(img.image_path).name
+                if not img_file.exists():
+                    log.warning("Reference image not found for %s: %s", poi.poi_id, img_file)
+                    continue
+                result = model.generate_from_bytes(img_file.read_bytes())
+                if "error" in result:
+                    log.warning("Re-embedding failed for %s: %s", poi.poi_id, result["error"])
+                    continue
+                embeddings.append(np.array(result["embedding"], dtype=np.float32))
+            if embeddings:
+                faiss_ids = faiss_repo.add(poi.poi_id, embeddings)
+                for fid in faiss_ids:
+                    mapping_repo.map_faiss_to_poi(fid, poi.poi_id)
+                log.info("Re-embedded POI %s: %d vector(s) added to FAISS", poi.poi_id, len(faiss_ids))
+            else:
+                log.warning("No valid reference images for POI %s — cannot re-embed", poi.poi_id)
 
     log.info("Initializing detection index...")
     import redis as _redis_mod

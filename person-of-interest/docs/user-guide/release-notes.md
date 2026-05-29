@@ -27,7 +27,7 @@
 - **Per-camera pipeline configs**: DLStreamer pipeline configs are generated dynamically
   per camera from zone_config.json
 - **Stream density benchmarking**: Integrated performance-tools submodule with `make benchmark`,
-  `make benchmark-stream-density`, `make consolidate-metrics` targets
+  `make benchmark-stream-density`,   `make consolidate-metrics`, and `make plot-metrics` targets
 - **App-specific controller configs**: Tracker and reid configs moved from SceneScape to
   each app's `configs/` directory (POI: cosine/0.97, SAD: L2/30)
 

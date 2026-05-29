@@ -116,17 +116,16 @@ If you encounter any problems not addressed here, check the
 - **Solution**:
 
   ```bash
-  # Stop services
-  make down
-
-  # Remove FAISS volume and re-enroll POIs
-  docker volume rm person-of-interest_faiss-data
+  # Stop services and wipe all data (Redis, FAISS, uploads)
+  make clean
 
   # Restart
   make up
   ```
 
-  > **Note:** This removes all enrolled POIs. Re-enroll after restart.
+  > **Note:** `make clean` removes all enrolled POIs, events, and FAISS data.
+  > Re-enroll POIs after restart. The system automatically reconciles FAISS on
+  > startup if Redis data and reference images are still present.
 
 ## Troubleshooting Docker Deployments
 
@@ -157,11 +156,8 @@ If you encounter any problems not addressed here, check the
 Follow these steps to reset the application to the initial state:
 
 ```bash
-# Stop all services
-make down
-
-# Remove all data volumes
-docker volume rm person-of-interest_redis-data person-of-interest_faiss-data person-of-interest_upload-data
+# Stop all services and remove data (Redis, FAISS, uploads)
+make clean
 
 # Restart fresh
 make up

@@ -30,6 +30,7 @@ class Config:
     mqtt_port: int = 1883
     mqtt_topic_event: str = ""
     mqtt_ca_cert: str = ""
+    mqtt_tls_insecure: bool = True  # skip hostname verification (self-signed certs)
     scene_uid: str = ""
 
     # Redis
@@ -126,6 +127,7 @@ class Config:
             mqtt_port=int(os.getenv("MQTT_PORT", "1883")),
             mqtt_topic_event=mqtt_topic,
             mqtt_ca_cert=os.getenv("MQTT_CA_CERT", ""),
+            mqtt_tls_insecure=os.getenv("MQTT_TLS_INSECURE", "true").lower() in ("true", "1", "yes"),
             scene_uid=scene_uid,
             redis_host=os.getenv("REDIS_HOST", "localhost"),
             redis_port=int(os.getenv("REDIS_PORT", "6379")),

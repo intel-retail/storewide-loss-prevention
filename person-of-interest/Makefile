@@ -121,6 +121,13 @@ PERF_TOOLS_DIR := ../performance-tools/benchmark-scripts
 SAD_STREAM_DENSITY := $(PERF_TOOLS_DIR)/sad_stream_density.py
 POI_STREAM_DENSITY := $(PERF_TOOLS_DIR)/poi_stream_density.py
 
+# Load benchmark vars from docker/.env (if it exists) so values like
+# BENCHMARK_TARGET_LATENCY_MS, BENCHMARK_INIT_DURATION etc. are picked up.
+# Only BENCHMARK_* lines are extracted to avoid parsing issues with other values.
+ifneq (,$(wildcard docker/.env))
+$(foreach line,$(shell grep '^BENCHMARK_' docker/.env 2>/dev/null),$(eval $(line)))
+endif
+
 # Benchmark configuration (override via env or docker/.env)
 BENCHMARK_TARGET_LATENCY_MS ?= 30000
 BENCHMARK_LATENCY_METRIC ?= avg
@@ -152,15 +159,55 @@ BENCHMARK_VENV := cd $(PERF_TOOLS_DIR) && \
 	pip3 install -q -e . && \
 	cd $(CURDIR)
 
+TAG ?= 2026.0.0
+REGISTRY_BENCHMARK ?= intel/retail-benchmark:$(TAG)
+
+.PHONY: fetch-benchmark
+fetch-benchmark: ## Pull benchmark metrics-collector image from registry
+	@echo "$(BLUE)Fetching benchmark image from registry...$(NC)"
+	docker pull $(REGISTRY_BENCHMARK)
+	@echo "$(GREEN)Benchmark image ready$(NC)"
+
+.PHONY: build-benchmark
+build-benchmark: ## Build benchmark metrics-collector Docker image
+	@echo "$(BLUE)Building benchmark Docker image...$(NC)"
+	@if [ "$(REGISTRY)" = "true" ]; then \
+		$(MAKE) fetch-benchmark; \
+	else \
+		cd ../performance-tools && $(MAKE) build-benchmark-docker; \
+	fi
+
+# Start metrics-collector (benchmark profile)
+.PHONY: _start-metrics-collector
+_start-metrics-collector:
+	@echo "$(BLUE)=== Starting metrics-collector ===$(NC)"
+	@if docker image inspect $(REGISTRY_BENCHMARK) >/dev/null 2>&1; then \
+		$(COMPOSE_POI) --profile benchmark up -d metrics-collector && \
+		echo "$(GREEN)  metrics-collector started$(NC)"; \
+	else \
+		echo "$(YELLOW)  metrics-collector image not found — skipping (run 'make build-benchmark' first)$(NC)"; \
+	fi
+
+# Stop metrics-collector
+.PHONY: _stop-metrics-collector
+_stop-metrics-collector:
+	@if docker ps -q -f name=poi-metrics-collector 2>/dev/null | grep -q .; then \
+		echo "$(BLUE)=== Stopping metrics-collector ===$(NC)"; \
+		$(COMPOSE_POI) --profile benchmark stop metrics-collector 2>/dev/null || true; \
+		$(COMPOSE_POI) --profile benchmark rm -f metrics-collector 2>/dev/null || true; \
+	fi
+
 .PHONY: benchmark
-benchmark: _benchmark-fresh-start _benchmark-enroll ## Single-scene POI benchmark with auto-enroll
+benchmark: _benchmark-fresh-start _benchmark-enroll _start-metrics-collector ## Single-scene POI benchmark with auto-enroll
 	@$(MAKE) --no-print-directory poi-benchmark BENCHMARK_RESOURCE_CONFIG=$(BENCHMARK_RESOURCE_CONFIG); ret=$$?; \
+		$(MAKE) --no-print-directory _stop-metrics-collector; \
 		$(MAKE) --no-print-directory _benchmark-cleanup; \
 		exit $$ret
 
 .PHONY: benchmark-stream-density
-benchmark-stream-density: _benchmark-fresh-start _benchmark-enroll ## Stream density with auto-enroll
+benchmark-stream-density: _benchmark-fresh-start _benchmark-enroll _start-metrics-collector ## Stream density with auto-enroll
 	@$(MAKE) --no-print-directory poi-benchmark-stream-density BENCHMARK_RESOURCE_CONFIG=$(BENCHMARK_RESOURCE_CONFIG); ret=$$?; \
+		$(MAKE) --no-print-directory _stop-metrics-collector; \
 		$(MAKE) --no-print-directory _benchmark-cleanup; \
 		exit $$ret
 
@@ -172,6 +219,8 @@ _benchmark-fresh-start:
 	@$(MAKE) --no-print-directory down 2>/dev/null || true
 	@echo "$(BLUE)=== Removing POI Compose volumes ===$(NC)"
 	@$(COMPOSE_POI) down -v --remove-orphans 2>/dev/null || true
+	@echo "$(BLUE)=== Clearing stale FAISS index ===$(NC)"
+	@rm -f data/faiss/poi.index data/faiss/id_map.json
 	@echo "$(BLUE)=== Initializing with DEVICE=$(DEVICE) ===$(NC)"
 	@$(MAKE) --no-print-directory init
 
@@ -222,6 +271,17 @@ consolidate-metrics: ## Consolidate benchmark metrics from results/ into a CSV
 		--output $(CURDIR)/$(RESULTS_PATH)/consolidated_metrics.csv
 	@echo ""
 	@echo "Results written to: $(RESULTS_PATH)/consolidated_metrics.csv"
+
+.PHONY: plot-metrics
+plot-metrics: ## Generate plots from benchmark metrics
+	@echo "╔══════════════════════════════════════════════════════════════════╗"
+	@echo "║                   Generating Metrics Plots                     ║"
+	@echo "╚══════════════════════════════════════════════════════════════════╝"
+	$(BENCHMARK_VENV) && \
+	python3 $(PERF_TOOLS_DIR)/usage_graph_plot.py \
+		--dir $(CURDIR)/$(RESULTS_PATH)
+	@echo ""
+	@echo "Plots saved to: $(RESULTS_PATH)/"
 
 .PHONY: stream-density
 stream-density: benchmark-stream-density ## Alias for benchmark-stream-density
@@ -340,6 +400,7 @@ lp-build:
 clean:
 	-$(COMPOSE_SCENESCAPE) down -v
 	-$(COMPOSE_LP) down -v 2>/dev/null || true
+	rm -rf data/faiss/* data/uploads/*
 
 .PHONY: clean-secrets
 clean-secrets:
@@ -381,6 +442,7 @@ help:
 	@echo "    make benchmark                 - Single-scene benchmark (1 scene)"
 	@echo "    make benchmark-stream-density  - Increase scenes until latency threshold"
 	@echo "    make consolidate-metrics       - Consolidate metrics to CSV"
+	@echo "    make plot-metrics              - Generate plots from benchmark metrics"
 	@echo "    make stream-density            - Alias for benchmark-stream-density"
 	@echo "    make generate-stream-density   - Generate overrides only (no start)"
 	@echo "    make clean-stream-density      - Revert to single camera"
@@ -396,6 +458,8 @@ help:
 	@echo ""
 	@echo "  Build:"
 	@echo "    make lp-build        - Build LP container images"
+	@echo "    make build-benchmark - Build metrics-collector Docker image"
+	@echo "    make fetch-benchmark - Pull metrics-collector image from registry"
 	@echo ""
 	@echo "  Cleanup:"
 	@echo "    make clean           - Stop and remove containers + volumes"
@@ -444,12 +508,22 @@ build:
 	@echo ""
 	@echo "$(BLUE)=== Building POI images ===$(NC)"
 ifeq ($(REGISTRY),false)
-	$(COMPOSE_POI) build poi-backend ui
+	POI_BACKEND_IMAGE=poi-backend POI_UI_IMAGE=poi-ui $(COMPOSE_POI) build poi-backend ui
+	@# Persist image overrides so make up uses locally-built images
+	@grep -q '^POI_BACKEND_IMAGE=' docker/.env 2>/dev/null && \
+		sed -i 's|^POI_BACKEND_IMAGE=.*|POI_BACKEND_IMAGE=poi-backend|' docker/.env || \
+		echo 'POI_BACKEND_IMAGE=poi-backend' >> docker/.env
+	@grep -q '^POI_UI_IMAGE=' docker/.env 2>/dev/null && \
+		sed -i 's|^POI_UI_IMAGE=.*|POI_UI_IMAGE=poi-ui|' docker/.env || \
+		echo 'POI_UI_IMAGE=poi-ui' >> docker/.env
 else
 	$(COMPOSE_POI) build poi-backend ui
-	docker tag poi-backend $(REGISTRY)/poi-backend:latest
-	docker tag poi-ui $(REGISTRY)/poi-ui:latest
 endif
+	@echo ""
+	@echo "$(BLUE)=== Pulling benchmark metrics-collector image ===$(NC)"
+	@docker pull $(REGISTRY_BENCHMARK) 2>/dev/null && \
+		echo "$(GREEN)  Benchmark image ready$(NC)" || \
+		echo "$(YELLOW)  Benchmark image not available — run 'make build-benchmark' to build locally$(NC)"
 	@echo "$(GREEN)Build complete.$(NC)"
 
 .PHONY: up
@@ -477,6 +551,8 @@ up:
 			docker volume rm storewide-lp_vol-db storewide-lp_vol-migrations 2>/dev/null && \
 				echo "  Removed storewide-lp_vol-db and storewide-lp_vol-migrations" || true; \
 		fi; \
+		echo "$(BLUE)=== Clearing stale FAISS index (fresh deployment) ===$(NC)"; \
+		rm -f data/faiss/poi.index data/faiss/id_map.json; \
 	fi
 	@# Validate HOST_IP is set — required for WebRTC ICE candidates (camera streams)
 	@HOST_IP_VAL="$$(grep -E '^HOST_IP=.+' docker/.env 2>/dev/null | cut -d= -f2-)"; \

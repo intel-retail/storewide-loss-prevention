@@ -1,0 +1,300 @@
+{
+  "uid": "poi-scene-001",
+  "name": "conference room",
+  "map_type": "map_upload",
+  "use_tracker": true,
+  "output_lla": false,
+  "map": "/media/base_image.jpg",
+  "cameras": [
+    {
+      "uid": "Camera_01",
+      "name": "Camera_01",
+      "intrinsics": {
+        "fx": 2303.83,
+        "fy": 2303.83,
+        "cx": 960,
+        "cy": 540
+      },
+      "transform_type": "3d-2d point correspondence",
+      "transforms": [
+        27.05,
+        24.59,
+        1886.39,
+        29.51,
+        1824.08,
+        1042.8,
+        28.69,
+        1026.4,
+        2.35,
+        23.49,
+        0,
+        14.62,
+        23.61,
+        0,
+        15.25,
+        15.48,
+        0,
+        2.5,
+        15.97,
+        0
+      ],
+      "translation": [
+        6.93,
+        24.53,
+        15.3
+      ],
+      "rotation": [
+        163.08,
+        5.75,
+        -0.44
+      ],
+      "scale": [
+        1,
+        1,
+        1
+      ],
+      "resolution": [
+        1920,
+        1080
+      ],
+      "scene": "poi-scene-001",
+      "cv_subsystem": "AUTO",
+      "undistort": false,
+      "use_camera_pipeline": false
+    },
+    {
+      "uid": "Camera_02",
+      "name": "Camera_02",
+      "intrinsics": {
+        "fx": 2303.83,
+        "fy": 2303.83,
+        "cx": 960,
+        "cy": 540
+      },
+      "transform_type": "3d-2d point correspondence",
+      "transforms": [
+        27.05,
+        24.59,
+        1886.39,
+        29.51,
+        1824.08,
+        1042.8,
+        28.69,
+        1026.4,
+        2.35,
+        23.49,
+        0,
+        14.62,
+        23.61,
+        0,
+        15.25,
+        15.48,
+        0,
+        2.5,
+        15.97,
+        0
+      ],
+      "translation": [
+        12.93,
+        24.53,
+        15.3
+      ],
+      "rotation": [
+        163.08,
+        -5.75,
+        0.44
+      ],
+      "scale": [
+        1,
+        1,
+        1
+      ],
+      "resolution": [
+        1920,
+        1080
+      ],
+      "scene": "poi-scene-001",
+      "cv_subsystem": "AUTO",
+      "undistort": false,
+      "use_camera_pipeline": false
+    }
+  ],
+  "regions": [
+    {
+      "uid": "region-entry-001",
+      "name": "entry",
+      "points": [
+        [
+          2.0,
+          13.0
+        ],
+        [
+          6.0,
+          13.0
+        ],
+        [
+          6.0,
+          15.0
+        ],
+        [
+          2.0,
+          15.0
+        ]
+      ],
+      "scene": "poi-scene-001",
+      "buffer_size": 0,
+      "height": 1,
+      "volumetric": false,
+      "color_ranges": {
+        "sectors": [
+          {
+            "color": "green",
+            "color_min": 0
+          },
+          {
+            "color": "yellow",
+            "color_min": 2
+          },
+          {
+            "color": "red",
+            "color_min": 5
+          }
+        ],
+        "range_max": 10
+      }
+    },
+    {
+      "uid": "region-exit-001",
+      "name": "exit",
+      "points": [
+        [
+          2.0,
+          20.0
+        ],
+        [
+          6.0,
+          20.0
+        ],
+        [
+          6.0,
+          22.0
+        ],
+        [
+          2.0,
+          22.0
+        ]
+      ],
+      "scene": "poi-scene-001",
+      "buffer_size": 0,
+      "height": 1,
+      "volumetric": false,
+      "color_ranges": {
+        "sectors": [
+          {
+            "color": "green",
+            "color_min": 0
+          },
+          {
+            "color": "yellow",
+            "color_min": 2
+          },
+          {
+            "color": "red",
+            "color_min": 5
+          }
+        ],
+        "range_max": 10
+      }
+    },
+    {
+      "uid": "region-high-value-001",
+      "name": "high_value",
+      "points": [
+        [
+          8.0,
+          14.0
+        ],
+        [
+          13.0,
+          14.0
+        ],
+        [
+          13.0,
+          16.0
+        ],
+        [
+          8.0,
+          16.0
+        ]
+      ],
+      "scene": "poi-scene-001",
+      "buffer_size": 0,
+      "height": 1,
+      "volumetric": false,
+      "color_ranges": {
+        "sectors": [
+          {
+            "color": "green",
+            "color_min": 0
+          },
+          {
+            "color": "yellow",
+            "color_min": 2
+          },
+          {
+            "color": "red",
+            "color_min": 5
+          }
+        ],
+        "range_max": 10
+      }
+    },
+    {
+      "uid": "region-checkout-001",
+      "name": "checkout",
+      "points": [
+        [
+          4.0,
+          16.0
+        ],
+        [
+          8.0,
+          16.0
+        ],
+        [
+          8.0,
+          18.0
+        ],
+        [
+          4.0,
+          18.0
+        ]
+      ],
+      "scene": "poi-scene-001",
+      "buffer_size": 0,
+      "height": 1,
+      "volumetric": false,
+      "color_ranges": {
+        "sectors": [
+          {
+            "color": "green",
+            "color_min": 0
+          },
+          {
+            "color": "yellow",
+            "color_min": 2
+          },
+          {
+            "color": "red",
+            "color_min": 5
+          }
+        ],
+        "range_max": 10
+      }
+    }
+  ],
+  "scale": 50,
+  "regulated_rate": 30,
+  "external_update_rate": 30,
+  "camera_calibration": "Manual"
+}

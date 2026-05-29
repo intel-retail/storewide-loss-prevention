@@ -11,6 +11,9 @@ from fastapi.testclient import TestClient
 
 from backend.api import poi_routes
 
+# Minimal valid JPEG header (SOI + EOI markers) for upload validation tests
+_JPEG_STUB = b"\xff\xd8\xff\xe0" + b"\x00" * 20
+
 
 @pytest.fixture
 def app():
@@ -99,7 +102,7 @@ class TestPOIRoutes:
         mock_poi_service.create_poi = AsyncMock(
             return_value={"error": "No faces detected in any uploaded image"}
         )
-        image = io.BytesIO(b"fake-image")
+        image = io.BytesIO(_JPEG_STUB)
 
         resp = client.post(
             "/api/v1/poi",
@@ -111,7 +114,7 @@ class TestPOIRoutes:
     def test_create_poi_too_many_images(self, client, mock_poi_service):
         images = []
         for i in range(6):
-            img = io.BytesIO(b"fake-image")
+            img = io.BytesIO(_JPEG_STUB)
             images.append(("images", (f"img_{i}.jpg", img, "image/jpeg")))
 
         resp = client.post(
@@ -120,3 +123,14 @@ class TestPOIRoutes:
             data={"severity": "medium", "description": ""},
         )
         assert resp.status_code == 400
+
+    def test_create_poi_invalid_file_header(self, client, mock_poi_service):
+        """Upload with valid MIME but invalid magic bytes should be rejected."""
+        image = io.BytesIO(b"not-an-image-at-all")
+        resp = client.post(
+            "/api/v1/poi",
+            files=[("images", ("test.jpg", image, "image/jpeg"))],
+            data={"severity": "medium", "description": ""},
+        )
+        assert resp.status_code == 400
+        assert "invalid file header" in resp.json()["detail"]

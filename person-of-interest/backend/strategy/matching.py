@@ -29,19 +29,24 @@ class CosineSimilarityStrategy(MatchingStrategy):
             # Inner product of L2-normed vectors = cosine similarity ∈ [-1, 1]
             similarity = float(distance)
             poi_id = self._faiss.get_poi_id_for_faiss_id(faiss_id)
+            if poi_id is None:
+                log.warning(
+                    "Stale FAISS vector: faiss_id=%d has no POI mapping — skipping (will be cleaned at next restart)",
+                    faiss_id,
+                )
+                continue
             log.info("FAISS result: poi=%s similarity=%.4f threshold=%.2f %s",
-                     poi_id or faiss_id, similarity, threshold,
+                     poi_id, similarity, threshold,
                      "MATCH" if similarity >= threshold else "below-threshold")
             if similarity >= threshold:
-                if poi_id:
-                    matches.append(
-                        MatchResult(
-                            poi_id=poi_id,
-                            similarity_score=similarity,
-                            faiss_distance=distance,
-                            embedding_id=str(faiss_id),
-                        )
+                matches.append(
+                    MatchResult(
+                        poi_id=poi_id,
+                        similarity_score=similarity,
+                        faiss_distance=distance,
+                        embedding_id=str(faiss_id),
                     )
+                )
         # Sort by similarity descending
         matches.sort(key=lambda m: m.similarity_score, reverse=True)
         return matches

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import threading
 from dataclasses import dataclass, field
 from typing import Callable
 
@@ -26,24 +27,32 @@ class EventBus:
     """Simple in-process event bus — Observer Pattern.
 
     Observers register callbacks that are invoked when events are published.
+    Thread-safe: subscribe/publish may be called from different threads
+    (MQTT callback thread vs FastAPI request threads).
     """
 
     def __init__(self) -> None:
+        self._lock = threading.Lock()
         self._listeners: dict[str, list[Callable]] = {}
 
     def subscribe(self, event_type: str, callback: Callable) -> None:
-        self._listeners.setdefault(event_type, []).append(callback)
+        with self._lock:
+            self._listeners.setdefault(event_type, []).append(callback)
         log.debug("Subscriber registered for %s", event_type)
 
     def publish(self, event_type: str, event) -> None:
-        for cb in self._listeners.get(event_type, []):
+        with self._lock:
+            callbacks = list(self._listeners.get(event_type, []))
+        for cb in callbacks:
             try:
                 cb(event)
             except Exception:
                 log.exception("Error in event handler for %s", event_type)
 
     async def publish_async(self, event_type: str, event) -> None:
-        for cb in self._listeners.get(event_type, []):
+        with self._lock:
+            callbacks = list(self._listeners.get(event_type, []))
+        for cb in callbacks:
             try:
                 if asyncio.iscoroutinefunction(cb):
                     await cb(event)

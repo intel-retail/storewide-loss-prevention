@@ -55,13 +55,33 @@ class ScenescapeAPIAdapter:
             log.exception("Failed to obtain SceneScape API token for user '%s'", username)
             return ""
 
+    def _refresh_token(self) -> bool:
+        """Re-authenticate and update the session header. Returns True on success."""
+        if not (self._cfg.scenescape_api_user and self._cfg.scenescape_api_password):
+            return False
+        self._token = self._fetch_token(
+            self._cfg.scenescape_api_user,
+            self._cfg.scenescape_api_password,
+        )
+        if self._token:
+            self._session.headers["Authorization"] = f"Token {self._token}"
+            return True
+        return False
+
+    def _get_with_retry(self, url: str, timeout: int = 10) -> requests.Response:
+        """GET with automatic token refresh on 401."""
+        resp = self._session.get(url, timeout=timeout)
+        if resp.status_code == 401 and self._refresh_token():
+            resp = self._session.get(url, timeout=timeout)
+        resp.raise_for_status()
+        return resp
+
     def list_cameras(self) -> list[dict]:
         if not self._base_url:
             log.warning("SceneScape API URL not configured")
             return []
         try:
-            resp = self._session.get(f"{self._base_url}/api/v1/cameras", timeout=10)
-            resp.raise_for_status()
+            resp = self._get_with_retry(f"{self._base_url}/api/v1/cameras")
             data = resp.json()
             if isinstance(data, list):
                 return data
@@ -74,8 +94,7 @@ class ScenescapeAPIAdapter:
         if not self._base_url:
             return None
         try:
-            resp = self._session.get(f"{self._base_url}/api/v1/cameras/{camera_id}", timeout=10)
-            resp.raise_for_status()
+            resp = self._get_with_retry(f"{self._base_url}/api/v1/cameras/{camera_id}")
             return resp.json()
         except requests.RequestException:
             log.exception("Failed to fetch camera %s", camera_id)

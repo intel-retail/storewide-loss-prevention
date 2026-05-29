@@ -1,11 +1,8 @@
-# SceneScape controller patches (POI-specific)
+# SceneScape overrides for the POI application.
 # Layered on top of scenescape/docker-compose.yaml — not used standalone.
+# NOTE: Do NOT patch SceneScape Python files here. The SceneScape codebase is
+#       owned by a separate team. Use config files and env vars instead.
 services:
-  scene:
-    volumes:
-      - ../scenescape/controller/patches/moving_object.py:/usr/local/lib/python3.11/site-packages/controller/moving_object.py:ro
-      - ../scenescape/controller/patches/vdms_adapter.py:/usr/local/lib/python3.11/site-packages/controller/vdms_adapter.py:ro
-
   # Fix WebRTC playback in Docker: MediaMTX must use a fixed UDP port for
   # ICE media (default is random ephemeral ports which Docker can't forward).
   # HOST_IP is auto-detected during 'make init' (written to docker/.env) so

@@ -64,15 +64,28 @@ class POIService:
 
         poi = builder.build()
 
-        # Store vectors in FAISS
+        # Store vectors in FAISS first, then persist metadata.
+        # If Redis save fails, roll back FAISS to avoid orphaned vectors.
         faiss_ids = self._embedding_repo.add(poi_id, embeddings)
 
-        # Map FAISS IDs → POI ID
-        for fid in faiss_ids:
-            self._mapping_repo.map_faiss_to_poi(fid, poi_id)
+        try:
+            # Map FAISS IDs → POI ID
+            for fid in faiss_ids:
+                self._mapping_repo.map_faiss_to_poi(fid, poi_id)
 
-        # Save metadata in Redis
-        self._poi_repo.save(poi)
+            # Save metadata in Redis
+            self._poi_repo.save(poi)
+        except Exception:
+            log.exception("Failed to save POI %s to Redis — rolling back enrollment", poi_id)
+            try:
+                self._mapping_repo.remove_mappings_for_poi(poi_id)
+            except Exception:
+                log.exception("Rollback failed for POI %s FAISS→POI mappings", poi_id)
+            try:
+                self._embedding_repo.remove(poi_id)
+            except Exception:
+                log.exception("Rollback failed for POI %s FAISS vectors", poi_id)
+            raise
 
         log.info("Created POI %s with %d embeddings", poi_id, len(embeddings))
         return poi.to_dict()
@@ -91,9 +104,14 @@ class POIService:
         deleted = self._poi_repo.delete(poi_id)
         if not deleted:
             return False
-        # Remove from FAISS
-        self._embedding_repo.remove(poi_id)
-        # Remove FAISS→POI mappings
-        self._mapping_repo.remove_mappings_for_poi(poi_id)
+        # Remove from FAISS + mappings — log but don't fail the delete
+        try:
+            self._embedding_repo.remove(poi_id)
+        except Exception:
+            log.exception("Failed to remove FAISS vectors for POI %s — stale vectors will be cleaned at next startup", poi_id)
+        try:
+            self._mapping_repo.remove_mappings_for_poi(poi_id)
+        except Exception:
+            log.exception("Failed to remove mapping for POI %s", poi_id)
         log.info("Deleted POI %s", poi_id)
         return True

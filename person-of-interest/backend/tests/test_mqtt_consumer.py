@@ -38,6 +38,7 @@ class TestEventConsumer:
     def _make_consumer(self, match_result=None):
         matching = MagicMock()
         matching.match_object.return_value = match_result
+        matching._cfg.faiss_dimension = 256
 
         events = MagicMock()
 
