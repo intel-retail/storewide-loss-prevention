@@ -8,6 +8,14 @@
 # SceneScape-specific targets are in scenescape/Makefile.
 
 SCENESCAPE_DIR := ../scenescape
+
+# Device resource config: pass DEVICE=all-cpu.env, all-gpu-cpu.env, all-gpu.env, all-npu-cpu.env, or all-npu.env
+# When not passed on the command line, auto-detect from docker/.env (written by 'make init')
+# so the NPU overlay is automatically applied on subsequent 'make up' calls (ITEP-92805).
+_DEVICE_FROM_ENV := $(shell grep '^RESOURCE_CONFIG=' docker/.env 2>/dev/null | sed 's|.*configs/res/||' | tr -d '[:space:]')
+DEVICE ?= $(if $(_DEVICE_FROM_ENV),$(_DEVICE_FROM_ENV),all-gpu.env)
+RESOURCE_CONFIG := configs/res/$(DEVICE)
+
 COMPOSE_SCENESCAPE := docker compose --project-directory . --env-file docker/.env -f $(SCENESCAPE_DIR)/docker-compose.yaml -f docker-compose.scenescape-overrides.yml
 COMPOSE_LP := docker compose --project-directory . --env-file docker/.env -f docker/docker-compose.yaml
 COMPOSE_ALL := docker compose --project-directory . --env-file docker/.env -f $(SCENESCAPE_DIR)/docker-compose.yaml -f docker-compose.scenescape-overrides.yml -f docker/docker-compose.yaml
@@ -20,10 +28,6 @@ COMPOSE_SCENESCAPE := $(COMPOSE_SCENESCAPE) $(if $(findstring npu,$(DEVICE)),-f 
 COMPOSE_ALL := $(COMPOSE_ALL) $(if $(findstring npu,$(DEVICE)),-f $(NPU_OVERLAY),)
 
 RESULTS_PATH ?= ./results
-
-# Device resource config: pass DEVICE=all-cpu.env, all-gpu-cpu.env, all-gpu.env, all-npu-cpu.env, or all-npu.env
-DEVICE ?= all-gpu.env
-RESOURCE_CONFIG := configs/res/$(DEVICE)
 
 # ---- Initialization ----
 
