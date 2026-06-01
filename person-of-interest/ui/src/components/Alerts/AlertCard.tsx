@@ -49,11 +49,7 @@ const AlertCard = ({ alert, onImageClick, poiPrimaryImage }: AlertCardProps) => 
             <span>Similarity: <span className={`font-semibold ${scoreColor}`}>{(score * 100).toFixed(1)}%</span></span>
             <span className="text-intel-gray">Confidence: <span className="font-medium text-intel-dark">{(alert.match.confidence * 100).toFixed(1)}%</span></span>
           </div>
-          {alert.poi_metadata.total_previous_matches > 0 && (
-            <p className="text-[11px] text-intel-gray">
-              {alert.poi_metadata.total_previous_matches} previous match{alert.poi_metadata.total_previous_matches !== 1 ? 'es' : ''}
-            </p>
-          )}
+          {/* previous match count hidden */}
           {alert.poi_metadata.notes && (
             <p className="text-[11px] text-intel-gray italic truncate" title={alert.poi_metadata.notes}>{alert.poi_metadata.notes}</p>
           )}

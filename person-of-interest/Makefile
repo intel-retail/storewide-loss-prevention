@@ -423,9 +423,18 @@ lp-build:
 
 .PHONY: clean
 clean:
-	-$(COMPOSE_SCENESCAPE) down -v
+	@# Flush Redis data while container is still running (best-effort)
+	@docker exec poi-redis redis-cli FLUSHALL 2>/dev/null || true
+	@# Remove FAISS indexes inside the container (best-effort)
+	@docker exec poi-backend rm -f /data/faiss/poi.index /data/faiss/id_map.json 2>/dev/null || true
+	@# Stop POI containers first (without -v to avoid shared network conflict)
+	-$(COMPOSE_POI) down 2>/dev/null || true
+	@# Now attempt full teardown with volumes (may warn about shared network — that's OK)
+	-$(COMPOSE_SCENESCAPE) down -v 2>/dev/null || true
 	-$(COMPOSE_LP) down -v 2>/dev/null || true
+	@# Clean local data dirs as final fallback
 	rm -rf data/faiss/* data/uploads/*
+	@echo "$(GREEN)=== Clean complete. Redis flushed, FAISS removed, containers stopped. ===$(NC)"
 
 .PHONY: clean-secrets
 clean-secrets:

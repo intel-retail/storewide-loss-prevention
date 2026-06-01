@@ -141,7 +141,11 @@ async def lifespan(app: FastAPI):
     # ── MQTT ──
     if cfg.mqtt_host:
         log.info("Starting MQTT consumer...")
-        _mqtt_adapter = MQTTAdapter(on_event=consumer.handle_event, on_region_event=region_consumer.handle_event)
+        _mqtt_adapter = MQTTAdapter(
+            on_event=consumer.handle_event,
+            on_region_event=region_consumer.handle_event,
+            on_native_region_event=region_consumer.handle_region_event,
+        )
         try:
             _mqtt_adapter.start()
         except Exception:

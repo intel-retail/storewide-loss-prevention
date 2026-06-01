@@ -1,76 +1,69 @@
-"""SceneScape regulated scene event consumer — region entry/exit tracking.
+"""SceneScape region consumer — UUID camera_bounds mapping + native region events.
 
-Subscribes to: scenescape/regulated/scene/{scene_id}
-Payload: objects list with per-person `regions` dict
-Region entry/exit is detected by diffing current vs previous region membership.
+Subscribes to TWO topics:
+  1. scenescape/regulated/scene/{scene_id}
+     → Extracts UUID→camera_bounds mapping for bbox-based track resolution.
+       Entry/exit is NOT derived here (no stateful diffing).
 
-Payload structure per person object:
-  {
-    id: str,
-    category: "person",
-    visibility: [camera_id, ...],
-    metadata: {...},
-    regions: {
-      region_id: {"entered": timestamp},
-      ...
-    }
-  }
+  2. scenescape/event/region/{scene_id}/{region_id}/{suffix}
+     → SceneScape's native region entry/exit events with server-computed dwell.
+       Provides explicit ``entered`` / ``exited`` lists — no diffing needed.
 """
 
 from __future__ import annotations
 
 import logging
 import re
-import threading
 import time
-from typing import Dict, Optional, Set
+from typing import Optional
 
 from backend.service.event_service import EventService
 from backend.utils.thumbnail import submit_capture
 
 log = logging.getLogger("poi.consumer.scenescape")
 
-# Topic: scenescape/regulated/scene/{scene_id}  (SceneScape v2026+)
+# Topic: scenescape/regulated/scene/{scene_id}  — camera_bounds only
 REGION_TOPIC_RE = re.compile(r"scenescape/regulated/scene/(?P<scene_id>[^/]+)$")
+
+# Topic: scenescape/event/region/{scene_id}/{region_id}/{suffix}  — native entry/exit
+REGION_EVENT_TOPIC_RE = re.compile(
+    r"scenescape/event/region/(?P<scene_id>[^/]+)/(?P<region_id>[^/]+)/(?P<suffix>[^/]+)$"
+)
+
+# Minimum interval between UUID camera_bounds log lines
+_UUID_LOG_INTERVAL = 60  # seconds
 
 
 class ScenescapeRegionConsumer:
-    """Handles region entry/exit events from the regulated scene MQTT topic.
+    """Handles SceneScape region tracking via two complementary topics.
 
-    Uses stateful diffing: detects entry when a region_id appears in a person's
-    `regions` dict for the first time, and exit when it disappears.
+    - Regulated scene: UUID→camera_bounds mapping (supports UUID resolution
+      in the camera topic MQTT consumer for POI matching).
+    - Region event: native ENTERED/EXITED events with dwell from SceneScape.
     """
-
-    # Max age (seconds) before stale entries are evicted from _region_presence
-    _PRESENCE_MAX_AGE = 3600  # 1 hour
-    _EVICTION_INTERVAL = 60  # seconds between eviction sweeps
 
     def __init__(self, event_service: EventService, event_repo=None) -> None:
         self._event_service = event_service
-        self._event_repo = event_repo  # RedisEventRepository for zone frame storage
-        self._lock = threading.Lock()
-        # {object_id: (set of region_ids, last_seen_timestamp)}
-        self._region_presence: Dict[str, Set[str]] = {}
-        self._last_seen: Dict[str, float] = {}
-        self._last_eviction = 0.0
+        self._event_repo = event_repo
+        self._last_uuid_log = 0.0
+
+    # ── Regulated scene topic: camera_bounds only ────────────────────────────
 
     def handle_event(self, topic: str, payload: dict) -> None:
+        """Process scenescape/regulated/scene/{scene_id}.
+
+        Extracts UUID→camera_bounds for each camera and stores in Redis.
+        Region entry/exit is handled by handle_region_event() instead.
+        """
         m = REGION_TOPIC_RE.match(topic)
         if not m:
             log.debug("Topic %s does not match regulated scene pattern, ignoring", topic)
             return
 
-        with self._lock:
-            self._evict_stale_locked()
-            self._process_event(m, payload)
-
-    def _process_event(self, m, payload: dict) -> None:
-        """Process a regulated scene event. Caller MUST hold self._lock."""
-        scene_id = m.group("scene_id")
-        timestamp = payload.get("timestamp", "")
+        if not self._event_repo:
+            return
 
         objects = payload.get("objects", [])
-        # Regulated topic objects is a list; also accept dict for robustness
         if isinstance(objects, dict):
             persons = objects.get("person", [])
         elif isinstance(objects, list):
@@ -78,119 +71,108 @@ class ScenescapeRegionConsumer:
         else:
             return
 
-        current_ids: set = set()
-
-        # ── Build UUID → camera_bounds mapping for bbox-based track resolution ──
-        # The regulated scene provides camera_bounds for each UUID, enabling the
-        # camera topic handler to map camera-local integer IDs to global UUIDs.
-        if self._event_repo:
-            cam_uuid_bounds: dict[str, dict[str, dict]] = {}  # camera_id → {uuid → bbox}
-            for obj in persons:
-                uid = obj.get("id", "")
-                cam_bounds = obj.get("camera_bounds", {})
-                for cam_id, bbox in cam_bounds.items():
-                    if cam_id not in cam_uuid_bounds:
-                        cam_uuid_bounds[cam_id] = {}
-                    cam_uuid_bounds[cam_id][uid] = bbox
-            if cam_uuid_bounds:
-                for cam_id, uuid_bounds in cam_uuid_bounds.items():
-                    try:
-                        self._event_repo.store_uuid_camera_bounds(cam_id, uuid_bounds)
-                    except Exception:
-                        log.debug("Failed to store UUID camera bounds for %s", cam_id, exc_info=True)
-                # Log at most once per eviction interval to avoid flooding
-                now = time.monotonic()
-                if now - getattr(self, "_last_uuid_log", 0) > self._EVICTION_INTERVAL:
-                    self._last_uuid_log = now
-                    log.info(
-                        "UUID camera bounds updated: %s",
-                        {c: len(u) for c, u in cam_uuid_bounds.items()},
-                    )
-
+        cam_uuid_bounds: dict[str, dict[str, dict]] = {}
         for obj in persons:
-            object_id = obj.get("id", "")
+            uid = obj.get("id", "")
+            cam_bounds = obj.get("camera_bounds", {})
+            for cam_id, bbox in cam_bounds.items():
+                if cam_id not in cam_uuid_bounds:
+                    cam_uuid_bounds[cam_id] = {}
+                cam_uuid_bounds[cam_id][uid] = bbox
+
+        if cam_uuid_bounds:
+            for cam_id, uuid_bounds in cam_uuid_bounds.items():
+                try:
+                    self._event_repo.store_uuid_camera_bounds(cam_id, uuid_bounds)
+                except Exception:
+                    log.debug("Failed to store UUID camera bounds for %s", cam_id, exc_info=True)
+            now = time.monotonic()
+            if now - self._last_uuid_log > _UUID_LOG_INTERVAL:
+                self._last_uuid_log = now
+                log.info(
+                    "UUID camera bounds updated: %s",
+                    {c: len(u) for c, u in cam_uuid_bounds.items()},
+                )
+
+    # ── Native region event topic: explicit entry/exit ───────────────────────
+
+    def handle_region_event(self, scene_id: str, region_id: str, data: dict) -> None:
+        """Process scenescape/event/region/{scene_id}/{region_id}/{suffix}.
+
+        SceneScape sends explicit ``entered`` and ``exited`` lists with
+        server-computed dwell time — no stateful diffing required.
+
+        Payload format:
+          {
+            "entered": [{"id": "uuid", "visibility": [...], "regions": {...}}],
+            "exited":  [{"object": {"id": "uuid"}, "dwell": 5.2}],
+            "timestamp": "2026-06-01T17:23:01.104Z"
+          }
+        """
+        timestamp = data.get("timestamp", "")
+
+        # ── Process entries ──
+        for obj in data.get("entered", []):
+            object_id = str(obj.get("id", obj.get("object_id", "")))
             if not object_id:
                 continue
-            current_ids.add(object_id)
-
             cameras = obj.get("visibility", [])
             camera_id = cameras[0] if cameras else None
 
-            # Regions dict: {region_id: {"entered": timestamp, ...}}
-            regions_now: Set[str] = set(obj.get("regions", {}).keys())
-            regions_before: Set[str] = self._region_presence.get(object_id, set())
+            region_info = (obj.get("regions") or {}).get(region_id, {})
+            entry_ts = region_info.get("entered", timestamp)
+            region_name = region_info.get("name", region_id)
 
-            entered_regions = regions_now - regions_before
-            exited_regions = regions_before - regions_now
-
-            # Bounding box from payload (may not be present on regulated topic)
             bbox = obj.get("bounding_box_px") or obj.get("bounding_box")
-
-            for region_id in entered_regions:
-                region_info = obj.get("regions", {}).get(region_id, {})
-                entry_ts = region_info.get("entered", timestamp)
-                region_name = region_info.get("name", region_id)
-                entry_frame_key = self._capture_zone_frame(
-                    object_id, scene_id, region_id, "entry", camera_id, bbox
+            entry_frame_key = self._capture_zone_frame(
+                object_id, scene_id, region_id, "entry", camera_id, bbox,
+            )
+            try:
+                self._event_service.store_region_entry(
+                    object_id, entry_ts, scene_id, region_id, region_name, camera_id,
+                    entry_frame_key=entry_frame_key,
                 )
-                try:
-                    self._event_service.store_region_entry(
-                        object_id, entry_ts, scene_id, region_id, region_name, camera_id,
-                        entry_frame_key=entry_frame_key,
-                    )
-                    log.info(
-                        "Region ENTER: obj=%s scene=%s region=%s camera=%s frame=%s",
-                        object_id, scene_id, region_id, camera_id,
-                        "captured" if entry_frame_key else "none",
-                    )
-                except Exception:
-                    log.exception("Error storing region entry for obj %s region %s", object_id, region_id)
-
-            for region_id in exited_regions:
-                region_name = region_id  # name not available on exit; use id
-                exit_frame_key = self._capture_zone_frame(
-                    object_id, scene_id, region_id, "exit", camera_id, bbox
+                log.info(
+                    "Region ENTER (native): obj=%s scene=%s region=%s camera=%s",
+                    object_id, scene_id, region_id, camera_id,
                 )
-                try:
-                    self._event_service.store_region_exit(
-                        object_id, timestamp, scene_id, region_id, region_name,
-                        exit_frame_key=exit_frame_key,
-                    )
-                    log.info(
-                        "Region EXIT: obj=%s scene=%s region=%s frame=%s",
-                        object_id, scene_id, region_id,
-                        "captured" if exit_frame_key else "none",
-                    )
-                except Exception:
-                    log.exception("Error storing region exit for obj %s region %s", object_id, region_id)
+            except Exception:
+                log.exception("Error storing region entry for obj %s region %s", object_id, region_id)
 
-            self._region_presence[object_id] = regions_now
-            self._last_seen[object_id] = time.monotonic()
+        # ── Process exits ──
+        for exit_entry in data.get("exited", []):
+            obj = exit_entry.get("object", exit_entry)
+            object_id = str(obj.get("id", obj.get("object_id", "")))
+            if not object_id:
+                continue
+            dwell = exit_entry.get("dwell")
+            cameras = obj.get("visibility", [])
+            camera_id = cameras[0] if cameras else None
 
-        # Clean up presence tracking for objects no longer in scene
-        gone_ids = set(self._region_presence.keys()) - current_ids
-        for object_id in gone_ids:
-            old_regions = self._region_presence.pop(object_id, set())
-            self._last_seen.pop(object_id, None)
-            for region_id in old_regions:
-                try:
-                    self._event_service.store_region_exit(
-                        object_id, timestamp, scene_id, region_id, region_id,
-                        exit_frame_key=None,  # object already gone; no frame available
-                    )
-                    log.info(
-                        "Region EXIT (object left scene): obj=%s scene=%s region=%s",
-                        object_id, scene_id, region_id,
-                    )
-                except Exception:
-                    log.exception("Error storing implicit region exit for obj %s", object_id)
+            exit_frame_key = self._capture_zone_frame(
+                object_id, scene_id, region_id, "exit", camera_id, None,
+            )
+            try:
+                self._event_service.store_region_exit(
+                    object_id, timestamp, scene_id, region_id, region_id,
+                    exit_frame_key=exit_frame_key,
+                    dwell_override=dwell,
+                )
+                log.info(
+                    "Region EXIT (native): obj=%s scene=%s region=%s dwell=%.1fs",
+                    object_id, scene_id, region_id, dwell or 0.0,
+                )
+            except Exception:
+                log.exception("Error storing region exit for obj %s region %s", object_id, region_id)
+
+    # ── Shared helpers ───────────────────────────────────────────────────────
 
     def _capture_zone_frame(
         self,
         object_id: str,
         scene_id: str,
         region_id: str,
-        event_type: str,  # "entry" or "exit"
+        event_type: str,
         camera_id: Optional[str],
         bbox,
     ) -> Optional[str]:
@@ -211,17 +193,3 @@ class ScenescapeRegionConsumer:
                 object_id, region_id, event_type, exc_info=True,
             )
             return None
-
-    def _evict_stale_locked(self) -> None:
-        """Remove entries older than _PRESENCE_MAX_AGE. Caller MUST hold self._lock."""
-        now = time.monotonic()
-        if now - self._last_eviction < self._EVICTION_INTERVAL:
-            return
-        self._last_eviction = now
-        cutoff = now - self._PRESENCE_MAX_AGE
-        stale = [oid for oid, ts in self._last_seen.items() if ts < cutoff]
-        for oid in stale:
-            self._region_presence.pop(oid, None)
-            self._last_seen.pop(oid, None)
-        if stale:
-            log.info("Evicted %d stale entries from region presence tracker", len(stale))

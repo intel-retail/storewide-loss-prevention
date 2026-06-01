@@ -25,9 +25,16 @@ _CAMERA_TOPIC_RE = re.compile(r"scenescape/data/camera/[^/]+$")
 _EXTERNAL_TOPIC_RE = re.compile(r"scenescape/external/[^/]+/person$")
 _EXTERNAL_TOPIC = "scenescape/external/+/person"
 
-# Regulated scene topic: scenescape/regulated/scene/{scene_id}  — region entry/exit
+# Regulated scene topic: scenescape/regulated/scene/{scene_id}  — camera_bounds mapping
 _REGULATED_TOPIC_RE = re.compile(r"scenescape/regulated/scene/[^/]+$")
 _REGULATED_TOPIC = "scenescape/regulated/scene/+"
+
+# Native region event topic: scenescape/event/region/{scene_id}/{region_id}/{suffix}
+# SceneScape sends explicit entered/exited lists with server-computed dwell time.
+_REGION_EVENT_TOPIC = "scenescape/event/region/+/+/+"
+_REGION_EVENT_RE = re.compile(
+    r"scenescape/event/region/(?P<scene_id>[^/]+)/(?P<region_id>[^/]+)/(?P<suffix>[^/]+)$"
+)
 
 # Image topic: scenescape/image/camera/{camera_id}
 # Published by sscape_adapter on every getimage command — same processFrame() call as
@@ -39,10 +46,13 @@ _IMAGE_TOPIC = "scenescape/image/camera/+"
 class MQTTAdapter:
     """Adapter Pattern — wraps paho-mqtt to subscribe to SceneScape events."""
 
-    def __init__(self, on_event: Callable[[str, dict], None], on_region_event: Optional[Callable[[str, dict], None]] = None) -> None:
+    def __init__(self, on_event: Callable[[str, dict], None],
+                 on_region_event: Optional[Callable[[str, dict], None]] = None,
+                 on_native_region_event: Optional[Callable[[str, str, dict], None]] = None) -> None:
         self._cfg = get_config()
         self._on_event = on_event
         self._on_region_event = on_region_event
+        self._on_native_region_event = on_native_region_event
         self._client: Optional[mqtt.Client] = None
         self._running = False
 
@@ -88,10 +98,13 @@ class MQTTAdapter:
             client.subscribe(_EXTERNAL_TOPIC)
             log.info("MQTT subscribed to external topic (monitoring): %s", _EXTERNAL_TOPIC)
 
-            # Subscribe to regulated scene topic for region entry/exit tracking
+            # Subscribe to regulated scene topic for UUID→camera_bounds mapping
             if self._on_region_event is not None:
                 client.subscribe(_REGULATED_TOPIC)
-                log.info("MQTT subscribed to regulated scene topic: %s", _REGULATED_TOPIC)
+                log.info("MQTT subscribed to regulated scene topic (camera_bounds): %s", _REGULATED_TOPIC)
+                # Subscribe to native region event topic for entry/exit with dwell
+                client.subscribe(_REGION_EVENT_TOPIC)
+                log.info("MQTT subscribed to native region event topic: %s", _REGION_EVENT_TOPIC)
 
             # Subscribe to image topic — same connection as detections so images
             # arrive BEFORE the corresponding detection message (in-order delivery).
@@ -123,7 +136,12 @@ class MQTTAdapter:
 
             if self._on_region_event is not None and _REGULATED_TOPIC_RE.match(msg.topic):
                 self._on_region_event(msg.topic, payload)
-            elif _EXTERNAL_TOPIC_RE.match(msg.topic) or _CAMERA_TOPIC_RE.match(msg.topic):
+            elif self._on_native_region_event is not None:
+                rm = _REGION_EVENT_RE.match(msg.topic)
+                if rm:
+                    self._on_native_region_event(rm.group("scene_id"), rm.group("region_id"), payload)
+                    return
+            if _EXTERNAL_TOPIC_RE.match(msg.topic) or _CAMERA_TOPIC_RE.match(msg.topic):
                 self._on_event(msg.topic, payload)
         except json.JSONDecodeError:
             log.warning("Invalid JSON on %s", msg.topic)

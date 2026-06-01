@@ -309,13 +309,46 @@ def _get_grabber(camera_id: str) -> _FrameGrabber:
 # Public helpers
 # ---------------------------------------------------------------------------
 
-def crop_bbox(frame: np.ndarray, bbox: dict, padding: int = 10) -> Optional[np.ndarray]:
-    """Crop a region from frame using {x, y, width, height} top-left bbox dict."""
+def normalize_bbox_px(bbox) -> Optional[tuple[int, int, int, int]]:
+    """Normalize any bbox format to (x1, y1, x2, y2) pixel coordinates.
+
+    Accepts:
+      - list/tuple [x1, y1, x2, y2]  (DLStreamer bounding_box_px)
+      - dict {x, y, width, height}   (SceneScape center_of_mass / legacy)
+    Returns (x1, y1, x2, y2) or None if bbox is invalid/empty.
+    """
+    if bbox is None:
+        return None
+    try:
+        if isinstance(bbox, (list, tuple)) and len(bbox) == 4:
+            x1, y1, x2, y2 = int(bbox[0]), int(bbox[1]), int(bbox[2]), int(bbox[3])
+        elif isinstance(bbox, dict):
+            if "x" in bbox and "width" in bbox:
+                x1 = int(bbox["x"])
+                y1 = int(bbox["y"])
+                x2 = x1 + int(bbox["width"])
+                y2 = y1 + int(bbox["height"])
+            else:
+                return None
+        else:
+            return None
+        if x2 > x1 and y2 > y1:
+            return (x1, y1, x2, y2)
+    except (TypeError, ValueError, KeyError):
+        pass
+    return None
+
+
+def crop_bbox(frame: np.ndarray, bbox, padding: int = 20) -> Optional[np.ndarray]:
+    """Crop a region from frame. Accepts any bbox format (list or dict)."""
+    coords = normalize_bbox_px(bbox)
+    if coords is None:
+        return None
     h, w = frame.shape[:2]
-    x1 = max(0, int(bbox.get("x", 0)) - padding)
-    y1 = max(0, int(bbox.get("y", 0)) - padding)
-    x2 = min(w, int(bbox.get("x", 0)) + int(bbox.get("width", 0)) + padding)
-    y2 = min(h, int(bbox.get("y", 0)) + int(bbox.get("height", 0)) + padding)
+    x1 = max(0, coords[0] - padding)
+    y1 = max(0, coords[1] - padding)
+    x2 = min(w, coords[2] + padding)
+    y2 = min(h, coords[3] + padding)
     if x2 <= x1 or y2 <= y1:
         return None
     return frame[y1:y2, x1:x2]

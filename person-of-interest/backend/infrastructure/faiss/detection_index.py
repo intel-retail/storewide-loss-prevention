@@ -105,6 +105,11 @@ class DetectionIndexRepository(IDetectionIndexRepository):
                    json.dumps(meta).encode())
         pipe.setex(f"{_REDIS_VEC_PREFIX}{faiss_id}".encode(),  self._ttl,
                    vec.flatten().astype(np.float32).tobytes())
+        # Store entry vector indexed by track_id for embedding continuity checks.
+        # When the tracker recycles an integer ID, the consumer compares the new
+        # embedding against this entry vector to detect identity changes.
+        pipe.setex(f"detection:entry_vec:{track_id}".encode(), self._ttl,
+                   vec.flatten().astype(np.float32).tobytes())
         pipe.execute()
 
         log.debug(
@@ -162,6 +167,13 @@ class DetectionIndexRepository(IDetectionIndexRepository):
         if raw is None:
             return None
         return raw.decode() if isinstance(raw, bytes) else raw
+
+    def get_entry_vector(self, track_id: str) -> Optional[np.ndarray]:
+        """Return the normalised entry embedding for a track, or None if expired."""
+        raw = self._r.get(f"detection:entry_vec:{track_id}".encode())
+        if raw is None:
+            return None
+        return np.frombuffer(raw, dtype=np.float32).copy()
 
     # ── Rolling exit vector (overwritten every detection) ───────────────────
 
@@ -328,10 +340,48 @@ class DetectionIndexRepository(IDetectionIndexRepository):
         Uses track_seen_ttl (default 600s), NOT the 7-day data TTL — so that when
         the SceneScape tracker recycles an integer ID for a new person, the gate
         expires in time and the new person is stored as a distinct detection.
+
+        The gate is refreshed on every call (even when not claimed) so it only
+        expires when the person truly leaves the scene.
         """
         effective_ttl = ttl if ttl is not None else self._track_seen_ttl
         key = f"detection:track:seen:{track_id}".encode()
-        return bool(self._r.set(key, b"1", ex=effective_ttl, nx=True))
+        claimed = bool(self._r.set(key, b"1", ex=effective_ttl, nx=True))
+        if not claimed:
+            # Refresh TTL so the gate stays alive while person is still in view
+            self._r.expire(key, effective_ttl)
+        return claimed
+
+    def should_sample(self, appearance_id: str) -> bool:
+        """Rate-limit additional embedding samples for an existing appearance.
+
+        Returns True at most once per ``detection_embedding_interval`` seconds
+        (default 10s), and up to ``detection_embeddings_per_track`` total samples
+        per appearance (default 5).  This ensures the detection index has
+        multiple embeddings per person visit — improving offline search recall
+        when the first-frame embedding is low quality.
+        """
+        cfg = get_config()
+        interval = cfg.detection_embedding_interval
+        max_samples = cfg.detection_embeddings_per_track
+
+        # Count existing samples for this track
+        count_key = f"detection:sample_count:{appearance_id}".encode()
+        current = self._r.get(count_key)
+        if current is not None and int(current) >= max_samples:
+            return False
+
+        # Rate-limit key — NX with interval TTL
+        gate_key = f"detection:sample_gate:{appearance_id}".encode()
+        if not self._r.set(gate_key, b"1", ex=interval, nx=True):
+            return False
+
+        # Increment counter (with same TTL as the appearance data)
+        pipe = self._r.pipeline()
+        pipe.incr(count_key)
+        pipe.expire(count_key, self._track_seen_ttl + 60)
+        pipe.execute()
+        return True
 
     def set_active_appearance(self, object_id: str, appearance_id: str) -> None:
         """Store the current appearance ID for a camera-local object_id.
