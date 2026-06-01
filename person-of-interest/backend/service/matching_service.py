@@ -11,7 +11,7 @@ import numpy as np
 from backend.core.config import get_config
 from backend.domain.entities.match_result import MatchResult
 from backend.domain.interfaces.matcher import MatchingStrategy
-from backend.domain.interfaces.repository import CacheRepository
+from backend.domain.interfaces.repository import CacheRepository, POIRepository
 
 log = logging.getLogger("poi.service.matching")
 
@@ -41,9 +41,11 @@ class MatchingService:
         self,
         strategy: MatchingStrategy,
         cache_repo: CacheRepository,
+        poi_repo: Optional[POIRepository] = None,
     ) -> None:
         self._strategy = strategy
         self._cache = cache_repo
+        self._poi_repo = poi_repo
         self._cfg = get_config()
 
     # ── Sticky-POI helpers ────────────────────────────────────────────────
@@ -72,6 +74,13 @@ class MatchingService:
             )
         except Exception:
             pass  # Non-fatal: fall back to regular cache behaviour
+
+    def _delete_sticky_poi(self, object_id: str) -> None:
+        """Remove sticky-POI key for the given object."""
+        try:
+            self._cache._r.delete(f"{_STICKY_PREFIX}{object_id}")  # type: ignore[attr-defined]
+        except Exception:
+            pass
 
     # ── Main matching entry point ─────────────────────────────────────────
 
@@ -117,7 +126,14 @@ class MatchingService:
         sticky = self._get_sticky_poi(object_id)
         if sticky is not None:
             sticky_poi_id, sticky_sim = sticky
-            if sticky_sim >= self._cfg.similarity_threshold:
+            # Validate the POI still exists — it may have been deleted
+            if self._poi_repo and not self._poi_repo.get(sticky_poi_id):
+                log.info(
+                    "Sticky-POI stale: object=%s → poi=%s was deleted — evicting",
+                    object_id, sticky_poi_id,
+                )
+                self._delete_sticky_poi(object_id)
+            elif sticky_sim >= self._cfg.similarity_threshold:
                 log.info(
                     "Sticky-POI hit: object=%s → poi=%s (sim=%.3f) — re-using first match, skipping FAISS",
                     object_id, sticky_poi_id, sticky_sim,

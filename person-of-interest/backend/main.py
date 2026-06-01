@@ -125,8 +125,8 @@ async def lifespan(app: FastAPI):
     event_bus = EventBus()
 
     # ── Service ──
-    poi_service = POIService(poi_repo, faiss_repo, mapping_repo)
-    matching_service = MatchingService(matching_strategy, cache_repo)
+    poi_service = POIService(poi_repo, faiss_repo, mapping_repo, cache_repo)
+    matching_service = MatchingService(matching_strategy, cache_repo, poi_repo)
     event_service = EventService(event_repo)
     alert_service = AlertService(alert_strategies, event_repo, poi_repo, event_bus)
 
