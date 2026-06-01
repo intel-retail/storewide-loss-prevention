@@ -41,6 +41,10 @@ class ScenescapeAPIAdapter:
         if not self._base_url:
             return ""
         try:
+            # Remove any existing Authorization header before authenticating —
+            # SceneScape validates the header first and returns 401 "Invalid token"
+            # if a stale token is present, even on the auth endpoint itself.
+            self._session.headers.pop("Authorization", None)
             resp = self._session.post(
                 f"{self._base_url}/api/v1/auth",
                 json={"username": username, "password": password},
