@@ -16,9 +16,6 @@ services:
       - "/dev/dri:/dev/dri"
       - "/dev/accel:/dev/accel"
     device_cgroup_rules:
-      - "c 189:* rmw"
-      - "c 209:* rmw"
-      - "a 189:* rwm"
       - "c 261:* rmw"  # Intel NPU accel devices (accel subsystem, major 261)
 
   lp-video-2:
@@ -26,7 +23,4 @@ services:
       - "/dev/dri:/dev/dri"
       - "/dev/accel:/dev/accel"
     device_cgroup_rules:
-      - "c 189:* rmw"
-      - "c 209:* rmw"
-      - "a 189:* rwm"
       - "c 261:* rmw"  # Intel NPU accel devices (accel subsystem, major 261)
