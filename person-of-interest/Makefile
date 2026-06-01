@@ -507,7 +507,7 @@ help:
 	@echo "    - Internet access (to download sample videos)"
 	@echo ""
 	@echo "  POI System:"
-	@echo "    make build           - Build POI backend + UI images (REGISTRY=false for local)"
+	@echo "    make build           - Build POI backend + UI images"
 	@echo "    make up              - Start POI stack (backend, UI, Redis, alert-service)"
 	@echo "    make down            - Stop POI stack"
 	@echo "    make logs            - Follow POI logs"
@@ -541,18 +541,7 @@ build:
 	-$(COMPOSE_SCENESCAPE) pull 2>/dev/null || echo "SceneScape images already available locally"
 	@echo ""
 	@echo "$(BLUE)=== Building POI images ===$(NC)"
-ifeq ($(REGISTRY),false)
-	POI_BACKEND_IMAGE=poi-backend POI_UI_IMAGE=poi-ui $(COMPOSE_POI) build poi-backend ui
-	@# Persist image overrides so make up uses locally-built images
-	@grep -q '^POI_BACKEND_IMAGE=' docker/.env 2>/dev/null && \
-		sed -i 's|^POI_BACKEND_IMAGE=.*|POI_BACKEND_IMAGE=poi-backend|' docker/.env || \
-		echo 'POI_BACKEND_IMAGE=poi-backend' >> docker/.env
-	@grep -q '^POI_UI_IMAGE=' docker/.env 2>/dev/null && \
-		sed -i 's|^POI_UI_IMAGE=.*|POI_UI_IMAGE=poi-ui|' docker/.env || \
-		echo 'POI_UI_IMAGE=poi-ui' >> docker/.env
-else
 	$(COMPOSE_POI) build poi-backend ui
-endif
 	@echo ""
 	@echo "$(BLUE)=== Pulling benchmark metrics-collector image ===$(NC)"
 	@docker pull $(REGISTRY_BENCHMARK) 2>/dev/null && \
