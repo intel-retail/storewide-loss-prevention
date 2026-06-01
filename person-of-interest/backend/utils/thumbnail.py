@@ -363,6 +363,15 @@ def capture_thumbnail(camera_id: str, bbox: Optional[dict], timestamp: str = "")
             log.info("Ring buffer empty for camera=%s, waiting for frame", camera_id)
             b64 = sub.request_frame_and_wait(timeout=3.0)
         if b64:
+            # The MQTT frame has all persons' bounding boxes burned in by
+            # sscape_adapter.annotateObjects().  Crop to just the matched
+            # person's region so the thumbnail shows only the relevant detection.
+            if bbox:
+                frame = base64_to_frame(b64)
+                if frame is not None:
+                    cropped = crop_bbox(frame, bbox)
+                    if cropped is not None and cropped.size > 0:
+                        b64 = frame_to_base64_jpeg(cropped) or b64
             return b64
         log.warning("No MQTT image for camera=%s — falling back to RTSP", camera_id)
 
