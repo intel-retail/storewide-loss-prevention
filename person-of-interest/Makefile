@@ -14,6 +14,10 @@ COMPOSE_ALL := docker compose --project-directory . --env-file docker/.env -f $(
 # When stream-density override exists, layer it in
 CAMERAS_OVERRIDE := docker/docker-compose.cameras.yaml
 COMPOSE_ALL := $(if $(wildcard $(CAMERAS_OVERRIDE)),$(COMPOSE_ALL) -f $(CAMERAS_OVERRIDE),$(COMPOSE_ALL))
+# When an NPU device config is selected, layer in the NPU device override (ITEP-92805)
+NPU_OVERLAY := docker-compose.npu-overrides.yml
+COMPOSE_SCENESCAPE := $(COMPOSE_SCENESCAPE) $(if $(findstring npu,$(DEVICE)),-f $(NPU_OVERLAY),)
+COMPOSE_ALL := $(COMPOSE_ALL) $(if $(findstring npu,$(DEVICE)),-f $(NPU_OVERLAY),)
 
 RESULTS_PATH ?= ./results
 
@@ -37,7 +41,7 @@ init:
 		echo "  HOST_IP is required for WebRTC camera streams to work in the Live Alerts UI."; \
 		echo "  Set it to the network-reachable IP of this machine before running make init:"; \
 		echo ""; \
-		echo "    export HOST_IP=\$$(hostname -I | awk '{print \$$1}') && make init"; \
+		echo "    export HOST_IP=\$$(ip route get 1 | awk '{print \$$7; exit}') && make init"; \
 		echo ""; \
 		exit 1; \
 	fi
@@ -580,7 +584,7 @@ up:
 		echo "  HOST_IP is required for WebRTC camera streams to work in the UI."; \
 		echo "  Set it before running make init:"; \
 		echo ""; \
-		echo "    export HOST_IP=\$$(hostname -I | awk '{print \$$1}') && make init"; \
+		echo "    export HOST_IP=\$$(ip route get 1 | awk '{print \$$7; exit}') && make init"; \
 		echo ""; \
 		echo "  Or for a specific IP:"; \
 		echo ""; \
@@ -590,6 +594,9 @@ up:
 	fi
 	@# Ensure sample videos are copied into the Docker volume before starting cameras
 	@$(MAKE) -C $(SCENESCAPE_DIR) APP_DIR=$(CURDIR) init-sample-data
+	@# Ensure required Docker volumes exist (ITEP-92808: missing init-volumes causes
+	@# SceneScape containers to fail on fresh deployments via make init + make up)
+	@$(MAKE) -C $(SCENESCAPE_DIR) APP_DIR=$(CURDIR) init-volumes
 	@# Ensure TLS key files are readable inside Docker containers (fixes SSL
 	@# Permission denied when container UID differs from host UID)
 	@chmod 644 $(SCENESCAPE_DIR)/secrets/certs/*.key $(SCENESCAPE_DIR)/secrets/ca/*.key 2>/dev/null || true
