@@ -23,8 +23,9 @@ COPY --from=builder /app/dist /usr/share/nginx/html
 RUN echo 'server { \
     listen 80; \
     root /usr/share/nginx/html; \
+    client_max_body_size 10m; \
     location / { try_files $uri $uri/ /index.html; } \
-    location /api/ { proxy_pass http://poi-backend:8000; } \
+    location /api/ { proxy_pass http://poi-backend:8000; proxy_read_timeout 300s; proxy_connect_timeout 60s; proxy_send_timeout 120s; } \
     location /uploads/ { proxy_pass http://poi-backend:8000/uploads/; proxy_set_header Host $host; } \
     location /ws/ { proxy_pass http://poi-backend:8000; proxy_http_version 1.1; proxy_set_header Upgrade $http_upgrade; proxy_set_header Connection "upgrade"; } \
     location /alerts/ws { proxy_pass http://poi-alert-service:8000/api/v1/ws; proxy_http_version 1.1; proxy_set_header Upgrade $http_upgrade; proxy_set_header Connection "upgrade"; proxy_read_timeout 3600s; } \

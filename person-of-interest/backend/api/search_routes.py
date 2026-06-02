@@ -179,6 +179,7 @@ def _build_grouped_appearance(
 
     # ── Exit frame and timestamp ──
     # Priority: rolling Redis exit (fresh, within 15min) → promoted FAISS exit (permanent)
+    #         → durable final_exit record (from promotion or SceneScape exit)
     exit_frame_url = None
     exit_timestamp = None
     exit_bbox = None
@@ -199,6 +200,28 @@ def _build_grouped_appearance(
             exit_faiss_id = promoted_exit["faiss_id"]
             if _detection_index.get_frame(exit_faiss_id):
                 exit_frame_url = f"/api/v1/frames/{_encode_key(f'detection:frame:{exit_faiss_id}')}"
+
+    # Final fallback: durable final_exit record — always available after
+    # promotion or SceneScape region exit, regardless of FAISS top-k.
+    # Fill any missing exit fields independently.
+    if _detection_index is not None and (
+        not exit_timestamp or not exit_frame_url or not exit_bbox
+    ):
+        final_exit = _detection_index.get_final_exit(track_id)
+        if final_exit:
+            if not exit_timestamp:
+                exit_timestamp = final_exit.get("timestamp")
+            if not exit_bbox:
+                exit_bbox = final_exit.get("bbox")
+            if not exit_frame_url:
+                fe_faiss_id = final_exit.get("faiss_id")
+                fe_frame_key = final_exit.get("frame_key")
+                if fe_faiss_id and _detection_index.get_frame(fe_faiss_id):
+                    exit_frame_url = f"/api/v1/frames/{_encode_key(f'detection:frame:{fe_faiss_id}')}"
+                elif fe_frame_key and _event_repo and _event_repo.get_zone_frame(fe_frame_key):
+                    exit_frame_url = f"/api/v1/frames/{_encode_key(fe_frame_key)}"
+            if exit_sim is None:
+                exit_sim = final_exit.get("similarity")
 
     # ── Zone dwells ──
     # Region dwells are keyed by the SceneScape UUID (object_id used by

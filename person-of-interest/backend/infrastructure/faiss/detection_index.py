@@ -38,6 +38,7 @@ _REDIS_NEXT_ID_KEY = "detection:next_id"
 _REDIS_EXIT_VEC_PREFIX  = "detection:exit_vec:"
 _REDIS_EXIT_META_PREFIX = "detection:exit_meta:"
 _REDIS_EXIT_FRAME_PREFIX = "detection:exit_frame:"
+_REDIS_FINAL_EXIT_PREFIX = "detection:final_exit:"
 
 
 class DetectionIndexRepository(IDetectionIndexRepository):
@@ -258,6 +259,41 @@ class DetectionIndexRepository(IDetectionIndexRepository):
             return key
         return None
 
+    # ── Durable final exit record (survives rolling exit expiry) ────────────
+
+    def store_final_exit(self, track_id: str, data: dict) -> None:
+        """Store or merge a durable final exit record for a track.
+
+        Merges with any existing record so that both the ExitPromoterThread
+        and SceneScape exit events can contribute fields without overwriting
+        each other.  Uses the 7-day data TTL.
+        """
+        key = f"{_REDIS_FINAL_EXIT_PREFIX}{track_id}".encode()
+        existing_raw = self._r.get(key)
+        if existing_raw:
+            try:
+                existing = json.loads(existing_raw.decode() if isinstance(existing_raw, bytes) else existing_raw)
+            except (json.JSONDecodeError, ValueError):
+                existing = {}
+        else:
+            existing = {}
+        # Merge: new data wins for non-empty values; preserve existing for missing fields
+        for k, v in data.items():
+            if v is not None and v != "":
+                existing[k] = v
+        self._r.setex(key, self._ttl, json.dumps(existing).encode())
+
+    def get_final_exit(self, track_id: str) -> Optional[dict]:
+        """Return the durable final exit record for a track, or None."""
+        raw = self._r.get(f"{_REDIS_FINAL_EXIT_PREFIX}{track_id}".encode())
+        if raw is None:
+            return None
+        try:
+            text = raw.decode() if isinstance(raw, bytes) else raw
+            return json.loads(text)
+        except (json.JSONDecodeError, ValueError):
+            return None
+
     def promote_exits(self) -> int:
         """Scan all pending exit vectors and promote those whose gate has expired.
 
@@ -328,6 +364,16 @@ class DetectionIndexRepository(IDetectionIndexRepository):
                 pipe.setex(f"detection:frame:{faiss_id}".encode(), self._ttl, frame_raw)
             pipe.execute()
 
+            # Store durable final exit record so search can find exit data
+            # by track_id without relying on FAISS top-k.
+            self.store_final_exit(track_id, {
+                "faiss_id": faiss_id,
+                "timestamp": meta.get("timestamp"),
+                "bbox": meta.get("bbox"),
+                "camera_id": meta.get("camera_id"),
+                "source": "promotion",
+            })
+
             promoted += 1
             log.info("Promoted exit embedding: track=%s faiss_id=%d", track_id, faiss_id)
 
@@ -341,16 +387,26 @@ class DetectionIndexRepository(IDetectionIndexRepository):
         the SceneScape tracker recycles an integer ID for a new person, the gate
         expires in time and the new person is stored as a distinct detection.
 
-        The gate is refreshed on every call (even when not claimed) so it only
-        expires when the person truly leaves the scene.
+        NOTE: gate is NOT refreshed here — call refresh_track_gate() separately
+        after the continuity check passes, so that recycled-ID detections from a
+        different person do not keep a stale gate alive.
         """
         effective_ttl = ttl if ttl is not None else self._track_seen_ttl
         key = f"detection:track:seen:{track_id}".encode()
-        claimed = bool(self._r.set(key, b"1", ex=effective_ttl, nx=True))
-        if not claimed:
-            # Refresh TTL so the gate stays alive while person is still in view
-            self._r.expire(key, effective_ttl)
-        return claimed
+        return bool(self._r.set(key, b"1", ex=effective_ttl, nx=True))
+
+    def refresh_track_gate(self, track_id: str, ttl: Optional[int] = None) -> None:
+        """Refresh the track gate TTL. Call ONLY after continuity check passes."""
+        effective_ttl = ttl if ttl is not None else self._track_seen_ttl
+        self._r.expire(f"detection:track:seen:{track_id}".encode(), effective_ttl)
+
+    def shorten_track_gate(self, track_id: str, ttl: int = 5) -> None:
+        """Shorten gate TTL so it expires soon (e.g. after continuity failure).
+
+        This lets the ExitPromoterThread promote the old exit quickly and
+        frees the gate for a new appearance from the recycled ID.
+        """
+        self._r.expire(f"detection:track:seen:{track_id}".encode(), ttl)
 
     def should_sample(self, appearance_id: str) -> bool:
         """Rate-limit additional embedding samples for an existing appearance.
@@ -401,6 +457,15 @@ class DetectionIndexRepository(IDetectionIndexRepository):
         if raw is None:
             return None
         return raw.decode() if isinstance(raw, bytes) else raw
+
+    def refresh_active_appearance(self, object_id: str) -> None:
+        """Refresh the active appearance TTL so it stays alive as long as the gate.
+
+        Called after continuity check passes to prevent the active_appearance
+        mapping from expiring before the gate on long-lived tracks.
+        """
+        key = f"detection:active_appearance:{object_id}".encode()
+        self._r.expire(key, self._track_seen_ttl + 60)
 
     # ── Private ─────────────────────────────────────────────────────────────
 

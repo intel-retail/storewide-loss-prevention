@@ -136,7 +136,8 @@ async def lifespan(app: FastAPI):
         event_repo=event_repo,
         detection_index=detection_index,
     )
-    region_consumer = ScenescapeRegionConsumer(event_service, event_repo=event_repo)
+    region_consumer = ScenescapeRegionConsumer(event_service, event_repo=event_repo,
+                                               detection_index=detection_index)
 
     # ── MQTT ──
     if cfg.mqtt_host:
