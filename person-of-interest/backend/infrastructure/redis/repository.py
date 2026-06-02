@@ -189,13 +189,22 @@ class RedisEventRepository(EventRepository):
         return [json.loads(r) for r in raw_list]
 
     def clear_alerts(self) -> int:
-        """Delete all alert records and the recent-alerts list. Returns count deleted."""
+        """Delete all alert records, the recent-alerts list, and per-POI counters. Returns count deleted."""
         deleted = 0
         self._r.delete("alerts:recent")
         deleted += 1
         cursor = 0
         while True:
             cursor, keys = self._r.scan(cursor, match="alert:*", count=200)
+            if keys:
+                self._r.delete(*keys)
+                deleted += len(keys)
+            if cursor == 0:
+                break
+        # Also clear per-POI alert counters
+        cursor = 0
+        while True:
+            cursor, keys = self._r.scan(cursor, match="alerts:count:*", count=200)
             if keys:
                 self._r.delete(*keys)
                 deleted += len(keys)

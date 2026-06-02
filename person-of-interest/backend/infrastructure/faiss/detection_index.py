@@ -261,27 +261,35 @@ class DetectionIndexRepository(IDetectionIndexRepository):
 
     # ── Durable final exit record (survives rolling exit expiry) ────────────
 
+    # Lua script for atomic merge of final_exit records (avoids GET/SETEX race)
+    _LUA_MERGE_FINAL_EXIT = """
+    local key = KEYS[1]
+    local new_data = cjson.decode(ARGV[1])
+    local ttl = tonumber(ARGV[2])
+    local existing = {}
+    local raw = redis.call('GET', key)
+    if raw then
+        local ok, val = pcall(cjson.decode, raw)
+        if ok then existing = val end
+    end
+    for k, v in pairs(new_data) do
+        if v ~= cjson.null and v ~= '' then
+            existing[k] = v
+        end
+    end
+    redis.call('SETEX', key, ttl, cjson.encode(existing))
+    return 1
+    """
+
     def store_final_exit(self, track_id: str, data: dict) -> None:
         """Store or merge a durable final exit record for a track.
 
         Merges with any existing record so that both the ExitPromoterThread
         and SceneScape exit events can contribute fields without overwriting
-        each other.  Uses the 7-day data TTL.
+        each other.  Uses a Lua script for atomic read-modify-write.
         """
-        key = f"{_REDIS_FINAL_EXIT_PREFIX}{track_id}".encode()
-        existing_raw = self._r.get(key)
-        if existing_raw:
-            try:
-                existing = json.loads(existing_raw.decode() if isinstance(existing_raw, bytes) else existing_raw)
-            except (json.JSONDecodeError, ValueError):
-                existing = {}
-        else:
-            existing = {}
-        # Merge: new data wins for non-empty values; preserve existing for missing fields
-        for k, v in data.items():
-            if v is not None and v != "":
-                existing[k] = v
-        self._r.setex(key, self._ttl, json.dumps(existing).encode())
+        key = f"{_REDIS_FINAL_EXIT_PREFIX}{track_id}"
+        self._r.eval(self._LUA_MERGE_FINAL_EXIT, 1, key, json.dumps(data), self._ttl)
 
     def get_final_exit(self, track_id: str) -> Optional[dict]:
         """Return the durable final exit record for a track, or None."""
