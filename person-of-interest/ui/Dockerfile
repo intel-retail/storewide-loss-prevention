@@ -1,5 +1,5 @@
 # ── Stage 1: Build ────────────────────────────────────────
-FROM node:20-alpine AS builder
+FROM node:20-slim AS builder
 
 WORKDIR /app
 
@@ -10,12 +10,12 @@ COPY ui/ ./
 RUN npm run build
 
 # ── Stage 2: Serve ───────────────────────────────────────
-FROM nginx:1.27-alpine
+FROM nginx:1.27
 
-# Upgrade specific Alpine packages for CVE remediation:
-#   libcrypto3/libssl3 3.3.7-r0 (CVE-2026-31789, CVE-2025-15467)
-#   libxml2 2.13.9-r0 (CVE-2025-49794, CVE-2025-49796)
-RUN apk add --no-cache libcrypto3=3.3.7-r0 libssl3=3.3.7-r0 libxml2=2.13.9-r0
+# Apply latest security patches
+RUN apt-get update && \
+    apt-get upgrade -y --no-install-recommends && \
+    rm -rf /var/lib/apt/lists/*
 
 COPY --from=builder /app/dist /usr/share/nginx/html
 
