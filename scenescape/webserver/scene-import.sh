@@ -146,7 +146,7 @@ for SCENE_ZIP in "${ZIP_FILES[@]}"; do
 
     echo "  Uploading ${ZIP_BASENAME}..."
     IMPORT_RESPONSE=$(python3 -c "
-import urllib.request, ssl, os, uuid
+import urllib.request, urllib.error, ssl, os, uuid
 ctx = ssl.create_default_context()
 ca = os.environ.get('CA_CERT', '')
 if ca and os.path.isfile(ca):
