@@ -5,6 +5,34 @@ detection-to-alert latency. Both targets accept the same `DEVICE` parameter as
 `make init` so the benchmark always runs with the correct model precision and
 hardware profile.
 
+## Prerequisites
+
+Before running any benchmark, ensure the following setup steps have been
+completed:
+
+```bash
+# 1. Initialize Git submodules (performance-tools, SceneScape, etc.)
+make update-submodules
+
+# 2. Download required AI models (face detection, re-identification)
+make download-models
+
+# 3. Generate configs and build images for your target device
+make init                         # CPU (default)
+make init DEVICE=all-gpu.env      # or GPU / NPU variant
+```
+
+**Sample data requirements:**
+
+- **SceneScape video files** — sample video files must be present in the
+  SceneScape sample data directory (e.g., `scenescape/sample_data/`). These
+  provide the camera feed for the benchmark pipeline.
+- **POI sample images** — at least `sample_data/poi_1.png` must exist in the
+  POI directory. The benchmark enrolls this image as the target POI.
+
+> **Note:** If models are missing or sample data is absent, the benchmark will
+> fail during service startup or POI enrollment.
+
 ## `make benchmark` — Single-Scene Latency
 
 Measures how quickly a matched POI triggers an alert with **one camera scene**.
