@@ -192,6 +192,7 @@ User uploads image → OpenVINO → Detection FAISS Search → Group by track �
 - [How to Use the Application](./how-to-use-application.md): Explore the application's features and verify its functionality.
 - [MQTT Pipeline Design](./mqtt-pipeline-design.md): Deep dive into the MQTT data flow and Redis data model.
 - [API Reference](./api-reference.md): Comprehensive reference for the REST API endpoints.
+- [Benchmarking](./benchmarking.md): Performance benchmarking and stream density testing.
 - [Support and Troubleshooting](./troubleshooting.md): Find solutions to common issues.
 
 <!--hide_directive
@@ -200,6 +201,7 @@ User uploads image → OpenVINO → Detection FAISS Search → Group by track �
 
 get-started
 how-to-use-application
+benchmarking
 mqtt-pipeline-design
 api-reference
 troubleshooting

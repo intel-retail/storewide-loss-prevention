@@ -128,9 +128,8 @@ class AlertService:
         poi_name = poi.notes if poi else ""
         enrollment_date = poi.created_at if poi else ""
 
-        # Count previous matches
-        prev_alerts = self._event_repo.get_events_for_poi(match.poi_id)
-        total_previous = len(prev_alerts)
+        # Count previous alerts (not movement events) for accuracy
+        total_previous = self._event_repo.get_alert_count_for_poi(match.poi_id)
 
         bbox = [0, 0, 0, 0]
         if center_of_mass:

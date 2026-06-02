@@ -55,11 +55,17 @@ async def search_history(
     query_vector = np.array(result["embedding"], dtype=np.float32)
 
     # ── Search detection index ──
-    # Search with a wider net (3x top_k) to ensure enough candidates survive
-    # time-range and similarity filtering.  Detection FAISS stores first-frame
-    # embeddings which may score lower than the query's ideal match.
+    # Search with a wide net to ensure enough candidates from all cameras
+    # survive time-range and similarity filtering.  With multiple cameras at
+    # different angles, the same person may score very differently — a narrow
+    # top-k can miss an entire camera's detections.
     t0 = time.perf_counter()
-    search_k = max(top_k * 3, 50)
+    top_k = max(1, min(top_k, 200))
+    total_vecs = _detection_index.total_vectors()
+    # Search wide enough to capture cross-camera results where the same person
+    # may score very differently due to viewing angle.  With 15k+ vectors and
+    # two cameras, a minimum of 2000 ensures both cameras' vectors are reached.
+    search_k = min(max(top_k * 50, 2000), total_vecs) if total_vecs > 0 else 2000
     hits = _detection_index.search(query_vector, top_k=search_k)
     query_latency_ms = (time.perf_counter() - t0) * 1000
 
@@ -84,10 +90,13 @@ async def search_history(
     threshold = cfg.search_similarity_threshold
     best_entry: dict[str, dict] = {}  # track_id → {faiss_id, similarity, meta}
     best_exit: dict[str, dict] = {}   # track_id → {faiss_id, similarity, meta}
-    for faiss_id, similarity in hits:
-        if similarity < threshold:
-            continue
-        meta = _detection_index.get_metadata(faiss_id)
+
+    # Filter by threshold first, then batch-fetch metadata in one pipeline call
+    above_threshold = [(fid, sim) for fid, sim in hits if sim >= threshold]
+    all_meta = _detection_index.batch_get_metadata([fid for fid, _ in above_threshold])
+
+    for faiss_id, similarity in above_threshold:
+        meta = all_meta.get(faiss_id)
         if meta is None:
             continue
         ts = meta.get("timestamp", "")
@@ -123,6 +132,17 @@ async def search_history(
         if track_id not in exit_sims and track_id in best_exit:
             exit_sims[track_id] = best_exit[track_id]["similarity"]
 
+    # ── Pre-fetch all zone dwells in batch ──
+    # Collect unique base object IDs (UUIDs without @timestamp) — dwells are
+    # keyed by raw UUID only.  Appearance IDs (uuid@ts) never have dwell data.
+    dwell_cache: dict[str, list[dict]] = {}
+    if _event_repo is not None:
+        lookup_ids_set: set[str] = set()
+        for track_id in best_entry:
+            base_id = track_id.rsplit("@", 1)[0] if "@" in track_id else track_id
+            lookup_ids_set.add(base_id)
+        dwell_cache = _event_repo.batch_get_region_dwells(lookup_ids_set)
+
     # ── Build one grouped appearance per track (entry + exit on same card) ──
     appearances = []
     for track_id, entry in best_entry.items():
@@ -132,6 +152,7 @@ async def search_history(
             entry["faiss_id"], entry["similarity"], entry["meta"],
             exit_sim=exit_sim, track_id=track_id,
             promoted_exit=promoted_exit,
+            dwell_cache=dwell_cache,
         )
         appearances.append(appearance)
 
@@ -162,13 +183,14 @@ def _build_grouped_appearance(
     exit_sim: Optional[float],
     track_id: str,
     promoted_exit: Optional[dict] = None,
+    dwell_cache: Optional[dict[str, list[dict]]] = None,
 ) -> dict:
     """Build one appearance card grouping entry and exit for the same track."""
     camera_id = meta.get("camera_id", "")
 
     # ── Entry frame ──
     entry_frame_url = None
-    if _detection_index is not None and _detection_index.get_frame(faiss_id):
+    if _detection_index is not None and _detection_index.has_frame(faiss_id):
         entry_frame_url = f"/api/v1/frames/{_encode_key(f'detection:frame:{faiss_id}')}"
     if entry_frame_url is None and _event_repo is not None:
         for event_type in ("entry", "last_seen"):
@@ -179,6 +201,7 @@ def _build_grouped_appearance(
 
     # ── Exit frame and timestamp ──
     # Priority: rolling Redis exit (fresh, within 15min) → promoted FAISS exit (permanent)
+    #         → durable final_exit record (from promotion or SceneScape exit)
     exit_frame_url = None
     exit_timestamp = None
     exit_bbox = None
@@ -197,8 +220,30 @@ def _build_grouped_appearance(
             exit_bbox = exit_bbox or promoted_exit["meta"].get("bbox")
         if promoted_exit and not exit_frame_url:
             exit_faiss_id = promoted_exit["faiss_id"]
-            if _detection_index.get_frame(exit_faiss_id):
+            if _detection_index.has_frame(exit_faiss_id):
                 exit_frame_url = f"/api/v1/frames/{_encode_key(f'detection:frame:{exit_faiss_id}')}"
+
+    # Final fallback: durable final_exit record — always available after
+    # promotion or SceneScape region exit, regardless of FAISS top-k.
+    # Fill any missing exit fields independently.
+    if _detection_index is not None and (
+        not exit_timestamp or not exit_frame_url or not exit_bbox
+    ):
+        final_exit = _detection_index.get_final_exit(track_id)
+        if final_exit:
+            if not exit_timestamp:
+                exit_timestamp = final_exit.get("timestamp")
+            if not exit_bbox:
+                exit_bbox = final_exit.get("bbox")
+            if not exit_frame_url:
+                fe_faiss_id = final_exit.get("faiss_id")
+                fe_frame_key = final_exit.get("frame_key")
+                if fe_faiss_id is not None and _detection_index.has_frame(fe_faiss_id):
+                    exit_frame_url = f"/api/v1/frames/{_encode_key(f'detection:frame:{fe_faiss_id}')}"
+                elif fe_frame_key and _event_repo and _event_repo.has_zone_frame(fe_frame_key):
+                    exit_frame_url = f"/api/v1/frames/{_encode_key(fe_frame_key)}"
+            if exit_sim is None:
+                exit_sim = final_exit.get("similarity")
 
     # ── Zone dwells ──
     # Region dwells are keyed by the SceneScape UUID (object_id used by
@@ -207,12 +252,12 @@ def _build_grouped_appearance(
     # Extract the base object_id (before @timestamp) and also try the full
     # track_id to cover both ID spaces.
     zone_appearances = []
-    if _event_repo is not None:
+    if dwell_cache is not None:
         base_object_id = track_id.rsplit("@", 1)[0] if "@" in track_id else track_id
         lookup_ids = {track_id, base_object_id}
         seen_dwell_keys: set = set()
         for lookup_id in lookup_ids:
-            dwells = _event_repo.get_region_dwells_for_object(lookup_id)
+            dwells = dwell_cache.get(lookup_id, [])
             for dwell in dwells:
                 # Dedup in case both IDs resolve to the same dwell records
                 dwell_key = (dwell.get("region_id", ""), dwell.get("entry_time", ""))

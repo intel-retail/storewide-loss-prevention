@@ -17,9 +17,15 @@ const App = () => {
       <TabBar tabs={TABS} activeTab={activeTab} onTabChange={setActiveTab} />
 
       <main className="flex-1 overflow-hidden">
-        {activeTab === 'POI Management' && <POIManagement />}
-        {activeTab === 'Live Alerts' && <LiveAlerts />}
-        {activeTab === 'Search History' && <SearchPanel />}
+        <div className={`h-full ${activeTab === 'POI Management' ? '' : 'hidden'}`}>
+          <POIManagement />
+        </div>
+        <div className={`h-full ${activeTab === 'Live Alerts' ? '' : 'hidden'}`}>
+          <LiveAlerts />
+        </div>
+        <div className={`h-full ${activeTab === 'Search History' ? '' : 'hidden'}`}>
+          <SearchPanel />
+        </div>
       </main>
 
       <Footer />

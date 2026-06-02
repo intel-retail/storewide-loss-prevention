@@ -543,10 +543,14 @@ build:
 	@echo "$(BLUE)=== Building POI images ===$(NC)"
 	$(COMPOSE_POI) build poi-backend ui
 	@echo ""
-	@echo "$(BLUE)=== Pulling benchmark metrics-collector image ===$(NC)"
-	@docker pull $(REGISTRY_BENCHMARK) 2>/dev/null && \
-		echo "$(GREEN)  Benchmark image ready$(NC)" || \
-		echo "$(YELLOW)  Benchmark image not available — run 'make build-benchmark' to build locally$(NC)"
+	@if [ "$(REGISTRY)" = "true" ]; then \
+		echo "$(BLUE)=== Pulling benchmark metrics-collector image ===$(NC)"; \
+		docker pull $(REGISTRY_BENCHMARK) 2>/dev/null && \
+			echo "$(GREEN)  Benchmark image ready$(NC)" || \
+			echo "$(YELLOW)  Benchmark image not available — run 'make build-benchmark' to build locally$(NC)"; \
+	else \
+		echo "$(BLUE)=== Skipping benchmark image pull (REGISTRY=false) ===$(NC)"; \
+	fi
 	@echo "$(GREEN)Build complete.$(NC)"
 
 .PHONY: up

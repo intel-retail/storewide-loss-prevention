@@ -344,6 +344,9 @@ class EventConsumer:
                                         "skipping sample + exit update",
                                         _sim, appearance_id,
                                     )
+                                    # Shorten gate so old exit promotes quickly
+                                    # and the recycled ID can start a new appearance
+                                    self._detection_index.shorten_track_gate(object_id, ttl=5)
                                     # Clear cached UUID mapping — tracker recycled
                                     # this person_int_id to a different person
                                     if self._event_repo and not object_id.startswith("cam:"):
@@ -353,6 +356,13 @@ class EventConsumer:
                                             )
                                         except Exception:
                                             pass
+
+                        # Refresh gate and active_appearance only after
+                        # continuity passes — prevents recycled-ID detections
+                        # from keeping a stale gate alive.
+                        if _continuity_ok:
+                            self._detection_index.refresh_track_gate(object_id)
+                            self._detection_index.refresh_active_appearance(object_id)
 
                         # Only sample if continuity check passed
                         if _continuity_ok and self._detection_index.should_sample(appearance_id):
@@ -380,13 +390,15 @@ class EventConsumer:
             if not frame_b64:
                 log.debug("No frame available for camera=%s at ts=%s", camera_id, timestamp)
 
-            # Crop to face bbox so stored frames always show the detected person,
-            # not the full camera view (which may contain other people).
+            # Crop to person body bbox (head-to-toe) so stored frames show the
+            # full person, matching what online alerts display.  Falls back to
+            # face bbox, then full camera frame.
             frame_b64_cropped: Optional[str] = None
-            if frame_b64 and best_face_bbox:
+            _crop_box = person_bbox or best_face_bbox
+            if frame_b64 and _crop_box:
                 _frame_np = base64_to_frame(frame_b64)
                 if _frame_np is not None:
-                    _cropped = crop_bbox(_frame_np, best_face_bbox)
+                    _cropped = crop_bbox(_frame_np, _crop_box)
                     if _cropped is not None and _cropped.size > 0:
                         frame_b64_cropped = frame_to_base64_jpeg(_cropped)
             if frame_b64_cropped is None:

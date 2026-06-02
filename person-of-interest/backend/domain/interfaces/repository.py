@@ -88,6 +88,11 @@ class EventRepository(ABC):
     def store_alert(self, alert: dict) -> None: ...
 
     @abstractmethod
+    def get_alert_count_for_poi(self, poi_id: str) -> int:
+        """Return the number of alerts stored for a POI."""
+        ...
+
+    @abstractmethod
     def is_alert_sent(self, object_id: str) -> bool: ...
 
     @abstractmethod
@@ -118,6 +123,13 @@ class EventRepository(ABC):
     def get_region_dwells_for_object(self, object_id: str, date_filter: Optional[str] = None) -> list[dict]:
         """Return region dwell records for an object, optionally filtered by date."""
         return []
+
+    def batch_get_region_dwells(self, object_ids: set[str]) -> dict[str, list[dict]]:
+        """Batch-fetch region dwells for multiple object IDs."""
+        result: dict[str, list[dict]] = {}
+        for oid in object_ids:
+            result[oid] = self.get_region_dwells_for_object(oid)
+        return result
 
     def get_track_poi_counts(self, track_id: str) -> dict[str, int]:
         """Return {poi_id: event_count} for all POIs that have events on this track."""

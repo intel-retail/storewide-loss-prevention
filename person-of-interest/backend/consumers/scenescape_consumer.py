@@ -42,9 +42,10 @@ class ScenescapeRegionConsumer:
     - Region event: native ENTERED/EXITED events with dwell from SceneScape.
     """
 
-    def __init__(self, event_service: EventService, event_repo=None) -> None:
+    def __init__(self, event_service: EventService, event_repo=None, detection_index=None) -> None:
         self._event_service = event_service
         self._event_repo = event_repo
+        self._detection_index = detection_index
         self._last_uuid_log = 0.0
 
     # ── Regulated scene topic: camera_bounds only ────────────────────────────
@@ -164,6 +165,31 @@ class ScenescapeRegionConsumer:
                 )
             except Exception:
                 log.exception("Error storing region exit for obj %s region %s", object_id, region_id)
+
+            # Store durable final exit for offline search — bridges SceneScape
+            # region exit to the detection-level appearance so search can find
+            # exit data by track_id without relying on FAISS top-k.
+            if self._detection_index is not None:
+                try:
+                    appearance_id = self._detection_index.get_active_appearance(object_id)
+                    if appearance_id:
+                        self._detection_index.store_final_exit(appearance_id, {
+                            "timestamp": timestamp,
+                            "camera_id": camera_id or "",
+                            "frame_key": exit_frame_key or "",
+                            "source": "scenescape",
+                        })
+                        log.info(
+                            "Final exit stored (SceneScape): obj=%s appearance=%s",
+                            object_id, appearance_id,
+                        )
+                    else:
+                        log.debug(
+                            "No active appearance for obj=%s — final exit not stored",
+                            object_id,
+                        )
+                except Exception:
+                    log.debug("Failed to store final exit for obj=%s", object_id, exc_info=True)
 
     # ── Shared helpers ───────────────────────────────────────────────────────
 

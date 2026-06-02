@@ -38,6 +38,7 @@ _REDIS_NEXT_ID_KEY = "detection:next_id"
 _REDIS_EXIT_VEC_PREFIX  = "detection:exit_vec:"
 _REDIS_EXIT_META_PREFIX = "detection:exit_meta:"
 _REDIS_EXIT_FRAME_PREFIX = "detection:exit_frame:"
+_REDIS_FINAL_EXIT_PREFIX = "detection:final_exit:"
 
 
 class DetectionIndexRepository(IDetectionIndexRepository):
@@ -132,12 +133,16 @@ class DetectionIndexRepository(IDetectionIndexRepository):
             distances, ids = self._index.search(vec, k)
 
         results = []
-        for dist, fid in zip(distances[0], ids[0]):
-            if fid < 0:
-                continue
-            # Only return hits whose metadata hasn't expired in Redis
-            if self._r.exists(f"{_REDIS_META_PREFIX}{fid}".encode()):
-                results.append((int(fid), float(dist)))
+        # Batch-check existence with a pipeline to avoid N round-trips
+        fid_list = [(float(dist), int(fid)) for dist, fid in zip(distances[0], ids[0]) if fid >= 0]
+        if fid_list:
+            pipe = self._r.pipeline(transaction=False)
+            for _, fid in fid_list:
+                pipe.exists(f"{_REDIS_META_PREFIX}{fid}".encode())
+            exists_flags = pipe.execute()
+            for (dist, fid), ex in zip(fid_list, exists_flags):
+                if ex:
+                    results.append((fid, dist))
 
         return results
 
@@ -151,6 +156,25 @@ class DetectionIndexRepository(IDetectionIndexRepository):
             return json.loads(text)
         except (json.JSONDecodeError, ValueError):
             return None
+
+    def batch_get_metadata(self, faiss_ids: list[int]) -> dict[int, dict]:
+        """Fetch metadata for multiple faiss_ids in a single Redis pipeline."""
+        if not faiss_ids:
+            return {}
+        pipe = self._r.pipeline(transaction=False)
+        for fid in faiss_ids:
+            pipe.get(f"{_REDIS_META_PREFIX}{fid}".encode())
+        results = pipe.execute()
+        out: dict[int, dict] = {}
+        for fid, raw in zip(faiss_ids, results):
+            if raw is None:
+                continue
+            try:
+                text = raw.decode() if isinstance(raw, bytes) else raw
+                out[fid] = json.loads(text)
+            except (json.JSONDecodeError, ValueError):
+                pass
+        return out
 
     def total_vectors(self) -> int:
         with self._lock:
@@ -167,6 +191,10 @@ class DetectionIndexRepository(IDetectionIndexRepository):
         if raw is None:
             return None
         return raw.decode() if isinstance(raw, bytes) else raw
+
+    def has_frame(self, faiss_id: int) -> bool:
+        """Check if a frame exists without fetching the full JPEG data."""
+        return bool(self._r.exists(f"detection:frame:{faiss_id}".encode()))
 
     def get_entry_vector(self, track_id: str) -> Optional[np.ndarray]:
         """Return the normalised entry embedding for a track, or None if expired."""
@@ -258,6 +286,49 @@ class DetectionIndexRepository(IDetectionIndexRepository):
             return key
         return None
 
+    # ── Durable final exit record (survives rolling exit expiry) ────────────
+
+    # Lua script for atomic merge of final_exit records (avoids GET/SETEX race)
+    _LUA_MERGE_FINAL_EXIT = """
+    local key = KEYS[1]
+    local new_data = cjson.decode(ARGV[1])
+    local ttl = tonumber(ARGV[2])
+    local existing = {}
+    local raw = redis.call('GET', key)
+    if raw then
+        local ok, val = pcall(cjson.decode, raw)
+        if ok then existing = val end
+    end
+    for k, v in pairs(new_data) do
+        if v ~= cjson.null and v ~= '' then
+            existing[k] = v
+        end
+    end
+    redis.call('SETEX', key, ttl, cjson.encode(existing))
+    return 1
+    """
+
+    def store_final_exit(self, track_id: str, data: dict) -> None:
+        """Store or merge a durable final exit record for a track.
+
+        Merges with any existing record so that both the ExitPromoterThread
+        and SceneScape exit events can contribute fields without overwriting
+        each other.  Uses a Lua script for atomic read-modify-write.
+        """
+        key = f"{_REDIS_FINAL_EXIT_PREFIX}{track_id}"
+        self._r.eval(self._LUA_MERGE_FINAL_EXIT, 1, key, json.dumps(data), self._ttl)
+
+    def get_final_exit(self, track_id: str) -> Optional[dict]:
+        """Return the durable final exit record for a track, or None."""
+        raw = self._r.get(f"{_REDIS_FINAL_EXIT_PREFIX}{track_id}".encode())
+        if raw is None:
+            return None
+        try:
+            text = raw.decode() if isinstance(raw, bytes) else raw
+            return json.loads(text)
+        except (json.JSONDecodeError, ValueError):
+            return None
+
     def promote_exits(self) -> int:
         """Scan all pending exit vectors and promote those whose gate has expired.
 
@@ -328,6 +399,16 @@ class DetectionIndexRepository(IDetectionIndexRepository):
                 pipe.setex(f"detection:frame:{faiss_id}".encode(), self._ttl, frame_raw)
             pipe.execute()
 
+            # Store durable final exit record so search can find exit data
+            # by track_id without relying on FAISS top-k.
+            self.store_final_exit(track_id, {
+                "faiss_id": faiss_id,
+                "timestamp": meta.get("timestamp"),
+                "bbox": meta.get("bbox"),
+                "camera_id": meta.get("camera_id"),
+                "source": "promotion",
+            })
+
             promoted += 1
             log.info("Promoted exit embedding: track=%s faiss_id=%d", track_id, faiss_id)
 
@@ -341,16 +422,26 @@ class DetectionIndexRepository(IDetectionIndexRepository):
         the SceneScape tracker recycles an integer ID for a new person, the gate
         expires in time and the new person is stored as a distinct detection.
 
-        The gate is refreshed on every call (even when not claimed) so it only
-        expires when the person truly leaves the scene.
+        NOTE: gate is NOT refreshed here — call refresh_track_gate() separately
+        after the continuity check passes, so that recycled-ID detections from a
+        different person do not keep a stale gate alive.
         """
         effective_ttl = ttl if ttl is not None else self._track_seen_ttl
         key = f"detection:track:seen:{track_id}".encode()
-        claimed = bool(self._r.set(key, b"1", ex=effective_ttl, nx=True))
-        if not claimed:
-            # Refresh TTL so the gate stays alive while person is still in view
-            self._r.expire(key, effective_ttl)
-        return claimed
+        return bool(self._r.set(key, b"1", ex=effective_ttl, nx=True))
+
+    def refresh_track_gate(self, track_id: str, ttl: Optional[int] = None) -> None:
+        """Refresh the track gate TTL. Call ONLY after continuity check passes."""
+        effective_ttl = ttl if ttl is not None else self._track_seen_ttl
+        self._r.expire(f"detection:track:seen:{track_id}".encode(), effective_ttl)
+
+    def shorten_track_gate(self, track_id: str, ttl: int = 5) -> None:
+        """Shorten gate TTL so it expires soon (e.g. after continuity failure).
+
+        This lets the ExitPromoterThread promote the old exit quickly and
+        frees the gate for a new appearance from the recycled ID.
+        """
+        self._r.expire(f"detection:track:seen:{track_id}".encode(), ttl)
 
     def should_sample(self, appearance_id: str) -> bool:
         """Rate-limit additional embedding samples for an existing appearance.
@@ -401,6 +492,15 @@ class DetectionIndexRepository(IDetectionIndexRepository):
         if raw is None:
             return None
         return raw.decode() if isinstance(raw, bytes) else raw
+
+    def refresh_active_appearance(self, object_id: str) -> None:
+        """Refresh the active appearance TTL so it stays alive as long as the gate.
+
+        Called after continuity check passes to prevent the active_appearance
+        mapping from expiring before the gate on long-lived tracks.
+        """
+        key = f"detection:active_appearance:{object_id}".encode()
+        self._r.expire(key, self._track_seen_ttl + 60)
 
     # ── Private ─────────────────────────────────────────────────────────────
 

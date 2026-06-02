@@ -6,7 +6,9 @@ import AppearanceCard from './SearchResultCard';
 const SearchPanel = () => {
   const [imageFile, setImageFile] = useState<File | null>(null);
   const [imagePreview, setImagePreview] = useState<string | null>(null);
+  const [startDate, setStartDate] = useState('');
   const [startTime, setStartTime] = useState('');
+  const [endDate, setEndDate] = useState('');
   const [endTime, setEndTime] = useState('');
   const [result, setResult] = useState<SearchResult | null>(null);
   const [loading, setLoading] = useState(false);
@@ -16,6 +18,19 @@ const SearchPanel = () => {
   const nowLocal = () => {
     const d = new Date();
     return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+  };
+  const todayLocal = () => nowLocal().slice(0, 10);
+
+  const combineDatetime = (date: string, time: string, defaultTime: string = '00:00'): string => {
+    if (!date) return '';
+    return `${date}T${time || defaultTime}`;
+  };
+
+  const clampToNow = (dt: string): string => {
+    if (!dt) return dt;
+    const now = new Date();
+    const selected = new Date(dt);
+    return selected > now ? now.toISOString() : new Date(dt).toISOString();
   };
 
   const handleUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -34,11 +49,13 @@ const SearchPanel = () => {
     setError(null);
     setResult(null);
     try {
+      const start = combineDatetime(startDate, startTime, '00:00');
+      const end = combineDatetime(endDate, endTime, '23:59:59');
       const data = await searchHistory({
         image: imageFile,
         topK: 20,
-        startTime: startTime ? new Date(startTime).toISOString() : '',
-        endTime: endTime ? new Date(endTime).toISOString() : '',
+        startTime: start ? clampToNow(start) : '',
+        endTime: end ? clampToNow(end) : '',
       });
       setResult(data);
       setSearched(true);
@@ -52,7 +69,9 @@ const SearchPanel = () => {
   const handleReset = () => {
     setImageFile(null);
     setImagePreview(null);
+    setStartDate('');
     setStartTime('');
+    setEndDate('');
     setEndTime('');
     setResult(null);
     setError(null);
@@ -90,28 +109,40 @@ const SearchPanel = () => {
           </p>
         </div>
 
-        {/* Time range — max capped to current local time to prevent future date selection */}
-        <label className="block">
-          <span className="text-xs font-medium text-intel-gray">Start Time</span>
+        {/* Time range — split date/time for Firefox compatibility */}
+        <div className="space-y-1">
+          <span className="text-xs font-medium text-intel-gray">Start</span>
           <input
-            type="datetime-local"
+            type="date"
+            value={startDate}
+            max={todayLocal()}
+            onChange={(e) => setStartDate(e.target.value)}
+            className="block w-full rounded-lg border border-gray-300 px-2.5 py-1.5 text-xs focus:border-intel-blue focus:ring-1 focus:ring-intel-blue outline-none"
+          />
+          <input
+            type="time"
             value={startTime}
-            max={nowLocal()}
             onChange={(e) => setStartTime(e.target.value)}
-            className="mt-1 block w-full rounded-lg border border-gray-300 px-2.5 py-1.5 text-xs focus:border-intel-blue focus:ring-1 focus:ring-intel-blue outline-none"
+            className="block w-full rounded-lg border border-gray-300 px-2.5 py-1.5 text-xs focus:border-intel-blue focus:ring-1 focus:ring-intel-blue outline-none"
           />
-        </label>
+        </div>
 
-        <label className="block">
-          <span className="text-xs font-medium text-intel-gray">End Time</span>
+        <div className="space-y-1">
+          <span className="text-xs font-medium text-intel-gray">End</span>
           <input
-            type="datetime-local"
-            value={endTime}
-            max={nowLocal()}
-            onChange={(e) => setEndTime(e.target.value)}
-            className="mt-1 block w-full rounded-lg border border-gray-300 px-2.5 py-1.5 text-xs focus:border-intel-blue focus:ring-1 focus:ring-intel-blue outline-none"
+            type="date"
+            value={endDate}
+            max={todayLocal()}
+            onChange={(e) => setEndDate(e.target.value)}
+            className="block w-full rounded-lg border border-gray-300 px-2.5 py-1.5 text-xs focus:border-intel-blue focus:ring-1 focus:ring-intel-blue outline-none"
           />
-        </label>
+          <input
+            type="time"
+            value={endTime}
+            onChange={(e) => setEndTime(e.target.value)}
+            className="block w-full rounded-lg border border-gray-300 px-2.5 py-1.5 text-xs focus:border-intel-blue focus:ring-1 focus:ring-intel-blue outline-none"
+          />
+        </div>
 
         <div className="space-y-2 pt-2">
           <button

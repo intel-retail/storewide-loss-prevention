@@ -46,10 +46,12 @@ const AlertCard = ({ alert, onImageClick, poiPrimaryImage }: AlertCardProps) => 
             {new Date(alert.timestamp).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit' })}
           </p>
           <div className="flex items-center gap-3 text-xs">
-            <span>Similarity: <span className={`font-semibold ${scoreColor}`}>{(score * 100).toFixed(1)}%</span></span>
-            <span className="text-intel-gray">Confidence: <span className="font-medium text-intel-dark">{(alert.match.confidence * 100).toFixed(1)}%</span></span>
+            <span>POI Match: <span className={`font-semibold ${scoreColor}`}>{(score * 100).toFixed(1)}%</span></span>
+            <span className="text-intel-gray">Face Detect: <span className="font-medium text-intel-dark">{(alert.match.confidence * 100).toFixed(1)}%</span></span>
           </div>
-          {/* previous match count hidden */}
+          {alert.poi_metadata.total_previous_matches > 0 && (
+            <p className="text-[10px] text-intel-gray">Previous matches: <span className="font-medium text-intel-dark">{alert.poi_metadata.total_previous_matches}</span></p>
+          )}
           {alert.poi_metadata.notes && (
             <p className="text-[11px] text-intel-gray italic truncate" title={alert.poi_metadata.notes}>{alert.poi_metadata.notes}</p>
           )}
