@@ -60,6 +60,7 @@ async def search_history(
     # different angles, the same person may score very differently — a narrow
     # top-k can miss an entire camera's detections.
     t0 = time.perf_counter()
+    top_k = max(1, min(top_k, 200))
     total_vecs = _detection_index.total_vectors()
     search_k = min(max(top_k * 10, 200), total_vecs) if total_vecs > 0 else 200
     hits = _detection_index.search(query_vector, top_k=search_k)
