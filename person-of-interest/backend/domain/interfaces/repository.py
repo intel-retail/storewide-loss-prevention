@@ -87,9 +87,10 @@ class EventRepository(ABC):
     @abstractmethod
     def store_alert(self, alert: dict) -> None: ...
 
+    @abstractmethod
     def get_alert_count_for_poi(self, poi_id: str) -> int:
         """Return the number of alerts stored for a POI."""
-        return 0
+        ...
 
     @abstractmethod
     def is_alert_sent(self, object_id: str) -> bool: ...

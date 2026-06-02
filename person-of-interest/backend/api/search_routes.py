@@ -218,7 +218,7 @@ def _build_grouped_appearance(
             if not exit_frame_url:
                 fe_faiss_id = final_exit.get("faiss_id")
                 fe_frame_key = final_exit.get("frame_key")
-                if fe_faiss_id and _detection_index.get_frame(fe_faiss_id):
+                if fe_faiss_id is not None and _detection_index.get_frame(fe_faiss_id):
                     exit_frame_url = f"/api/v1/frames/{_encode_key(f'detection:frame:{fe_faiss_id}')}"
                 elif fe_frame_key and _event_repo and _event_repo.get_zone_frame(fe_frame_key):
                     exit_frame_url = f"/api/v1/frames/{_encode_key(fe_frame_key)}"

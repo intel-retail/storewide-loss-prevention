@@ -21,9 +21,16 @@ const SearchPanel = () => {
   };
   const todayLocal = () => nowLocal().slice(0, 10);
 
-  const combineDatetime = (date: string, time: string): string => {
+  const combineDatetime = (date: string, time: string, defaultTime: string = '00:00'): string => {
     if (!date) return '';
-    return time ? `${date}T${time}` : `${date}T00:00`;
+    return `${date}T${time || defaultTime}`;
+  };
+
+  const clampToNow = (dt: string): string => {
+    if (!dt) return dt;
+    const now = new Date();
+    const selected = new Date(dt);
+    return selected > now ? now.toISOString() : new Date(dt).toISOString();
   };
 
   const handleUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -42,13 +49,13 @@ const SearchPanel = () => {
     setError(null);
     setResult(null);
     try {
-      const start = combineDatetime(startDate, startTime);
-      const end = combineDatetime(endDate, endTime);
+      const start = combineDatetime(startDate, startTime, '00:00');
+      const end = combineDatetime(endDate, endTime, '23:59:59');
       const data = await searchHistory({
         image: imageFile,
         topK: 20,
-        startTime: start ? new Date(start).toISOString() : '',
-        endTime: end ? new Date(end).toISOString() : '',
+        startTime: start ? clampToNow(start) : '',
+        endTime: end ? clampToNow(end) : '',
       });
       setResult(data);
       setSearched(true);
