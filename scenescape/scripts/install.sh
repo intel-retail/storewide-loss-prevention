@@ -26,9 +26,9 @@ fi
 # ---- Set HOST_IP ----
 HOST_IP_ARG="$1"
 if [ -z "$HOST_IP_ARG" ]; then
-    HOST_IP=$(hostname -I 2>/dev/null | cut -f1 -d' ')
+    HOST_IP=$(ip route get 1 2>/dev/null | awk '{print $7; exit}')
     if [ -z "$HOST_IP" ]; then
-        HOST_IP=$(ip route get 1 2>/dev/null | awk '{print $7}')
+        HOST_IP=$(hostname -I 2>/dev/null | cut -f1 -d' ')
     fi
     [ -z "$HOST_IP" ] && HOST_IP="localhost"
 else
