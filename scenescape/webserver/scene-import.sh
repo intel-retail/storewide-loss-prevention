@@ -193,7 +193,11 @@ except Exception as e:
 ")
 
     echo "  Import response: ${IMPORT_RESPONSE}"
-    IMPORT_SUCCESS=$((IMPORT_SUCCESS + 1))
+    if echo "${IMPORT_RESPONSE}" | grep -qE '^(HTTP [45][0-9]{2}:|ERROR:)'; then
+        IMPORT_FAIL=$((IMPORT_FAIL + 1))
+    else
+        IMPORT_SUCCESS=$((IMPORT_SUCCESS + 1))
+    fi
 done
 
 # Cleanup cloned zips
