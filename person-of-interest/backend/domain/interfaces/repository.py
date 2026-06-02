@@ -124,6 +124,13 @@ class EventRepository(ABC):
         """Return region dwell records for an object, optionally filtered by date."""
         return []
 
+    def batch_get_region_dwells(self, object_ids: set[str]) -> dict[str, list[dict]]:
+        """Batch-fetch region dwells for multiple object IDs."""
+        result: dict[str, list[dict]] = {}
+        for oid in object_ids:
+            result[oid] = self.get_region_dwells_for_object(oid)
+        return result
+
     def get_track_poi_counts(self, track_id: str) -> dict[str, int]:
         """Return {poi_id: event_count} for all POIs that have events on this track."""
         return {}

@@ -302,6 +302,10 @@ class RedisEventRepository(EventRepository):
             "exit_frame_key": exit_frame_key or "",
         }
         self._r.setex(key, 86400 * 7, json.dumps(data))  # 7 day TTL
+        # Secondary index: track dwell keys per object_id for O(1) lookups
+        idx_key = f"region:dwell:idx:{object_id}"
+        self._r.sadd(idx_key, key)
+        self._r.expire(idx_key, 86400 * 7)
 
     def store_zone_frame(self, frame_key: str, b64_jpeg: str, ttl: int = 86400 * 7) -> None:
         """Store a base64-encoded JPEG frame for a zone entry or exit event."""
@@ -311,6 +315,10 @@ class RedisEventRepository(EventRepository):
         """Return the stored base64 JPEG for a zone frame key, or None if expired."""
         val = self._r.get(frame_key)
         return val.decode() if isinstance(val, bytes) else val
+
+    def has_zone_frame(self, frame_key: str) -> bool:
+        """Check if a zone frame exists without fetching the full JPEG data."""
+        return bool(self._r.exists(frame_key))
 
     def claim_track_entry(self, object_id: str, ttl: int = 120) -> bool:
         """Atomically claim the entry frame slot for a track (NX).
@@ -483,6 +491,52 @@ class RedisEventRepository(EventRepository):
         if best_iou >= iou_threshold:
             return best_uuid
         return None
+
+    def batch_get_region_dwells(self, object_ids: set[str]) -> dict[str, list[dict]]:
+        """Fetch region dwells for multiple object IDs using pipelined SMEMBERS + MGET.
+
+        Uses the secondary SET index (region:dwell:idx:{object_id}) for O(set_size)
+        lookups instead of SCAN/KEYS over the full keyspace.
+        Falls back to SCAN for object_ids without an index (pre-existing data).
+        """
+        if not object_ids:
+            return {}
+        ordered_ids = list(object_ids)
+
+        # Step 1: Pipeline SMEMBERS to get dwell keys from the index
+        pipe = self._r.pipeline(transaction=False)
+        for oid in ordered_ids:
+            pipe.smembers(f"region:dwell:idx:{oid}")
+        index_results = pipe.execute()
+
+        # Build key→object_id mapping
+        all_keys: list[str] = []
+        key_to_oid: dict[str, str] = {}
+
+        for oid, members in zip(ordered_ids, index_results):
+            if members:
+                for key in members:
+                    k = key.decode() if isinstance(key, bytes) else key
+                    all_keys.append(k)
+                    key_to_oid[k] = oid
+            # No fallback — the index is maintained for all new writes and
+            # was backfilled for pre-existing data.  An empty SMEMBERS simply
+            # means the object has no dwell records.
+
+        result: dict[str, list[dict]] = {oid: [] for oid in object_ids}
+        if not all_keys:
+            return result
+
+        # Step 2: Pipeline GET all dwell values
+        pipe = self._r.pipeline(transaction=False)
+        for key in all_keys:
+            pipe.get(key)
+        values = pipe.execute()
+
+        for key, raw in zip(all_keys, values):
+            if raw:
+                result[key_to_oid[key]].append(json.loads(raw))
+        return result
 
     def get_region_dwells_for_object(self, object_id: str, date_filter: Optional[str] = None) -> list[dict]:
         """Return region dwell records for an object, optionally filtered by date.

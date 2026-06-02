@@ -133,12 +133,16 @@ class DetectionIndexRepository(IDetectionIndexRepository):
             distances, ids = self._index.search(vec, k)
 
         results = []
-        for dist, fid in zip(distances[0], ids[0]):
-            if fid < 0:
-                continue
-            # Only return hits whose metadata hasn't expired in Redis
-            if self._r.exists(f"{_REDIS_META_PREFIX}{fid}".encode()):
-                results.append((int(fid), float(dist)))
+        # Batch-check existence with a pipeline to avoid N round-trips
+        fid_list = [(float(dist), int(fid)) for dist, fid in zip(distances[0], ids[0]) if fid >= 0]
+        if fid_list:
+            pipe = self._r.pipeline(transaction=False)
+            for _, fid in fid_list:
+                pipe.exists(f"{_REDIS_META_PREFIX}{fid}".encode())
+            exists_flags = pipe.execute()
+            for (dist, fid), ex in zip(fid_list, exists_flags):
+                if ex:
+                    results.append((fid, dist))
 
         return results
 
@@ -152,6 +156,25 @@ class DetectionIndexRepository(IDetectionIndexRepository):
             return json.loads(text)
         except (json.JSONDecodeError, ValueError):
             return None
+
+    def batch_get_metadata(self, faiss_ids: list[int]) -> dict[int, dict]:
+        """Fetch metadata for multiple faiss_ids in a single Redis pipeline."""
+        if not faiss_ids:
+            return {}
+        pipe = self._r.pipeline(transaction=False)
+        for fid in faiss_ids:
+            pipe.get(f"{_REDIS_META_PREFIX}{fid}".encode())
+        results = pipe.execute()
+        out: dict[int, dict] = {}
+        for fid, raw in zip(faiss_ids, results):
+            if raw is None:
+                continue
+            try:
+                text = raw.decode() if isinstance(raw, bytes) else raw
+                out[fid] = json.loads(text)
+            except (json.JSONDecodeError, ValueError):
+                pass
+        return out
 
     def total_vectors(self) -> int:
         with self._lock:
@@ -168,6 +191,10 @@ class DetectionIndexRepository(IDetectionIndexRepository):
         if raw is None:
             return None
         return raw.decode() if isinstance(raw, bytes) else raw
+
+    def has_frame(self, faiss_id: int) -> bool:
+        """Check if a frame exists without fetching the full JPEG data."""
+        return bool(self._r.exists(f"detection:frame:{faiss_id}".encode()))
 
     def get_entry_vector(self, track_id: str) -> Optional[np.ndarray]:
         """Return the normalised entry embedding for a track, or None if expired."""
