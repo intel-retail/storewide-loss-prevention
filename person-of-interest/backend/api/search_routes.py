@@ -55,11 +55,13 @@ async def search_history(
     query_vector = np.array(result["embedding"], dtype=np.float32)
 
     # ── Search detection index ──
-    # Search with a wider net (3x top_k) to ensure enough candidates survive
-    # time-range and similarity filtering.  Detection FAISS stores first-frame
-    # embeddings which may score lower than the query's ideal match.
+    # Search with a wide net to ensure enough candidates from all cameras
+    # survive time-range and similarity filtering.  With multiple cameras at
+    # different angles, the same person may score very differently — a narrow
+    # top-k can miss an entire camera's detections.
     t0 = time.perf_counter()
-    search_k = max(top_k * 3, 50)
+    total_vecs = _detection_index.total_vectors()
+    search_k = min(max(top_k * 10, 200), total_vecs) if total_vecs > 0 else 200
     hits = _detection_index.search(query_vector, top_k=search_k)
     query_latency_ms = (time.perf_counter() - t0) * 1000
 
