@@ -89,6 +89,34 @@ Before running `make init`, set `HOST_IP` to the network-reachable IP address of
 this machine. MediaMTX uses it to advertise the correct WebRTC ICE candidates so
 browsers can connect to the live camera streams.
 
+### Proxy Configuration (if behind a corporate proxy)
+
+If your environment requires a proxy to reach the internet (for example, to pull
+Docker images or download models), export the proxy variables **before** running
+any `make` commands:
+
+```bash
+# Set proxy (adjust to your network)
+export HTTP_PROXY=http://your-proxy-server:port
+export HTTPS_PROXY=http://your-proxy-server:port
+export NO_PROXY=localhost,127.0.0.1,web.scenescape.intel.com,<host-ip>
+
+# Lowercase variants (used by some tools)
+export http_proxy=$HTTP_PROXY
+export https_proxy=$HTTPS_PROXY
+export no_proxy=$NO_PROXY
+```
+
+> **Important:** Add `web.scenescape.intel.com` and your machine's IP to
+> `NO_PROXY` so that internal Docker-to-Docker traffic does not go through
+> the proxy. Failing to do so may cause SceneScape scene imports or API
+> calls to fail with connection errors.
+>
+> These variables are propagated into Docker containers via the
+> `docker-compose.yml` environment sections. If the proxy is not set,
+> the variables default to blank strings (you will see harmless Docker
+> Compose warnings about unset variables).
+
 ```bash
 # Set HOST_IP (required for WebRTC camera streams)
 export HOST_IP=$(hostname -I | awk '{print $1}')

@@ -7,11 +7,11 @@
 #
 # When STREAM_DENSITY > 1, clones the base scene zip on-the-fly with unique
 # scene names and camera IDs, uploads each clone, then cleans up.
+#
+# Uses Python's built-in urllib for HTTP calls (no curl/apt-get needed,
+# avoids proxy issues inside Docker containers).
 
 set -e
-
-# Install curl (not present in python:3.12-slim)
-apt-get update -qq && apt-get install -y -qq curl > /dev/null 2>&1
 
 SCENE_ZIP_NAME="${SCENE_ZIP:-}"
 STREAM_DENSITY="${STREAM_DENSITY:-1}"
@@ -71,16 +71,25 @@ echo "  Found ${#ZIP_FILES[@]} zip file(s) to import."
 echo "  API URL:  ${SCENESCAPE_URL}"
 echo "  User:     ${SCENESCAPE_USER}"
 
-# Build curl TLS flags
-CURL_TLS_FLAGS="-k"
-if [ -f "${CA_CERT}" ]; then
-    CURL_TLS_FLAGS="--cacert ${CA_CERT}"
-fi
-
 # Wait for SceneScape web to be healthy
 echo "Waiting for SceneScape web service..."
 for i in $(seq 1 ${MAX_RETRIES}); do
-    HEALTH=$(curl -s ${CURL_TLS_FLAGS} "${SCENESCAPE_URL}/api/v1/database-ready" 2>/dev/null || echo "")
+    HEALTH=$(python3 -c "
+import urllib.request, ssl, os
+ctx = ssl.create_default_context()
+ca = os.environ.get('CA_CERT', '')
+if ca and os.path.isfile(ca):
+    ctx.load_verify_locations(ca)
+else:
+    ctx.check_hostname = False
+    ctx.verify_mode = ssl.CERT_NONE
+try:
+    url = os.environ.get('SCENESCAPE_URL', '').rstrip('/') + '/api/v1/database-ready'
+    r = urllib.request.urlopen(url, context=ctx, timeout=5)
+    print(r.read().decode())
+except Exception:
+    print('')
+")
     if echo "$HEALTH" | grep -q "true"; then
         echo "  Web service is ready (attempt ${i}/${MAX_RETRIES})"
         break
@@ -95,15 +104,32 @@ done
 
 # Authenticate and get token
 echo "Authenticating..."
-AUTH_RESPONSE=$(curl -s ${CURL_TLS_FLAGS} \
-    -X POST "${SCENESCAPE_URL}/api/v1/auth" \
-    -H "Content-Type: application/json" \
-    -d "{\"username\": \"${SCENESCAPE_USER}\", \"password\": \"${SCENESCAPE_PASSWORD}\"}" 2>/dev/null)
-
-TOKEN=$(echo "$AUTH_RESPONSE" | python3 -c "import sys,json; print(json.load(sys.stdin).get('token',''))" 2>/dev/null || echo "")
+TOKEN=$(python3 -c "
+import urllib.request, ssl, json, os, sys
+ctx = ssl.create_default_context()
+ca = os.environ.get('CA_CERT', '')
+if ca and os.path.isfile(ca):
+    ctx.load_verify_locations(ca)
+else:
+    ctx.check_hostname = False
+    ctx.verify_mode = ssl.CERT_NONE
+base_url = os.environ.get('SCENESCAPE_URL', '').rstrip('/')
+data = json.dumps({
+    'username': os.environ.get('SCENESCAPE_USER', ''),
+    'password': os.environ.get('SCENESCAPE_PASSWORD', os.environ.get('SUPASS', '')),
+}).encode()
+req = urllib.request.Request(f'{base_url}/api/v1/auth', data=data,
+                            headers={'Content-Type': 'application/json'}, method='POST')
+try:
+    r = urllib.request.urlopen(req, context=ctx, timeout=30)
+    print(json.loads(r.read().decode()).get('token', ''))
+except Exception as e:
+    print(f'ERROR: {e}', file=sys.stderr)
+    print('')
+")
 
 if [ -z "${TOKEN}" ]; then
-    echo "ERROR: Failed to authenticate. Response: ${AUTH_RESPONSE}"
+    echo "ERROR: Failed to authenticate with SceneScape."
     exit 1
 fi
 echo "  Authenticated successfully."
@@ -124,13 +150,54 @@ for SCENE_ZIP in "${ZIP_FILES[@]}"; do
     fi
 
     echo "  Uploading ${ZIP_BASENAME}..."
-    IMPORT_RESPONSE=$(curl -s ${CURL_TLS_FLAGS} \
-        -X POST "${SCENESCAPE_URL}/api/v1/import-scene/" \
-        -H "Authorization: token ${TOKEN}" \
-        -F "zipFile=@${SCENE_ZIP}" 2>/dev/null)
+    IMPORT_RESPONSE=$(SCENE_ZIP_PATH="${SCENE_ZIP}" AUTH_TOKEN="${TOKEN}" python3 -c "
+import urllib.request, urllib.error, ssl, os, uuid, sys
+ctx = ssl.create_default_context()
+ca = os.environ.get('CA_CERT', '')
+if ca and os.path.isfile(ca):
+    ctx.load_verify_locations(ca)
+else:
+    ctx.check_hostname = False
+    ctx.verify_mode = ssl.CERT_NONE
+boundary = uuid.uuid4().hex
+zip_path = os.environ['SCENE_ZIP_PATH']
+filename = os.path.basename(zip_path)
+base_url = os.environ.get('SCENESCAPE_URL', '').rstrip('/')
+token = os.environ.get('AUTH_TOKEN', '')
+with open(zip_path, 'rb') as f:
+    file_data = f.read()
+body = (
+    b'--' + boundary.encode() + b'\r\n'
+    b'Content-Disposition: form-data; name=\"zipFile\"; filename=\"' + filename.encode() + b'\"\r\n'
+    b'Content-Type: application/zip\r\n\r\n'
+    + file_data + b'\r\n'
+    b'--' + boundary.encode() + b'--\r\n'
+)
+req = urllib.request.Request(
+    f'{base_url}/api/v1/import-scene/',
+    data=body,
+    headers={
+        'Authorization': f'token {token}',
+        'Content-Type': f'multipart/form-data; boundary={boundary}',
+    },
+    method='POST',
+)
+try:
+    r = urllib.request.urlopen(req, context=ctx, timeout=120)
+    print(r.read().decode())
+except urllib.error.HTTPError as e:
+    print(f'HTTP {e.code}: {e.read().decode()}')
+except Exception as e:
+    print(f'ERROR: {e}', file=sys.stderr)
+    print(f'ERROR: {e}')
+")
 
     echo "  Import response: ${IMPORT_RESPONSE}"
-    IMPORT_SUCCESS=$((IMPORT_SUCCESS + 1))
+    if echo "${IMPORT_RESPONSE}" | grep -qE '^(HTTP [45][0-9]{2}:|ERROR:)'; then
+        IMPORT_FAIL=$((IMPORT_FAIL + 1))
+    else
+        IMPORT_SUCCESS=$((IMPORT_SUCCESS + 1))
+    fi
 done
 
 # Cleanup cloned zips

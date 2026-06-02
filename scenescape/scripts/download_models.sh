@@ -63,8 +63,8 @@ DOWNLOAD_CMDS="${DOWNLOAD_CMDS% && }"
 echo "[1/2] Downloading models into Docker volume '${VOLUME_NAME}'..."
 docker run --rm \
     -v "${VOLUME_NAME}":/models \
-    alpine:3.23 \
-    sh -c "apk add --no-cache curl >/dev/null 2>&1 && ${DOWNLOAD_CMDS}"
+    debian:bookworm-slim \
+    sh -c "apt-get update -qq && apt-get install -y -qq curl >/dev/null 2>&1 && ${DOWNLOAD_CMDS}"
 
 # Copy model-proc files (same as SceneScape's copy-config-files)
 echo "[2/2] Copying model-proc files..."
@@ -72,7 +72,7 @@ if [ -d "${MODEL_PROC_DIR}" ] && [ -n "$(ls -A "${MODEL_PROC_DIR}"/*.json 2>/dev
     docker run --rm \
         -v "${MODEL_PROC_DIR}":/src:ro \
         -v "${VOLUME_NAME}":/models \
-        alpine:3.23 \
+        debian:bookworm-slim \
         sh -c "mkdir -p /models/object_detection/person && cp -v /src/*.json /models/object_detection/person/"
 else
     echo "WARNING: No model-proc JSON files found in ${MODEL_PROC_DIR}"

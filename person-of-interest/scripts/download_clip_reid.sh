@@ -38,7 +38,7 @@ ALL_EXIST=true
 IFS=',' read -ra PREC_ARR <<< "${PRECISIONS}"
 for PREC in "${PREC_ARR[@]}"; do
     DEST="/models/intel/${MODEL_NAME}/${PREC}"
-    EXISTING=$(docker run --rm -v "${VOLUME_NAME}":/models alpine:3.23 \
+    EXISTING=$(docker run --rm -v "${VOLUME_NAME}":/models debian:bookworm-slim \
         sh -c "[ -f ${DEST}/${MODEL_NAME}.xml ] && [ -f ${DEST}/${MODEL_NAME}.bin ] && echo yes || echo no")
     if [ "${EXISTING}" != "yes" ]; then
         ALL_EXIST=false
@@ -48,7 +48,7 @@ done
 if [ "${ALL_EXIST}" = "true" ]; then
     echo "  All requested precisions already exist. Skipping download."
     echo "  To re-download, remove the model first:"
-    echo "    docker run --rm -v ${VOLUME_NAME}:/models alpine:3.23 rm -rf /models/intel/${MODEL_NAME}"
+    echo "    docker run --rm -v ${VOLUME_NAME}:/models debian:bookworm-slim rm -rf /models/intel/${MODEL_NAME}"
     exit 0
 fi
 

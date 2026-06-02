@@ -95,20 +95,6 @@ View and manage camera feeds integrated via Intel® SceneScape.
 - **Live Status**: Shows which cameras are actively publishing detections
 - **SceneScape Proxy**: Camera list is fetched from the SceneScape API transparently
 
-#### 5. **AI-Powered Analysis (MCP Server)**
-
-Optional integration with LLM and VLM models for advanced analysis.
-
-- **Event Summarization**: Use `llm_summarize_events` to generate natural language summaries
-  of POI detection patterns
-- **Scene Analysis**: Use `vlm_analyze_scene` to analyze surveillance camera frames for
-  suspicious activity
-- **OpenVINO Inference**: Generate face embeddings on-demand via MCP tools
-- **Claude Desktop Integration**: Connect via MCP for interactive AI-assisted investigation
-
-> **Note:** MCP tools require additional configuration. Set `LLM_BASE_URL`, `VLM_BASE_URL`,
-> and optionally `MCP_ALLOW_EXTERNAL_AI=true` for non-local AI endpoints.
-
 ## Verifying the Deployment
 
 ### Check Service Health

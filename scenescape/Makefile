@@ -31,14 +31,14 @@ init:
 init-sample-data:
 	@echo "Initializing sample data volume..."
 	@docker volume create storewide-lp_vol-sample-data 2>/dev/null || true
-	@docker run --rm -v storewide-lp_vol-sample-data:/dest alpine:3.23 chown $$(id -u):$$(id -g) /dest
+	@docker run --rm -v storewide-lp_vol-sample-data:/dest debian:bookworm-slim chown $$(id -u):$$(id -g) /dest
 	@if [ -d "$(SAMPLE_DATA_DIR)" ] && [ -n "$$(ls -A $(SAMPLE_DATA_DIR)/*.ts $(SAMPLE_DATA_DIR)/*.mp4 2>/dev/null)" ]; then \
 		echo "Copying sample videos to volume..."; \
 		docker run --rm \
 			-v $(SAMPLE_DATA_DIR):/source:ro \
 			-v storewide-lp_vol-sample-data:/dest \
 			--user $$(id -u):$$(id -g) \
-			alpine:3.23 \
+			debian:bookworm-slim \
 			sh -c "cp -v /source/*.ts /source/*.mp4 /dest/ 2>/dev/null || true"; \
 		echo "Sample data volume initialized."; \
 	else \
@@ -59,7 +59,7 @@ download-models:
 init-volumes:
 	@echo "Initializing Docker volumes..."
 	@docker volume create storewide-lp_vol-media 2>/dev/null || true
-	@docker run --rm -v storewide-lp_vol-media:/data alpine:3.23 sh -c "chown 1000:1000 /data && touch /data/placeholder"
+	@docker run --rm -v storewide-lp_vol-media:/data debian:bookworm-slim sh -c "chown 1000:1000 /data && touch /data/placeholder"
 	@docker volume create storewide-lp_vol-models 2>/dev/null || true
 	@echo "Volumes initialized."
 

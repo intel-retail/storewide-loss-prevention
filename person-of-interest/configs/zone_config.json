@@ -48,7 +48,7 @@
     "checkout": "CHECKOUT"
   },
   "benchmark": {
-    "target_latency_ms": 2000,
+    "target_latency_ms": 1000,
     "latency_metric": "avg",
     "scene_increment": 1,
     "init_duration": 90,

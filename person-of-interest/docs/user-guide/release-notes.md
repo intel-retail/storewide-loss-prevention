@@ -67,10 +67,7 @@
   same tracked person
 - Region entry/exit tracking with dwell time computation via Intel® SceneScape regulated
   scene events
-- MCP server with LLM, VLM, OpenVINO, Docker, Redis, and POI data tools for Claude Desktop
-  integration
-- Docker Compose deployment with five services: backend, UI, Redis, alert service, and
-  MCP server
+- Docker Compose deployment with four services: backend, UI, Redis, and alert service
 - Full test suite with 110 passing tests covering matching, alerting, MQTT consumption,
   region tracking, and enrollment
 
@@ -92,8 +89,6 @@
   consider switching to `IndexIVFFlat` for approximate nearest neighbor search.
 - Thumbnail capture depends on RTSP stream availability from the camera; if RTSP is not
   configured, thumbnails may be empty.
-- The MCP server AI tools (LLM/VLM) require a separately deployed inference endpoint
-  (e.g., Ollama, vLLM) — they are not included in the default deployment.
 - SceneScape integration is required for region tracking and dwell time features; without
   SceneScape, only per-camera tracking is available.
 - Alert dedup window is per `(object_id, poi_id)` pair — a different POI match for the same

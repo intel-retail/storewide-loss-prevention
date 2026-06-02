@@ -21,9 +21,8 @@ You are a DevOps engineer specialising in Docker containerisation for this retai
 |---|---|---|---|
 | `poi-backend` | `backend/Dockerfile` | `8000` | FastAPI backend |
 | `poi-ui` | `ui/Dockerfile` | `3000→80` | React UI (nginx) |
-| `poi-redis` | `redis:8.6.2-alpine` | `6379` | Metadata + event store |
+| `poi-redis` | `redis:8.6.2` | `6379` | Metadata + event store |
 | `poi-alert-service` | `intel/alert-service:0.0.1` | `8001` | Alert fan-out |
-| `poi-mcp-server` | `mcp_server/Dockerfile` | `9000` | MCP server |
 
 ## Key Conventions
 
