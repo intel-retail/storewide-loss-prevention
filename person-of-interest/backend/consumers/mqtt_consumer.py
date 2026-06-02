@@ -2,31 +2,21 @@
 
 Primary topic: scenescape/data/camera/{camera_id}
   Payload: per-camera DLStreamer output with person detections and face sub_objects.
-  Person objects contain body-reid embeddings; face sub_objects (when present) contain
-  face-reid embeddings from face-reidentification-retail-0095 — the SAME model used
-  during POI enrollment.  Only face sub_object embeddings are used for FAISS matching.
+  Face sub_objects contain face-reid embeddings from face-reidentification-retail-0095
+  — the SAME model used during POI enrollment.
 
-  Track key resolution:
-    1. The regulated scene topic (processed by ScenescapeRegionConsumer) publishes
-       global UUIDs with per-camera bounding boxes (camera_bounds).
-    2. On each camera detection, we look up the SceneScape UUID whose camera_bounds
-       best overlaps with the detected person's bounding box (IoU matching).
-    3. If a UUID is found (IoU ≥ 0.3), it becomes the track key.  UUIDs are unique
-       per physical person across all cameras and never recycled.
-    4. Fallback: if no UUID match is found, we use f"cam:{camera_id}:{person_int_id}"
-       (camera-local integer, may be recycled by the tracker).
+  Track key resolution (priority order):
+    1. Temporal continuity cache: reuse a previously-resolved UUID for the same
+       camera-local person ID (cam:{camera}:{int_id} → UUID).
+    2. External topic visibility: if exactly one UUID is visible on this camera
+       (from scenescape/external/{scene_id}/person), use it directly.
+    3. IoU tiebreaker: if multiple UUIDs are visible, match bounding boxes
+       (only non-projected camera_bounds with positive dimensions).
+    4. Fallback: f"cam:{camera_id}:{person_int_id}" (may recycle).
 
-Secondary topic (monitoring only): scenescape/external/{scene_id}/person
-  Carries global UUIDs, reid_state, and body-reid embeddings (person-reidentification-
-  retail-0277).  Body embeddings are a DIFFERENT embedding space from the face model
-  and must NOT be used for FAISS comparison against face-enrolled POIs.
-
-Embedding space alignment:
-  Enrollment (EmbeddingModelFactory):  face-reidentification-retail-0095, 256-dim,
-                                       with landmark alignment preprocessing.
-  Runtime (camera topic face objects): face-reidentification-retail-0095, 256-dim,
-                                       simple resize preprocessing (no landmark align).
-  Both are in the same base model embedding space → FAISS cosine similarity is valid.
+Secondary topic (monitoring + visibility): scenescape/external/{scene_id}/person
+  Carries global UUIDs, reid_state, visibility (camera list), and body-reid
+  embeddings.  Used to build per-camera UUID visibility index for resolution.
 """
 
 from __future__ import annotations
@@ -39,11 +29,13 @@ import struct
 import time
 from typing import List, Optional
 
+import numpy as np
+
 from backend.observer.events import EventBus, MatchFoundEvent
 from backend.service.alert_service import AlertService
 from backend.service.event_service import EventService
 from backend.service.matching_service import MatchingService
-from backend.utils.thumbnail import grab_frame_now, submit_capture
+from backend.utils.thumbnail import grab_frame_now, submit_capture, base64_to_frame, crop_bbox, frame_to_base64_jpeg
 
 log = logging.getLogger("poi.consumer")
 
@@ -235,29 +227,59 @@ class EventConsumer:
                 camera_id, person_int_id, best_face_conf, len(embedding_vector),
             )
 
-            # ── Resolve global UUID from SceneScape regulated scene ──────────
-            # The regulated scene topic provides a UUID→camera_bounds mapping
-            # (stored in Redis by ScenescapeRegionConsumer).  We match the camera
-            # person's bounding box against those bounds via IoU to find the
-            # global UUID for this person.  UUIDs are unique per physical person
-            # across all cameras and never get recycled — solving the tracker ID
-            # recycling problem (camera-local ints like 1,2,3 get reused).
+            # ── Resolve global UUID from SceneScape ─────────────────────────
+            # Resolution strategy (in priority order):
+            #   1. Temporal continuity cache: cam:Camera:N → UUID (from prior resolution)
+            #   2. External topic visibility: which UUIDs are visible on this camera
+            #      - If exactly 1 UUID → unambiguous match
+            #      - If multiple → IoU tiebreaker with non-projected bounds
+            #   3. Fallback to camera-local ID (cam:Camera:N)
             person_bbox = obj.get("bounding_box_px") or best_face_bbox
             resolved_uuid: Optional[str] = None
-            if self._event_repo and person_bbox:
+            resolution_method: str = "none"
+
+            if self._event_repo:
+                # 1. Check temporal continuity cache
                 try:
-                    resolved_uuid = self._event_repo.get_uuid_for_camera_bbox(
-                        camera_id, person_bbox, iou_threshold=0.3,
-                    )
+                    cached = self._event_repo.get_uuid_for_camid(camera_id, person_int_id)
+                    if cached:
+                        resolved_uuid = cached
+                        resolution_method = "cached"
                 except Exception:
-                    log.debug("UUID lookup failed for camera=%s", camera_id, exc_info=True)
+                    pass
+
+                # 2. If not cached, check visibility from external topic
+                if not resolved_uuid:
+                    try:
+                        visible = self._event_repo.get_visible_uuids(camera_id, max_age_s=5.0)
+                        if len(visible) == 1:
+                            resolved_uuid = visible[0]
+                            resolution_method = "visibility_single"
+                        elif len(visible) > 1 and person_bbox:
+                            # Multiple UUIDs visible — try IoU with non-projected bounds
+                            resolved_uuid = self._event_repo.get_uuid_for_camera_bbox(
+                                camera_id, person_bbox, iou_threshold=0.3,
+                            )
+                            if resolved_uuid:
+                                resolution_method = "iou_tiebreaker"
+                    except Exception:
+                        log.debug("UUID visibility lookup failed for camera=%s", camera_id, exc_info=True)
+
+                # Cache the mapping for subsequent frames
+                if resolved_uuid and resolution_method != "cached":
+                    try:
+                        self._event_repo.store_camid_uuid_mapping(
+                            camera_id, person_int_id, resolved_uuid,
+                        )
+                    except Exception:
+                        pass
 
             # Use UUID as track key if resolved; otherwise fall back to camera-local ID.
             if resolved_uuid:
                 object_id = resolved_uuid
                 log.info(
-                    "Resolved UUID: camera=%s person=%s → uuid=%s",
-                    camera_id, person_int_id, resolved_uuid,
+                    "Resolved UUID [%s]: camera=%s person=%s → uuid=%s",
+                    resolution_method, camera_id, person_int_id, resolved_uuid,
                 )
             else:
                 object_id = f"cam:{camera_id}:{person_int_id}"
@@ -265,24 +287,29 @@ class EventConsumer:
                     "No UUID resolved for camera=%s person=%s — using camera-local ID %s",
                     camera_id, person_int_id, object_id,
                 )
-            # ── Detection index: store one embedding per unique appearance ──
-            # Each time claim_track succeeds, a new person appearance window starts.
-            # We create a unique appearance_id (object_id + timestamp) so that when
-            # the camera-local ID is recycled for a different person, FAISS entries
-            # are NOT grouped together.  The appearance_id is stored in Redis so
-            # subsequent frames (exit vector updates) use the same one.
+            # ── Detection index: store face embeddings for offline search ──
+            # We store multiple embeddings per appearance (up to N, spaced by
+            # an interval) to improve search recall.
+            #
+            # Appearance lifecycle:
+            #   - claim_track succeeds → new appearance window → store entry
+            #   - claim_track fails → existing window → continuity check first,
+            #     then rate-limited sampling if same person
+            #
+            # Continuity check runs BEFORE sampling to prevent wrong-person
+            # embeddings from being stored when the tracker recycles IDs.
             new_faiss_id: int = -1
             appearance_id = object_id  # fallback if detection index disabled
+            _continuity_ok = True  # True for new appearances, checked for existing
             if self._detection_index is not None:
-                import numpy as _np
-                import time as _time
+                _det_vec = np.array(embedding_vector, dtype=np.float32)
                 try:
                     if self._detection_index.claim_track(object_id):
                         # New appearance window — create unique appearance_id
-                        appearance_id = f"{object_id}@{int(_time.time())}"
+                        appearance_id = f"{object_id}@{int(time.time())}"
                         self._detection_index.set_active_appearance(object_id, appearance_id)
                         new_faiss_id = self._detection_index.add(
-                            vector=_np.array(embedding_vector, dtype=_np.float32),
+                            vector=_det_vec,
                             camera_id=camera_id,
                             track_id=appearance_id,
                             timestamp=timestamp,
@@ -293,11 +320,53 @@ class EventConsumer:
                             appearance_id, object_id, new_faiss_id,
                         )
                     else:
-                        # Same person still in frame — look up the active appearance_id
+                        # Existing appearance window — check continuity first
                         appearance_id = (
                             self._detection_index.get_active_appearance(object_id) or object_id
                         )
-                        log.debug("DetectionIndex: track already stored, skipping %s", object_id)
+                        # Compare new embedding against entry vector to detect
+                        # tracker ID recycling (different person reusing same ID)
+                        _entry_raw = self._detection_index.get_entry_vector(appearance_id)
+                        if _entry_raw is not None:
+                            _entry_vec = _entry_raw.reshape(1, -1)
+                            _entry_norm = np.linalg.norm(_entry_vec)
+                            _new_vec = _det_vec.reshape(1, -1)
+                            _new_norm = np.linalg.norm(_new_vec)
+                            if _entry_norm > 1e-9 and _new_norm > 1e-9:
+                                _sim = float(np.dot(
+                                    _entry_vec / _entry_norm,
+                                    (_new_vec / _new_norm).T,
+                                )[0, 0])
+                                if _sim < 0.50:
+                                    _continuity_ok = False
+                                    log.debug(
+                                        "Continuity check: sim=%.3f for %s — "
+                                        "skipping sample + exit update",
+                                        _sim, appearance_id,
+                                    )
+                                    # Clear cached UUID mapping — tracker recycled
+                                    # this person_int_id to a different person
+                                    if self._event_repo and not object_id.startswith("cam:"):
+                                        try:
+                                            self._event_repo.clear_camid_uuid_mapping(
+                                                camera_id, person_int_id,
+                                            )
+                                        except Exception:
+                                            pass
+
+                        # Only sample if continuity check passed
+                        if _continuity_ok and self._detection_index.should_sample(appearance_id):
+                            new_faiss_id = self._detection_index.add(
+                                vector=_det_vec,
+                                camera_id=camera_id,
+                                track_id=appearance_id,
+                                timestamp=timestamp,
+                                bbox=best_face_bbox,
+                            )
+                            log.debug(
+                                "DetectionIndex: sampled additional embedding %s faiss_id=%d",
+                                appearance_id, new_faiss_id,
+                            )
                 except Exception:
                     log.debug("DetectionIndex.add failed for %s", object_id, exc_info=True)
 
@@ -311,24 +380,37 @@ class EventConsumer:
             if not frame_b64:
                 log.debug("No frame available for camera=%s at ts=%s", camera_id, timestamp)
 
-            # Store frame keyed by faiss_id (unique per detection, never overwritten).
-            if new_faiss_id >= 0 and frame_b64 and self._detection_index is not None:
-                self._detection_index.store_frame(new_faiss_id, frame_b64)
+            # Crop to face bbox so stored frames always show the detected person,
+            # not the full camera view (which may contain other people).
+            frame_b64_cropped: Optional[str] = None
+            if frame_b64 and best_face_bbox:
+                _frame_np = base64_to_frame(frame_b64)
+                if _frame_np is not None:
+                    _cropped = crop_bbox(_frame_np, best_face_bbox)
+                    if _cropped is not None and _cropped.size > 0:
+                        frame_b64_cropped = frame_to_base64_jpeg(_cropped)
+            if frame_b64_cropped is None:
+                frame_b64_cropped = frame_b64  # fallback to full frame
+
+            # Store cropped frame keyed by faiss_id (unique per detection, never overwritten).
+            if new_faiss_id >= 0 and frame_b64_cropped and self._detection_index is not None:
+                self._detection_index.store_frame(new_faiss_id, frame_b64_cropped)
                 log.info("Detection frame stored: faiss_id=%d track=%s", new_faiss_id, appearance_id)
 
-            # Always update the rolling exit vector for this appearance (overwritten
-            # each detection).  When the person leaves, the last value stored here
-            # becomes the effective "exit" embedding — searched at query time.
-            if self._detection_index is not None:
-                import numpy as _np2
+            # Update the rolling exit vector for this appearance (overwritten
+            # each detection).  When the person leaves, the last value stored
+            # here becomes the effective "exit" embedding.
+            # Only update if continuity check passed (same person still in frame).
+            if self._detection_index is not None and _continuity_ok:
+                _exit_vec = np.array(embedding_vector, dtype=np.float32)
                 try:
                     self._detection_index.update_exit(
                         track_id=appearance_id,
-                        vector=_np2.array(embedding_vector, dtype=_np2.float32),
+                        vector=_exit_vec,
                         camera_id=camera_id,
                         timestamp=timestamp,
                         bbox=best_face_bbox,
-                        b64_frame=frame_b64,
+                        b64_frame=frame_b64_cropped,
                     )
                 except Exception:
                     log.debug("update_exit failed for %s", appearance_id, exc_info=True)
@@ -343,6 +425,7 @@ class EventConsumer:
                 camera_id=camera_id,
                 confidence=best_face_conf,
                 bounding_box=person_bbox,
+                face_bbox=best_face_bbox,
                 mqtt_receive_time_ms=mqtt_receive_time_ms,
             )
 
@@ -398,6 +481,13 @@ class EventConsumer:
         else:
             return
 
+        # Build per-camera UUID visibility from all persons in this message.
+        # Each person has visibility=[Camera_01, Camera_02, ...] listing cameras
+        # that can see them.  We aggregate into {camera_id: [uuid, ...]} and
+        # store in Redis so the camera topic handler can resolve UUIDs without
+        # relying on fragile IoU matching with projected camera_bounds.
+        cam_uuids: dict[str, list[str]] = {}
+
         for obj in persons:
             object_id = obj.get("id")
             if not object_id:
@@ -405,6 +495,10 @@ class EventConsumer:
             reid_state = obj.get("reid_state", "")
             visibility = obj.get("visibility", [])
             camera_id = visibility[0] if visibility else scene_name
+
+            # Accumulate UUID visibility per camera
+            for cam in visibility:
+                cam_uuids.setdefault(cam, []).append(object_id)
 
             if self._event_repo:
                 # Store reid metadata for observability (MCP tools, match enrichment).
@@ -430,6 +524,14 @@ class EventConsumer:
                 region=camera_id,
             )
 
+        # Store per-camera UUID visibility in Redis
+        if self._event_repo and cam_uuids:
+            for cam_id, uuid_list in cam_uuids.items():
+                try:
+                    self._event_repo.store_uuid_visibility(cam_id, uuid_list)
+                except Exception:
+                    log.debug("Failed to store UUID visibility for %s", cam_id, exc_info=True)
+
     # ── Shared matching + alerting ──────────────────────────────────────────
 
     def _run_matching(
@@ -441,8 +543,15 @@ class EventConsumer:
         confidence: float,
         bounding_box,
         mqtt_receive_time_ms: int = 0,
+        face_bbox=None,
     ) -> None:
-        """Run FAISS lookup and emit alerts for a confirmed detection."""
+        """Run FAISS lookup and emit alerts for a confirmed detection.
+
+        Args:
+            bounding_box: person-level bbox (used for alert metadata / context).
+            face_bbox: face sub_object bbox that produced the embedding
+                       (used for thumbnail crop — guarantees same person).
+        """
         display_camera = camera_id or "unknown"
 
         # Record movement before matching attempt
@@ -475,10 +584,9 @@ class EventConsumer:
             # Attach global reid metadata if available
             reid_meta_raw = None
             try:
-                import json as _json
                 _raw = self._event_repo._r.get(f"reid:meta:{object_id}")  # type: ignore[attr-defined]
                 if _raw:
-                    reid_meta_raw = _json.loads(_raw)
+                    reid_meta_raw = json.loads(_raw)
             except Exception:
                 pass
             if reid_meta_raw:
@@ -486,30 +594,41 @@ class EventConsumer:
             self._event_repo.set_match_metadata(object_id, match_meta, ttl=3600)
             log.debug("Match metadata written to Redis for uuid=%s", object_id)
 
-        # Capture thumbnail — prefer instant MQTT ring-buffer lookup, fall
-        # back to thread-pool RTSP capture only when MQTT has no frame.
-        thumbnail_path = ""
-        if camera_id and self._event_repo and self._event_repo.claim_thumbnail(object_id, ttl=30):
+        # Capture thumbnail — crop the MATCHED PERSON from the inline-cached frame.
+        # Uses the person body bounding_box (head-to-toe) rather than face_bbox
+        # so the thumbnail shows the full person, not just a tight face crop.
+        # Each alert gets its own thumbnail keyed by a unique alert-thumbnail ID.
+        thumbnail_b64: Optional[str] = None
+        if camera_id:
             b64 = grab_frame_now(camera_id, timestamp)
-            if b64 is None:
+            crop_box = bounding_box or face_bbox
+            if b64 is not None and crop_box:
+                frame = base64_to_frame(b64)
+                if frame is not None:
+                    cropped = crop_bbox(frame, crop_box)
+                    if cropped is not None and cropped.size > 0:
+                        thumbnail_b64 = frame_to_base64_jpeg(cropped)
+                    else:
+                        log.warning(
+                            "Face crop failed for uuid=%s camera=%s face_bbox=%s — using full frame",
+                            object_id, camera_id, crop_box,
+                        )
+                if thumbnail_b64 is None:
+                    thumbnail_b64 = b64  # fall back to full frame
+            if b64 is not None and thumbnail_b64 is None:
+                thumbnail_b64 = b64  # no crop_box but valid frame — use full frame
+            if thumbnail_b64 is None:
                 # MQTT ring buffer empty — fall back to async RTSP capture
-                future = submit_capture(camera_id, bounding_box, timestamp)
+                future = submit_capture(camera_id, crop_box, timestamp)
                 try:
-                    b64 = future.result(timeout=6)
+                    thumbnail_b64 = future.result(timeout=6)
                 except Exception:
-                    b64 = None
+                    thumbnail_b64 = None
                     log.warning("Thumbnail timed out or failed for uuid=%s camera=%s", object_id, camera_id)
-            if b64:
-                self._event_repo.store_thumbnail(object_id, b64, ttl=3600)
-                thumbnail_path = f"/api/v1/thumbnail/{object_id}"
-                log.info("Thumbnail captured for uuid=%s camera=%s", object_id, camera_id)
-            else:
-                log.warning("Thumbnail returned no data for uuid=%s camera=%s", object_id, camera_id)
         elif not camera_id:
             log.warning("No camera_id for uuid=%s — thumbnail skipped (visibility empty)", object_id)
-        elif self._event_repo and self._event_repo.get_thumbnail(object_id):
-            thumbnail_path = f"/api/v1/thumbnail/{object_id}"
 
+        # Create alert first to get the unique alert_id
         alert = self._alerts.create_alert_payload(
             match=match,
             object_id=object_id,
@@ -518,9 +637,26 @@ class EventConsumer:
             region_name=display_camera,
             confidence=confidence,
             center_of_mass=bounding_box,
-            thumbnail_path=thumbnail_path,
+            thumbnail_path="",  # placeholder — set below after storing
             mqtt_receive_time_ms=mqtt_receive_time_ms,
         )
+
+        # Store the thumbnail keyed by alert_id (immutable — each alert gets
+        # its own face crop, never overwritten by later detections).
+        thumbnail_path = ""
+        if thumbnail_b64 and self._event_repo:
+            thumb_key = alert.alert_id
+            self._event_repo.store_thumbnail(thumb_key, thumbnail_b64, ttl=3600)
+            thumbnail_path = f"/api/v1/thumbnail/{thumb_key}"
+            # Also store under object_id for backward compat (timeline, search)
+            self._event_repo.store_thumbnail(object_id, thumbnail_b64, ttl=3600)
+            log.info(
+                "Thumbnail stored: alert=%s uuid=%s camera=%s face_crop=%s",
+                alert.alert_id, object_id, display_camera, face_bbox is not None,
+            )
+
+        # Update alert payload with the per-alert thumbnail path
+        alert.match["thumbnail_path"] = thumbnail_path
 
         # Update movement event with the matched poi_id and thumbnail
         self._events.store_movement(

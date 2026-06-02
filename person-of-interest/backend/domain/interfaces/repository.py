@@ -137,6 +137,35 @@ class EventRepository(ABC):
         """Retrieve stored match metadata for an object."""
         return None
 
+    # ── UUID visibility + resolution (populated from external topic) ──
+
+    def store_uuid_visibility(
+        self, camera_id: str, uuids: list[str], ttl: int = 10,
+    ) -> None:
+        """Store which UUIDs are currently visible on a camera."""
+
+    def get_visible_uuids(
+        self, camera_id: str, max_age_s: float = 5.0,
+    ) -> list[str]:
+        """Return UUIDs currently visible on a camera (freshness-checked)."""
+        return []
+
+    def store_camid_uuid_mapping(
+        self, camera_id: str, person_int_id: int, uuid: str, ttl: int = 600,
+    ) -> None:
+        """Cache a confirmed camera-local person ID → UUID mapping."""
+
+    def get_uuid_for_camid(
+        self, camera_id: str, person_int_id: int,
+    ) -> Optional[str]:
+        """Look up cached UUID for a camera-local person ID."""
+        return None
+
+    def clear_camid_uuid_mapping(
+        self, camera_id: str, person_int_id: int,
+    ) -> None:
+        """Clear the cached UUID for a camera-local person ID."""
+
 
 class EmbeddingMappingRepository(ABC):
     """Interface for mapping FAISS internal IDs to POI IDs."""
@@ -193,3 +222,11 @@ class DetectionIndexRepository(ABC):
         Used to deduplicate: one embedding per track, not one per frame.
         """
         ...
+
+    def should_sample(self, appearance_id: str) -> bool:
+        """Rate-limit additional embedding samples for an existing appearance.
+
+        Returns True at most once per detection_embedding_interval seconds,
+        up to detection_embeddings_per_track total samples per appearance.
+        """
+        return False

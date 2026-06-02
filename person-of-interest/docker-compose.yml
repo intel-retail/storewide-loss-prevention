@@ -18,21 +18,21 @@ services:
       - PYTHONPATH=/app
       - ALERT_SERVICE_URL=http://poi-alert-service:8000
       - DELIVERY_HANDLERS=log,alert_service
-      - ALERT_DEDUP_TTL=60
+      # ALERT_DEDUP_TTL, OBJECT_CACHE_TTL, SIMILARITY_THRESHOLD,
+      # SEARCH_SIMILARITY_THRESHOLD are injected via env_file (.env below).
+      # Do NOT override them here — environment: takes precedence over env_file
+      # and would prevent .env edits from taking effect.
       - RTSP_BASE_URL=rtsp://mediaserver:8554
       - RTSP_PREWARM_CAMERAS=Camera_01,Camera_02
       - CAMERA_STREAM_MAP=${CAMERA_STREAM_MAP:-Camera_01:Camera_01,Camera_02:Camera_02}
       - MQTT_IMAGE_CAMERAS=Camera_01,Camera_02
-      - SIMILARITY_THRESHOLD=${SIMILARITY_THRESHOLD:-0.50}
-      - SEARCH_SIMILARITY_THRESHOLD=${SEARCH_SIMILARITY_THRESHOLD:-0.60}
-      - OBJECT_CACHE_TTL=5
       - ENROLL_FACE_PADDING=0.0
       - ENROLL_FACE_SQUARE=false
       - ENROLL_EMBEDDING_STRATEGY=mean
       - MEDIAMTX_WEBRTC_PORT=${MEDIAMTX_WEBRTC_PORT:-8889}
       - USECASE_1=${USECASE_1:-Person-of-Interest}
       - CONTAINER_RESULTS_PATH=/app/results
-      - SCENESCAPE_API_URL=${SCENESCAPE_API_URL:-}
+      - SCENESCAPE_API_URL=${POI_BACKEND_SCENESCAPE_URL:-https://web.scenescape.intel.com}
       - SCENESCAPE_API_USER=${SCENESCAPE_API_USER:-}
       - SCENESCAPE_API_PASSWORD=${SCENESCAPE_API_PASSWORD:-}
       - NO_PROXY=localhost,127.0.0.1,web.scenescape.intel.com,*.intel.com,172.18.0.0/16,172.19.0.0/16,10.*,134.*

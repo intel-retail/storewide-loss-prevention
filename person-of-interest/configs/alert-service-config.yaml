@@ -10,7 +10,8 @@ subscriptions:
       fields:
         - metadata.poi_id
         - metadata.camera_id
-      window_seconds: 60
+        - metadata.object_id
+      window_seconds: 300
       on_missing: skip
       hash:
         algorithm: sha1

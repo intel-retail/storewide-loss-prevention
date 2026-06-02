@@ -222,7 +222,7 @@ class RedisEventRepository(EventRepository):
             "camera_id": camera_id or "",
             "entry_frame_key": entry_frame_key or "",
         }
-        self._r.setex(key, 3600, json.dumps(data))  # 1h TTL
+        self._r.setex(key, 86400, json.dumps(data))  # 24h TTL — must outlive any realistic dwell
 
     def get_region_presence(self, object_id, scene_id, region_id):
         """Get region presence record."""
@@ -235,6 +235,33 @@ class RedisEventRepository(EventRepository):
         """Delete region presence record after exit."""
         key = f"region:presence:{scene_id}:{region_id}:{object_id}"
         self._r.delete(key)
+
+    def scan_all_region_presence(self) -> list[dict]:
+        """Return all active region presence records.
+
+        Each item: {"object_id": str, "scene_id": str, "region_id": str, ...data}
+        Used to rebuild in-memory state after container restart.
+        """
+        import json
+        results: list[dict] = []
+        cursor = 0
+        while True:
+            cursor, keys = self._r.scan(cursor, match="region:presence:*", count=500)
+            for key in keys:
+                raw = self._r.get(key)
+                if not raw:
+                    continue
+                # Key format: region:presence:{scene_id}:{region_id}:{object_id}
+                parts = (key if isinstance(key, str) else key.decode()).split(":", 4)
+                if len(parts) < 5:
+                    continue
+                _, _, scene_id, region_id, object_id = parts
+                data = json.loads(raw)
+                data.update({"object_id": object_id, "scene_id": scene_id, "region_id": region_id})
+                results.append(data)
+            if cursor == 0:
+                break
+        return results
 
     def store_region_dwell(self, object_id, timestamp, scene_id, region_id, region_name, dwell_sec=None,
                            entry_time=None, camera_id=None, entry_frame_key=None, exit_frame_key=None):
@@ -300,6 +327,86 @@ class RedisEventRepository(EventRepository):
         """Store reid metadata for a global UUID (for MCP tool observability)."""
         self._r.setex(f"reid:meta:{global_uuid}", ttl, json.dumps(metadata))
 
+    # ── UUID ↔ camera visibility + resolution ────────────────────────────
+
+    def store_uuid_visibility(
+        self, camera_id: str, uuids: list[str], ttl: int = 10,
+    ) -> None:
+        """Store which UUIDs are currently visible on a camera.
+
+        Called from the external topic handler.  The list is a snapshot
+        from SceneScape's controller — replaced every frame (~1-3 Hz).
+        Stored as a Redis hash with the current epoch timestamp so
+        readers can enforce freshness.
+        """
+        import time
+        key = f"uuid:visible:{camera_id}"
+        pipe = self._r.pipeline()
+        pipe.delete(key)
+        if uuids:
+            now_str = str(time.time())
+            mapping = {uid: now_str for uid in uuids}
+            pipe.hset(key, mapping=mapping)
+            pipe.expire(key, ttl)
+        pipe.execute()
+
+    def get_visible_uuids(
+        self, camera_id: str, max_age_s: float = 5.0,
+    ) -> list[str]:
+        """Return UUIDs currently visible on a camera (freshness-checked).
+
+        Only returns UUIDs whose visibility was updated within max_age_s
+        seconds.  Returns empty list if data is stale or absent.
+        """
+        import time
+        key = f"uuid:visible:{camera_id}"
+        raw_map = self._r.hgetall(key)
+        if not raw_map:
+            return []
+
+        now = time.time()
+        result: list[str] = []
+        for uid_bytes, ts_bytes in raw_map.items():
+            uid = uid_bytes.decode() if isinstance(uid_bytes, bytes) else uid_bytes
+            try:
+                ts = float(ts_bytes)
+            except (ValueError, TypeError):
+                continue
+            if now - ts <= max_age_s:
+                result.append(uid)
+        return result
+
+    def store_camid_uuid_mapping(
+        self, camera_id: str, person_int_id: int, uuid: str, ttl: int = 600,
+    ) -> None:
+        """Cache a confirmed camera-local person ID → UUID mapping.
+
+        Once we establish that cam:Camera_01:1 is UUID X, this cache
+        allows all subsequent detections for person 1 on Camera_01 to
+        use the same UUID without re-resolving visibility each frame.
+        TTL matches track_seen_ttl (default 600s).
+        """
+        key = f"uuid_map:{camera_id}:{person_int_id}"
+        self._r.setex(key, ttl, uuid)
+
+    def get_uuid_for_camid(
+        self, camera_id: str, person_int_id: int,
+    ) -> Optional[str]:
+        """Look up cached UUID for a camera-local person ID."""
+        raw = self._r.get(f"uuid_map:{camera_id}:{person_int_id}")
+        if raw is None:
+            return None
+        return raw.decode() if isinstance(raw, bytes) else raw
+
+    def clear_camid_uuid_mapping(
+        self, camera_id: str, person_int_id: int,
+    ) -> None:
+        """Clear the cached UUID for a camera-local person ID.
+
+        Called when continuity check fails (different person reusing same ID).
+        """
+        self._r.delete(f"uuid_map:{camera_id}:{person_int_id}")
+
     # ── UUID ↔ camera bbox mapping (populated from regulated scene topic) ──
 
     def store_uuid_camera_bounds(
@@ -341,6 +448,13 @@ class RedisEventRepository(EventRepository):
             try:
                 ref = json.loads(bbox_bytes)
             except (json.JSONDecodeError, ValueError):
+                continue
+            # Skip projected bounds — they use 3D-projected coordinates
+            # that don't match the camera topic's pixel-space bboxes.
+            if ref.get("projected"):
+                continue
+            # Skip invalid bounds (negative or zero dimensions)
+            if ref.get("width", 0) <= 0 or ref.get("height", 0) <= 0:
                 continue
             iou = _compute_iou(bbox, ref)
             if iou > best_iou:
@@ -445,11 +559,38 @@ class RedisEmbeddingMappingRepository(EmbeddingMappingRepository):
 # ── Module-level helpers ────────────────────────────────────────────────────
 
 
-def _compute_iou(a: dict, b: dict) -> float:
+def _normalize_bbox(bbox) -> dict:
+    """Convert any bbox format to {x, y, width, height} dict.
+
+    Handles: [x1, y1, x2, y2] list, {x, y, width, height} dict,
+    and {x1, y1, x2, y2} or {left, top, right, bottom} dicts.
+    Returns a dict with keys x, y, width, height. Returns zero-bbox on failure.
+    """
+    if isinstance(bbox, (list, tuple)) and len(bbox) >= 4:
+        x1, y1, x2, y2 = float(bbox[0]), float(bbox[1]), float(bbox[2]), float(bbox[3])
+        return {"x": int(min(x1, x2)), "y": int(min(y1, y2)),
+                "width": int(abs(x2 - x1)), "height": int(abs(y2 - y1))}
+    if isinstance(bbox, dict):
+        if "width" in bbox and "height" in bbox:
+            return bbox
+        if "x2" in bbox and "y2" in bbox:
+            x1 = float(bbox.get("x1", bbox.get("x", 0)))
+            y1 = float(bbox.get("y1", bbox.get("y", 0)))
+            x2 = float(bbox["x2"])
+            y2 = float(bbox["y2"])
+            return {"x": int(min(x1, x2)), "y": int(min(y1, y2)),
+                    "width": int(abs(x2 - x1)), "height": int(abs(y2 - y1))}
+    return {"x": 0, "y": 0, "width": 0, "height": 0}
+
+
+def _compute_iou(a, b) -> float:
     """Compute Intersection-over-Union for two bounding boxes.
 
-    Each bbox is a dict with keys: x, y, width, height.
+    Accepts any bbox format: [x1,y1,x2,y2] list or {x,y,width,height} dict.
     """
+    a = _normalize_bbox(a)
+    b = _normalize_bbox(b)
+
     ax1 = a.get("x", 0)
     ay1 = a.get("y", 0)
     ax2 = ax1 + a.get("width", 0)

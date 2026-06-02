@@ -289,6 +289,9 @@ if [ -n "${POST_INFERENCE}" ]; then
     POST_INFERENCE_CHAIN="! ${POST_INFERENCE}"
 fi
 
+CLIP_REID_PRECISION="${CLIP_REID_PRECISION:-FP16}"
+FACE_DETECTION_PRECISION="${FACE_DETECTION_PRECISION:-FP16}"
+
 # Camera 1 — always generated
 PIPELINE_CONFIG_1="${DLSTREAMER_OUTPUT_DIR}/${APP_NAME}-${CAMERA_NAME}-pipeline-config.json"
 sed -e "s|{{CAMERA_NAME}}|${CAMERA_NAME}|g" \
@@ -301,6 +304,8 @@ sed -e "s|{{CAMERA_NAME}}|${CAMERA_NAME}|g" \
     -e "s|{{REID_MODEL_PRECISION}}|${REID_MODEL_PRECISION}|g" \
     -e "s|{{REID_DEVICE}}|${REID_DEVICE}|g" \
     -e "s|{{MODEL_PRECISION}}|${MODEL_PRECISION}|g" \
+    -e "s|{{CLIP_REID_PRECISION}}|${CLIP_REID_PRECISION}|g" \
+    -e "s|{{FACE_DETECTION_PRECISION}}|${FACE_DETECTION_PRECISION}|g" \
     -e "s|{{DECODE}}|${DECODE}|g" \
     -e "s|{{PRE_PROCESS}}|${PRE_PROCESS}|g" \
     -e "s|{{PRE_PROCESS_CONFIG}}|${PRE_PROCESS_CONFIG}|g" \
@@ -332,6 +337,8 @@ if [ -n "${CAMERA_NAME_2}" ]; then
         -e "s|{{REID_MODEL_PRECISION}}|${REID_MODEL_PRECISION}|g" \
         -e "s|{{REID_DEVICE}}|${REID_DEVICE}|g" \
         -e "s|{{MODEL_PRECISION}}|${MODEL_PRECISION}|g" \
+        -e "s|{{CLIP_REID_PRECISION}}|${CLIP_REID_PRECISION}|g" \
+        -e "s|{{FACE_DETECTION_PRECISION}}|${FACE_DETECTION_PRECISION}|g" \
         -e "s|{{DECODE}}|${DECODE}|g" \
         -e "s|{{PRE_PROCESS}}|${PRE_PROCESS}|g" \
         -e "s|{{PRE_PROCESS_CONFIG}}|${PRE_PROCESS_CONFIG}|g" \
@@ -463,7 +470,8 @@ REID_MODEL=${REID_MODEL}
 REID_MODEL_PRECISION=${REID_MODEL_PRECISION}
 OVMS_IMAGE_TAG=${OVMS_IMAGE_TAG:-2026.1-gpu}
 
-# ---- Device Resource Config ----
+# ---- Device Resource Config (ITEP-92805: persisted so make up auto-applies NPU overlay) ----
+RESOURCE_CONFIG=${RESOURCE_CONFIG}
 DECODE=${DECODE}
 DETECT_DEVICE=${DETECT_DEVICE}
 REID_DEVICE=${REID_DEVICE}

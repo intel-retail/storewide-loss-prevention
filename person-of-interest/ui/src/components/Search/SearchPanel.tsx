@@ -13,6 +13,11 @@ const SearchPanel = () => {
   const [error, setError] = useState<string | null>(null);
   const [searched, setSearched] = useState(false);
 
+  const nowLocal = () => {
+    const d = new Date();
+    return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+  };
+
   const handleUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
@@ -85,12 +90,13 @@ const SearchPanel = () => {
           </p>
         </div>
 
-        {/* Time range */}
+        {/* Time range — max capped to current local time to prevent future date selection */}
         <label className="block">
           <span className="text-xs font-medium text-intel-gray">Start Time</span>
           <input
             type="datetime-local"
             value={startTime}
+            max={nowLocal()}
             onChange={(e) => setStartTime(e.target.value)}
             className="mt-1 block w-full rounded-lg border border-gray-300 px-2.5 py-1.5 text-xs focus:border-intel-blue focus:ring-1 focus:ring-intel-blue outline-none"
           />
@@ -101,6 +107,7 @@ const SearchPanel = () => {
           <input
             type="datetime-local"
             value={endTime}
+            max={nowLocal()}
             onChange={(e) => setEndTime(e.target.value)}
             className="mt-1 block w-full rounded-lg border border-gray-300 px-2.5 py-1.5 text-xs focus:border-intel-blue focus:ring-1 focus:ring-intel-blue outline-none"
           />

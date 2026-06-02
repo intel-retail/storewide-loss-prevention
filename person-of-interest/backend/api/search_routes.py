@@ -20,7 +20,7 @@ _detection_index = None
 _event_repo = None
 
 
-def init(embedding_factory, detection_index, event_repo) -> None:
+def init(embedding_factory, detection_index, event_repo, **_kwargs) -> None:
     global _embedding_factory, _detection_index, _event_repo
     _embedding_factory = embedding_factory
     _detection_index = detection_index
@@ -55,17 +55,35 @@ async def search_history(
     query_vector = np.array(result["embedding"], dtype=np.float32)
 
     # ── Search detection index ──
+    # Search with a wider net (3x top_k) to ensure enough candidates survive
+    # time-range and similarity filtering.  Detection FAISS stores first-frame
+    # embeddings which may score lower than the query's ideal match.
     t0 = time.perf_counter()
-    hits = _detection_index.search(query_vector, top_k=top_k)
+    search_k = max(top_k * 3, 50)
+    hits = _detection_index.search(query_vector, top_k=search_k)
     query_latency_ms = (time.perf_counter() - t0) * 1000
+
+    if hits:
+        sims = sorted((s for _, s in hits), reverse=True)
+        log.debug(
+            "Search: %d hits, top-5 sims=[%s], threshold=%.2f, range=%s→%s",
+            len(hits),
+            ", ".join(f"{s:.4f}" for s in sims[:5]),
+            get_config().search_similarity_threshold,
+            start_time, end_time,
+        )
 
     if not hits:
         return _empty_response(start_time, end_time, query_latency_ms)
 
-    # ── Collect best entry hit per track (above search similarity threshold) ──
+    # ── Collect best entry AND best exit hit per track ──
+    # Promoted exit vectors (added to FAISS by ExitPromoterThread) carry
+    # meta["role"]="exit".  We separate them so the search can show both
+    # entry and exit data even after the rolling Redis exit keys expire.
     cfg = get_config()
     threshold = cfg.search_similarity_threshold
     best_entry: dict[str, dict] = {}  # track_id → {faiss_id, similarity, meta}
+    best_exit: dict[str, dict] = {}   # track_id → {faiss_id, similarity, meta}
     for faiss_id, similarity in hits:
         if similarity < threshold:
             continue
@@ -78,8 +96,13 @@ async def search_history(
         if end_time and ts and ts > end_time:
             continue
         track_id = meta["track_id"]
-        if track_id not in best_entry or similarity > best_entry[track_id]["similarity"]:
-            best_entry[track_id] = {"faiss_id": faiss_id, "similarity": similarity, "meta": meta}
+        role = meta.get("role", "entry")
+        if role == "exit":
+            if track_id not in best_exit or similarity > best_exit[track_id]["similarity"]:
+                best_exit[track_id] = {"faiss_id": faiss_id, "similarity": similarity, "meta": meta}
+        else:
+            if track_id not in best_entry or similarity > best_entry[track_id]["similarity"]:
+                best_entry[track_id] = {"faiss_id": faiss_id, "similarity": similarity, "meta": meta}
 
     if not best_entry:
         return _empty_response(start_time, end_time, query_latency_ms)
@@ -87,17 +110,28 @@ async def search_history(
     # ── Check rolling exit vectors for the same tracks ──
     exit_sims = _detection_index.search_exits(query_vector, list(best_entry.keys()))
 
-    # Discard exit matches below the search threshold — they are likely
-    # a different person captured as the track's "exit" frame.
-    exit_sims = {tid: sim for tid, sim in exit_sims.items() if sim >= threshold}
+    # Rolling exits belong to the same tracker track as the entry — they are
+    # the last face seen before the person left.  Since the entry similarity
+    # already confirmed identity, we trust the exit frame without re-checking
+    # against the query threshold (the person may look very different at exit:
+    # back of head, far away, different angle).
+
+    # Fallback: use promoted FAISS exit vectors for tracks where the rolling
+    # Redis exit has already expired (TTL=15min).  Promoted exits are permanent
+    # in FAISS and carry the same track_id.
+    for track_id in best_entry:
+        if track_id not in exit_sims and track_id in best_exit:
+            exit_sims[track_id] = best_exit[track_id]["similarity"]
 
     # ── Build one grouped appearance per track (entry + exit on same card) ──
     appearances = []
     for track_id, entry in best_entry.items():
         exit_sim = exit_sims.get(track_id)
+        promoted_exit = best_exit.get(track_id)
         appearance = _build_grouped_appearance(
             entry["faiss_id"], entry["similarity"], entry["meta"],
             exit_sim=exit_sim, track_id=track_id,
+            promoted_exit=promoted_exit,
         )
         appearances.append(appearance)
 
@@ -127,6 +161,7 @@ def _build_grouped_appearance(
     meta: dict,
     exit_sim: Optional[float],
     track_id: str,
+    promoted_exit: Optional[dict] = None,
 ) -> dict:
     """Build one appearance card grouping entry and exit for the same track."""
     camera_id = meta.get("camera_id", "")
@@ -142,35 +177,62 @@ def _build_grouped_appearance(
                 entry_frame_url = f"/api/v1/frames/{_encode_key(key)}"
                 break
 
-    # ── Exit frame (rolling, only available within track_seen_ttl window) ──
+    # ── Exit frame and timestamp ──
+    # Priority: rolling Redis exit (fresh, within 15min) → promoted FAISS exit (permanent)
     exit_frame_url = None
     exit_timestamp = None
+    exit_bbox = None
     if exit_sim is not None and _detection_index is not None:
+        # Try rolling Redis exit first (still within track_seen_ttl)
         exit_frame_key = _detection_index.get_exit_frame_url_key(track_id)
         if exit_frame_key:
             exit_frame_url = f"/api/v1/frames/{_encode_key(exit_frame_key)}"
         exit_meta = _detection_index.get_exit_meta(track_id) or {}
         exit_timestamp = exit_meta.get("timestamp")
+        exit_bbox = exit_meta.get("bbox")
+
+        # Fallback to promoted FAISS exit if rolling Redis exit expired
+        if promoted_exit and not exit_timestamp:
+            exit_timestamp = promoted_exit["meta"].get("timestamp")
+            exit_bbox = exit_bbox or promoted_exit["meta"].get("bbox")
+        if promoted_exit and not exit_frame_url:
+            exit_faiss_id = promoted_exit["faiss_id"]
+            if _detection_index.get_frame(exit_faiss_id):
+                exit_frame_url = f"/api/v1/frames/{_encode_key(f'detection:frame:{exit_faiss_id}')}"
 
     # ── Zone dwells ──
+    # Region dwells are keyed by the SceneScape UUID (object_id used by
+    # ScenescapeRegionConsumer), while the detection index track_id is an
+    # appearance_id like "cam:Camera_02:1@1715100000" or "uuid-abc@1715100000".
+    # Extract the base object_id (before @timestamp) and also try the full
+    # track_id to cover both ID spaces.
     zone_appearances = []
     if _event_repo is not None:
-        dwells = _event_repo.get_region_dwells_for_object(track_id)
-        for dwell in dwells:
-            zone_entry: dict = {
-                "zone": dwell.get("region_name") or dwell.get("region_id", ""),
-                "scene_id": dwell.get("scene_id", ""),
-                "entry_time": dwell.get("entry_time", ""),
-                "exit_time": dwell.get("exit_time", ""),
-                "dwell_seconds": dwell.get("dwell_sec"),
-            }
-            entry_fk = dwell.get("entry_frame_key", "")
-            exit_fk = dwell.get("exit_frame_key", "")
-            if entry_fk:
-                zone_entry["entry_frame_url"] = f"/api/v1/frames/{_encode_key(entry_fk)}"
-            if exit_fk:
-                zone_entry["exit_frame_url"] = f"/api/v1/frames/{_encode_key(exit_fk)}"
-            zone_appearances.append(zone_entry)
+        base_object_id = track_id.rsplit("@", 1)[0] if "@" in track_id else track_id
+        lookup_ids = {track_id, base_object_id}
+        seen_dwell_keys: set = set()
+        for lookup_id in lookup_ids:
+            dwells = _event_repo.get_region_dwells_for_object(lookup_id)
+            for dwell in dwells:
+                # Dedup in case both IDs resolve to the same dwell records
+                dwell_key = (dwell.get("region_id", ""), dwell.get("entry_time", ""))
+                if dwell_key in seen_dwell_keys:
+                    continue
+                seen_dwell_keys.add(dwell_key)
+                zone_entry: dict = {
+                    "zone": dwell.get("region_name") or dwell.get("region_id", ""),
+                    "scene_id": dwell.get("scene_id", ""),
+                    "entry_time": dwell.get("entry_time", ""),
+                    "exit_time": dwell.get("exit_time", ""),
+                    "dwell_seconds": dwell.get("dwell_sec"),
+                }
+                entry_fk = dwell.get("entry_frame_key", "")
+                exit_fk = dwell.get("exit_frame_key", "")
+                if entry_fk:
+                    zone_entry["entry_frame_url"] = f"/api/v1/frames/{_encode_key(entry_fk)}"
+                if exit_fk:
+                    zone_entry["exit_frame_url"] = f"/api/v1/frames/{_encode_key(exit_fk)}"
+                zone_appearances.append(zone_entry)
         zone_appearances.sort(key=lambda z: z.get("entry_time") or "")
 
     # Overall similarity = best of entry and exit
@@ -188,6 +250,7 @@ def _build_grouped_appearance(
         "entry_frame_url": entry_frame_url,
         "exit_frame_url": exit_frame_url,
         "bbox": meta.get("bbox"),
+        "exit_bbox": exit_bbox,
         "zone_appearances": zone_appearances,
     }
 

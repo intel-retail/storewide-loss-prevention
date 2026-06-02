@@ -159,22 +159,23 @@ class EventService:
         )
 
     def store_region_exit(self, object_id, timestamp, scene_id, region_id, region_name,
-                          exit_frame_key=None):
+                          exit_frame_key=None, dwell_override=None):
         """Record region exit — calculate dwell time and store."""
         entry_data = self._repo.get_region_presence(object_id, scene_id, region_id)
-        dwell_sec = None
+        dwell_sec = dwell_override  # prefer SceneScape's server-computed dwell if provided
         entry_time = None
         if entry_data:
             # Prefer the region_name from entry (human-readable) over the exit fallback
             region_name = entry_data.get("region_name") or region_name
             entry_time = entry_data.get("first_seen")
-            try:
-                from datetime import datetime, timezone
-                t0 = datetime.fromisoformat(entry_data["first_seen"].replace("Z", "+00:00"))
-                t1 = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
-                dwell_sec = (t1 - t0).total_seconds()
-            except Exception:
-                pass
+            if dwell_sec is None:
+                try:
+                    from datetime import datetime, timezone
+                    t0 = datetime.fromisoformat(entry_data["first_seen"].replace("Z", "+00:00"))
+                    t1 = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
+                    dwell_sec = (t1 - t0).total_seconds()
+                except Exception:
+                    pass
         self._repo.store_region_dwell(
             object_id, timestamp, scene_id, region_id, region_name, dwell_sec,
             entry_time=entry_time,

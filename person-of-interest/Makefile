@@ -8,18 +8,26 @@
 # SceneScape-specific targets are in scenescape/Makefile.
 
 SCENESCAPE_DIR := ../scenescape
+
+# Device resource config: pass DEVICE=all-cpu.env, all-gpu-cpu.env, all-gpu.env, all-npu-cpu.env, or all-npu.env
+# When not passed on the command line, auto-detect from docker/.env (written by 'make init')
+# so the NPU overlay is automatically applied on subsequent 'make up' calls (ITEP-92805).
+_DEVICE_FROM_ENV := $(shell grep '^RESOURCE_CONFIG=' docker/.env 2>/dev/null | sed 's|.*configs/res/||' | tr -d '[:space:]')
+DEVICE ?= $(if $(_DEVICE_FROM_ENV),$(_DEVICE_FROM_ENV),all-gpu.env)
+RESOURCE_CONFIG := configs/res/$(DEVICE)
+
 COMPOSE_SCENESCAPE := docker compose --project-directory . --env-file docker/.env -f $(SCENESCAPE_DIR)/docker-compose.yaml -f docker-compose.scenescape-overrides.yml
 COMPOSE_LP := docker compose --project-directory . --env-file docker/.env -f docker/docker-compose.yaml
 COMPOSE_ALL := docker compose --project-directory . --env-file docker/.env -f $(SCENESCAPE_DIR)/docker-compose.yaml -f docker-compose.scenescape-overrides.yml -f docker/docker-compose.yaml
 # When stream-density override exists, layer it in
 CAMERAS_OVERRIDE := docker/docker-compose.cameras.yaml
 COMPOSE_ALL := $(if $(wildcard $(CAMERAS_OVERRIDE)),$(COMPOSE_ALL) -f $(CAMERAS_OVERRIDE),$(COMPOSE_ALL))
+# When an NPU device config is selected, layer in the NPU device override (ITEP-92805)
+NPU_OVERLAY := docker-compose.npu-overrides.yml
+COMPOSE_SCENESCAPE := $(COMPOSE_SCENESCAPE) $(if $(findstring npu,$(DEVICE)),-f $(NPU_OVERLAY),)
+COMPOSE_ALL := $(COMPOSE_ALL) $(if $(findstring npu,$(DEVICE)),-f $(NPU_OVERLAY),)
 
 RESULTS_PATH ?= ./results
-
-# Device resource config: pass DEVICE=all-cpu.env, all-gpu-cpu.env, all-gpu.env, all-npu-cpu.env, or all-npu.env
-DEVICE ?= all-gpu.env
-RESOURCE_CONFIG := configs/res/$(DEVICE)
 
 # ---- Initialization ----
 
@@ -37,7 +45,7 @@ init:
 		echo "  HOST_IP is required for WebRTC camera streams to work in the Live Alerts UI."; \
 		echo "  Set it to the network-reachable IP of this machine before running make init:"; \
 		echo ""; \
-		echo "    export HOST_IP=\$$(hostname -I | awk '{print \$$1}') && make init"; \
+		echo "    export HOST_IP=\$$(ip route get 1 | awk '{print \$$7; exit}') && make init"; \
 		echo ""; \
 		exit 1; \
 	fi
@@ -415,9 +423,18 @@ lp-build:
 
 .PHONY: clean
 clean:
-	-$(COMPOSE_SCENESCAPE) down -v
+	@# Flush Redis data while container is still running (best-effort)
+	@docker exec poi-redis redis-cli FLUSHALL 2>/dev/null || true
+	@# Remove FAISS indexes inside the container (best-effort)
+	@docker exec poi-backend rm -f /data/faiss/poi.index /data/faiss/id_map.json 2>/dev/null || true
+	@# Stop POI containers first (without -v to avoid shared network conflict)
+	-$(COMPOSE_POI) down 2>/dev/null || true
+	@# Now attempt full teardown with volumes (may warn about shared network — that's OK)
+	-$(COMPOSE_SCENESCAPE) down -v 2>/dev/null || true
 	-$(COMPOSE_LP) down -v 2>/dev/null || true
+	@# Clean local data dirs as final fallback
 	rm -rf data/faiss/* data/uploads/*
+	@echo "$(GREEN)=== Clean complete. Redis flushed, FAISS removed, containers stopped. ===$(NC)"
 
 .PHONY: clean-secrets
 clean-secrets:
@@ -490,7 +507,7 @@ help:
 	@echo "    - Internet access (to download sample videos)"
 	@echo ""
 	@echo "  POI System:"
-	@echo "    make build           - Build POI backend + UI images (REGISTRY=false for local)"
+	@echo "    make build           - Build POI backend + UI images"
 	@echo "    make up              - Start POI stack (backend, UI, Redis, alert-service)"
 	@echo "    make down            - Stop POI stack"
 	@echo "    make logs            - Follow POI logs"
@@ -524,18 +541,7 @@ build:
 	-$(COMPOSE_SCENESCAPE) pull 2>/dev/null || echo "SceneScape images already available locally"
 	@echo ""
 	@echo "$(BLUE)=== Building POI images ===$(NC)"
-ifeq ($(REGISTRY),false)
-	POI_BACKEND_IMAGE=poi-backend POI_UI_IMAGE=poi-ui $(COMPOSE_POI) build poi-backend ui
-	@# Persist image overrides so make up uses locally-built images
-	@grep -q '^POI_BACKEND_IMAGE=' docker/.env 2>/dev/null && \
-		sed -i 's|^POI_BACKEND_IMAGE=.*|POI_BACKEND_IMAGE=poi-backend|' docker/.env || \
-		echo 'POI_BACKEND_IMAGE=poi-backend' >> docker/.env
-	@grep -q '^POI_UI_IMAGE=' docker/.env 2>/dev/null && \
-		sed -i 's|^POI_UI_IMAGE=.*|POI_UI_IMAGE=poi-ui|' docker/.env || \
-		echo 'POI_UI_IMAGE=poi-ui' >> docker/.env
-else
 	$(COMPOSE_POI) build poi-backend ui
-endif
 	@echo ""
 	@echo "$(BLUE)=== Pulling benchmark metrics-collector image ===$(NC)"
 	@docker pull $(REGISTRY_BENCHMARK) 2>/dev/null && \
@@ -580,7 +586,7 @@ up:
 		echo "  HOST_IP is required for WebRTC camera streams to work in the UI."; \
 		echo "  Set it before running make init:"; \
 		echo ""; \
-		echo "    export HOST_IP=\$$(hostname -I | awk '{print \$$1}') && make init"; \
+		echo "    export HOST_IP=\$$(ip route get 1 | awk '{print \$$7; exit}') && make init"; \
 		echo ""; \
 		echo "  Or for a specific IP:"; \
 		echo ""; \
@@ -590,6 +596,9 @@ up:
 	fi
 	@# Ensure sample videos are copied into the Docker volume before starting cameras
 	@$(MAKE) -C $(SCENESCAPE_DIR) APP_DIR=$(CURDIR) init-sample-data
+	@# Ensure required Docker volumes exist (ITEP-92808: missing init-volumes causes
+	@# SceneScape containers to fail on fresh deployments via make init + make up)
+	@$(MAKE) -C $(SCENESCAPE_DIR) APP_DIR=$(CURDIR) init-volumes
 	@# Ensure TLS key files are readable inside Docker containers (fixes SSL
 	@# Permission denied when container UID differs from host UID)
 	@chmod 644 $(SCENESCAPE_DIR)/secrets/certs/*.key $(SCENESCAPE_DIR)/secrets/ca/*.key 2>/dev/null || true

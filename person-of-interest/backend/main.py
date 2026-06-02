@@ -125,8 +125,8 @@ async def lifespan(app: FastAPI):
     event_bus = EventBus()
 
     # ── Service ──
-    poi_service = POIService(poi_repo, faiss_repo, mapping_repo)
-    matching_service = MatchingService(matching_strategy, cache_repo)
+    poi_service = POIService(poi_repo, faiss_repo, mapping_repo, cache_repo)
+    matching_service = MatchingService(matching_strategy, cache_repo, poi_repo)
     event_service = EventService(event_repo)
     alert_service = AlertService(alert_strategies, event_repo, poi_repo, event_bus)
 
@@ -141,7 +141,11 @@ async def lifespan(app: FastAPI):
     # ── MQTT ──
     if cfg.mqtt_host:
         log.info("Starting MQTT consumer...")
-        _mqtt_adapter = MQTTAdapter(on_event=consumer.handle_event, on_region_event=region_consumer.handle_event)
+        _mqtt_adapter = MQTTAdapter(
+            on_event=consumer.handle_event,
+            on_region_event=region_consumer.handle_event,
+            on_native_region_event=region_consumer.handle_region_event,
+        )
         try:
             _mqtt_adapter.start()
         except Exception:

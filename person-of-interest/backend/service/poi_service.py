@@ -10,7 +10,7 @@ from typing import Optional
 import numpy as np
 
 from backend.domain.entities.poi import POI
-from backend.domain.interfaces.repository import EmbeddingMappingRepository, EmbeddingRepository, POIRepository
+from backend.domain.interfaces.repository import CacheRepository, EmbeddingMappingRepository, EmbeddingRepository, POIRepository
 from backend.factory.factories import EmbeddingModelFactory
 from backend.utils.builder import POIBuilder
 
@@ -27,10 +27,12 @@ class POIService:
         poi_repo: POIRepository,
         embedding_repo: EmbeddingRepository,
         mapping_repo: EmbeddingMappingRepository,
+        cache_repo: Optional[CacheRepository] = None,
     ) -> None:
         self._poi_repo = poi_repo
         self._embedding_repo = embedding_repo
         self._mapping_repo = mapping_repo
+        self._cache_repo = cache_repo
 
     async def create_poi(
         self,
@@ -113,5 +115,41 @@ class POIService:
             self._mapping_repo.remove_mappings_for_poi(poi_id)
         except Exception:
             log.exception("Failed to remove mapping for POI %s", poi_id)
+        # Flush all sticky-POI and object-cache keys that reference this POI
+        # so deleted POIs stop generating matches immediately.
+        self._flush_caches_for_poi(poi_id)
         log.info("Deleted POI %s", poi_id)
         return True
+
+    def _flush_caches_for_poi(self, poi_id: str) -> None:
+        """Scan and remove sticky-POI and object-cache keys referencing poi_id."""
+        if self._cache_repo is None:
+            return
+        try:
+            import json as _json
+            r = self._cache_repo._r  # type: ignore[attr-defined]
+            flushed = 0
+            for prefix in ("sticky_poi:", "object:"):
+                cursor = 0
+                while True:
+                    cursor, keys = r.scan(cursor, match=f"{prefix}*", count=200)
+                    for key in keys:
+                        raw = r.get(key)
+                        if not raw:
+                            continue
+                        text = raw.decode() if isinstance(raw, bytes) else raw
+                        try:
+                            data = _json.loads(text)
+                            cached_poi = data.get("poi_id") if isinstance(data, dict) else None
+                        except (ValueError, TypeError):
+                            # Legacy colon-separated format: "poi_id:similarity"
+                            cached_poi = text.split(":", 1)[0] if ":" in text else text
+                        if cached_poi == poi_id:
+                            r.delete(key)
+                            flushed += 1
+                    if cursor == 0:
+                        break
+            if flushed:
+                log.info("Flushed %d cache/sticky keys for deleted POI %s", flushed, poi_id)
+        except Exception:
+            log.exception("Failed to flush caches for POI %s", poi_id)

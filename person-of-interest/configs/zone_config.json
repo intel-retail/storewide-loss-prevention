@@ -34,7 +34,7 @@
     "seaweedfs_volume_port": 8080
   },
   "scenescape_api": {
-    "base_url": "https://web.scenescape.intel.com",
+    "base_url": "https://localhost",
     "auth_path": "/api/v1/auth",
     "scenes_path": "/api/v1/scenes",
     "regions_path": "/api/v1/regions",
@@ -57,5 +57,5 @@
     "min_throughput_ratio": 0.5,
     "results_path": "./results"
   },
-  "stream_density": 3
+  "stream_density": 4
 }
