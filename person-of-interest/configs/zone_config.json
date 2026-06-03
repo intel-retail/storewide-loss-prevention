@@ -19,7 +19,7 @@
     "version": "v2026.1.0-rc1",
     "controller_image": "intel/scenescape-controller",
     "manager_image": "intel/scenescape-manager",
-    "dlstreamer_version": "2026.1.0-ubuntu24-rc1.1",
+    "dlstreamer_version": "2026.1.0-ubuntu24-rc2",
     "api_user": "admin"
   },
   "store": {
