@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: (C) 2026 Intel Corporation
+# SPDX-License-Identifier: Apache-2.0
+
 FROM docker.io/intel/dlstreamer:2026.1.0-ubuntu24-rc2
 
 USER root
