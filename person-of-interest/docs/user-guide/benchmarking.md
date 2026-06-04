@@ -18,8 +18,10 @@ make update-submodules
 make download-models
 
 # 3. Generate configs and build images for your target device
-make init                         # CPU (default)
-make init DEVICE=all-gpu.env      # or GPU / NPU variant
+make init                         # GPU (default)
+make init DEVICE=all-cpu.env      # CPU variant
+make init DEVICE=all-gpu.env      # GPU (explicit)
+make init DEVICE=all-npu-cpu.env  # or NPU variant
 ```
 
 **Sample data requirements:**
@@ -38,8 +40,11 @@ make init DEVICE=all-gpu.env      # or GPU / NPU variant
 Measures how quickly a matched POI triggers an alert with **one camera scene**.
 
 ```bash
-# CPU (default, FP32)
+# GPU (default)
 make benchmark
+
+# CPU — all pipelines on CPU, FP32
+make benchmark DEVICE=all-cpu.env
 
 # GPU — detect+reid on GPU, FP16
 make benchmark DEVICE=all-gpu.env
@@ -77,10 +82,13 @@ latency exceeds `BENCHMARK_TARGET_LATENCY_MS`, finding the maximum supported
 stream density.
 
 ```bash
-# CPU
+# GPU (default)
 make benchmark-stream-density
 
-# GPU
+# CPU
+make benchmark-stream-density DEVICE=all-cpu.env
+
+# GPU (explicit)
 make benchmark-stream-density DEVICE=all-gpu.env
 
 # GPU detect / CPU reid
@@ -96,7 +104,7 @@ iterations — no manual re-init is required.
 
 | Parameter | Default | Description |
 |---|---|---|
-| `DEVICE` | `all-cpu.env` | Hardware profile — controls device, model precision, and pre-process backend |
+| `DEVICE` | `all-gpu.env` | Hardware profile — controls device, model precision, and pre-process backend |
 | `BENCHMARK_TARGET_LATENCY_MS` | `30000` | Latency threshold in ms |
 | `BENCHMARK_LATENCY_METRIC` | `avg` | Latency metric: `avg` or `max` |
 | `BENCHMARK_DURATION` | `120` | Max wait (seconds) for single-run benchmark |
@@ -153,8 +161,9 @@ benchmark virtual environment (set up automatically by the benchmark targets).
 
 ```bash
 # Run benchmarks
-make benchmark                              # Single-scene latency (CPU)
-make benchmark DEVICE=all-gpu.env           # Single-scene latency (GPU)
+make benchmark                              # Single-scene latency (GPU, default)
+make benchmark DEVICE=all-cpu.env           # Single-scene latency (CPU)
+make benchmark DEVICE=all-gpu.env           # Single-scene latency (GPU, explicit)
 make benchmark-stream-density               # Stream density scaling
 
 # Post-process results
