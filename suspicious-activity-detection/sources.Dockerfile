@@ -1,5 +1,8 @@
+# SPDX-FileCopyrightText: (C) 2026 Intel Corporation
+# SPDX-License-Identifier: Apache-2.0
+
 # -------- Stage 1: Download GPL Sources --------
-FROM intel/swlp-service:2026.1.0-rc1 AS source-builder
+FROM intel/swlp-service:2026.1.0-rc2 AS source-builder
 LABEL stage="source-builder"
 
 USER root
@@ -30,9 +33,9 @@ RUN if [ -f /etc/apt/sources.list ]; then \
     done
 
 # -------- Final Stage --------
-FROM intel/swlp-service:2026.1.0-rc1 AS final
+FROM intel/swlp-service:2026.1.0-rc2 AS final
 
-LABEL description="Source redistribution image for GPL-licensed packages in intel/hl-ai-nicu-backend:2026.1.0-rc1"
+LABEL description="Source redistribution image for GPL-licensed packages in intel/swlp-service:2026.1.0-rc2"
 
 USER root
 

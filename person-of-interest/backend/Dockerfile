@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: (C) 2026 Intel Corporation
+# SPDX-License-Identifier: Apache-2.0
+
 # ── Stage 1: Builder ──────────────────────────────────────
 FROM python:3.12-slim AS builder
 
