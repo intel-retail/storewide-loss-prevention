@@ -19,9 +19,10 @@ RESOURCE_CONFIG := configs/res/$(DEVICE)
 COMPOSE_SCENESCAPE := docker compose --project-directory . --env-file docker/.env -f $(SCENESCAPE_DIR)/docker-compose.yaml -f docker-compose.scenescape-overrides.yml
 COMPOSE_LP := docker compose --project-directory . --env-file docker/.env -f docker/docker-compose.yaml
 COMPOSE_ALL := docker compose --project-directory . --env-file docker/.env -f $(SCENESCAPE_DIR)/docker-compose.yaml -f docker-compose.scenescape-overrides.yml -f docker/docker-compose.yaml
-# When stream-density override exists, layer it in
+# When stream-density override exists, layer it in only for density > 1
 CAMERAS_OVERRIDE := docker/docker-compose.cameras.yaml
-COMPOSE_ALL := $(if $(wildcard $(CAMERAS_OVERRIDE)),$(COMPOSE_ALL) -f $(CAMERAS_OVERRIDE),$(COMPOSE_ALL))
+_STREAM_DENSITY_FROM_ENV := $(shell grep '^STREAM_DENSITY=' docker/.env 2>/dev/null | cut -d= -f2 | tr -d '[:space:]')
+COMPOSE_ALL := $(if $(and $(wildcard $(CAMERAS_OVERRIDE)),$(filter-out 0 1,$(_STREAM_DENSITY_FROM_ENV))),$(COMPOSE_ALL) -f $(CAMERAS_OVERRIDE),$(COMPOSE_ALL))
 # When an NPU device config is selected, layer in the NPU device override (ITEP-92805)
 NPU_OVERLAY := docker-compose.npu-overrides.yml
 COMPOSE_SCENESCAPE := $(COMPOSE_SCENESCAPE) $(if $(findstring npu,$(DEVICE)),-f $(NPU_OVERLAY),)
@@ -352,24 +353,22 @@ poi-benchmark: ## Run a single-scene POI benchmark (detection-to-alert latency)
 	@echo ""
 	mkdir -p $(RESULTS_PATH)
 	@# Fix ownership if results/ was created by a Docker container (root-owned).
-	@# Uses docker run (no sudo needed) to chown inside a container that has access.
 	@if [ "$$(stat -c '%U' $(RESULTS_PATH) 2>/dev/null)" != "$$(id -un)" ]; then \
 		docker run --rm -v "$(CURDIR)/$(RESULTS_PATH)":/r debian:bookworm-slim \
 			chown -R "$(shell id -u):$(shell id -g)" /r && \
 		echo "  Fixed ownership of $(RESULTS_PATH)"; \
 	fi
 	$(BENCHMARK_VENV) && \
-	python3 $(POI_STREAM_DENSITY) run $(CURDIR) \
+	python3 $(POI_STREAM_DENSITY) \
 		--single_run \
 		--scenes 1 \
+		--benchmark_duration $(BENCHMARK_DURATION) \
+		--poi_scripts_dir $(CURDIR)/benchmark \
+		--app_dir $(CURDIR) \
 		--target_latency_ms $(BENCHMARK_TARGET_LATENCY_MS) \
 		--latency_metric $(BENCHMARK_LATENCY_METRIC) \
-		--init_duration $(BENCHMARK_INIT_DURATION) \
-		--stabilise_duration $(BENCHMARK_STABILISE_DURATION) \
-		--benchmark_duration $(BENCHMARK_DURATION) \
-		--resource_config $(BENCHMARK_RESOURCE_CONFIG) \
-		--results_dir $(CURDIR)/$(RESULTS_PATH)
-
+		--results_dir $(CURDIR)/$(RESULTS_PATH) \
+		--resource_config $(BENCHMARK_RESOURCE_CONFIG)
 .PHONY: poi-benchmark-stream-density
 poi-benchmark-stream-density: ## Iteratively increase scenes until POI latency threshold
 	@echo "╔══════════════════════════════════════════════════════════════════╗"
@@ -386,14 +385,15 @@ poi-benchmark-stream-density: ## Iteratively increase scenes until POI latency t
 	@echo ""
 	mkdir -p $(RESULTS_PATH)
 	@# Fix ownership if results/ was created by a Docker container (root-owned).
-	@# Uses docker run (no sudo needed) to chown inside a container that has access.
 	@if [ "$$(stat -c '%U' $(RESULTS_PATH) 2>/dev/null)" != "$$(id -un)" ]; then \
 		docker run --rm -v "$(CURDIR)/$(RESULTS_PATH)":/r debian:bookworm-slim \
 			chown -R "$(shell id -u):$(shell id -g)" /r && \
 		echo "  Fixed ownership of $(RESULTS_PATH)"; \
 	fi
 	$(BENCHMARK_VENV) && \
-	python3 $(POI_STREAM_DENSITY) run $(CURDIR) \
+	python3 $(POI_STREAM_DENSITY) \
+		--poi_scripts_dir $(CURDIR)/benchmark \
+		--app_dir $(CURDIR) \
 		--target_latency_ms $(BENCHMARK_TARGET_LATENCY_MS) \
 		--latency_metric $(BENCHMARK_LATENCY_METRIC) \
 		--scene_increment $(BENCHMARK_SCENE_INCREMENT) \
@@ -401,8 +401,9 @@ poi-benchmark-stream-density: ## Iteratively increase scenes until POI latency t
 		--stabilise_duration $(BENCHMARK_STABILISE_DURATION) \
 		--max_iterations $(BENCHMARK_MAX_ITERATIONS) \
 		--max_alert_wait $(BENCHMARK_MAX_ALERT_WAIT) \
-		--resource_config $(BENCHMARK_RESOURCE_CONFIG) \
-		--results_dir $(CURDIR)/$(RESULTS_PATH)
+		--results_dir $(CURDIR)/$(RESULTS_PATH) \
+		--resource_config $(BENCHMARK_RESOURCE_CONFIG)
+
 
 .PHONY: poi-stream-density
 poi-stream-density: poi-benchmark-stream-density ## Alias for poi-benchmark-stream-density

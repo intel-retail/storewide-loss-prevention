@@ -57,5 +57,5 @@
     "min_throughput_ratio": 0.5,
     "results_path": "./results"
   },
-  "stream_density": 3
+  "stream_density": 4
 }
