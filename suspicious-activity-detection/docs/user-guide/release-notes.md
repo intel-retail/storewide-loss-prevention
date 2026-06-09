@@ -9,11 +9,22 @@
 
 **Release Date**: May 2026
 
-**New Features**:
+**New**:
 
-- **Declarative rule engine**: Configurable rules in `configs/rules.yaml` with variable
-  substitution, session flags, and conditional alert severity escalation — no code changes
-  needed to add or modify detection rules
+- **Detecting suspicious behavior**:
+
+  | Activity | Trigger | Alert Level |
+  |---|---|---|
+  | Merchandise Concealment | Pose + VLM confirms suspicious behavior | WARNING |
+  | Checkout Bypass | Visited HIGH_VALUE zone, exited without CHECKOUT | WARNING / CRITICAL |
+  | Loitering | Dwell time exceeds threshold in HIGH_VALUE zone | WARNING |
+  | Repeated Visits | Re-entries ≥ threshold to the same HIGH_VALUE zone | WARNING |
+  | Restricted Zone Violation | Entered a RESTRICTED zone | CRITICAL |
+
+- **Declarative rule engine**: Rules configuration moved from code to
+  declarative `configs/rules.yaml` with variable substitution, session flags,
+  and conditional alert severity escalation — no code changes needed to add or
+  modify detection rules
 - **Behavioral analysis with VLM**: Two-stage pipeline using YOLO pose estimation followed
   by Qwen2.5-VL-7B-Instruct VLM inference via OVMS for concealment detection in
   high-value zones
@@ -29,6 +40,8 @@
   SceneScape instance as an importable zip file
 - **Per-camera pipeline configs**: DLStreamer pipeline configs are generated dynamically
   per camera from zone_config.json
+- **Benchmark submodule**: Benchmark targets now use performance-tools submodule
+  instead of inline scripts.
 - **Stream density benchmarking**: Integrated performance-tools submodule with `make benchmark`,
   `make benchmark-stream-density`, and `make consolidate-metrics` targets
 - **App-specific controller configs**: Tracker and reid configs moved from SceneScape to
@@ -36,16 +49,11 @@
 - **Device resource configs**: Selectable device profiles (`all-gpu-cpu.env`, `all-npu-cpu.env`,
   etc.) via `DEVICE=` parameter with automatic validation
 
-**Bug Fixes**:
+**Fixed**:
 
 - Fixed behavioral analysis timeout when VLM inference exceeds default HTTP timeout
 - Fixed rule engine variable substitution not applying environment overrides
 - Fixed Gradio UI health check failing on startup race condition
-
-**Breaking Changes**:
-
-- Rules configuration moved from code to declarative `configs/rules.yaml`
-- Benchmark targets now use performance-tools submodule instead of inline scripts
 
 ### Version 1.0.0
 
