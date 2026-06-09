@@ -9,8 +9,14 @@
 
 **Release Date**: May 2026
 
-**New Features**:
+**New**:
 
+- **Search API response format**: `visits[]` changed to `appearances[]` with entry/exit
+  similarity and frame URLs
+- **Dynamic SceneScape configuration**: All environment variables are now auto-generated
+  from `configs/zone_config.json` via `make init` that replaced `make init-env`.
+  In result, manual editing of `.env` is not required.
+- Benchmark targets now use performance-tools submodule instead of backend benchmarks
 - **Two-stage offline search**: Historical search now uses a two-stage pipeline — first
   searches enrolled POI index, then falls back to the all-detections index for non-enrolled
   persons
@@ -20,32 +26,24 @@
   with zone-level entry/exit frames for dwell records
 - **Track purity filter**: Prevents false positives from DLStreamer track ID reuse by
   checking per-POI event counts and filtering tracks with < 40% purity
-- **Dynamic SceneScape configuration**: All environment variables are now auto-generated
-  from `configs/zone_config.json` via `make init` — eliminates manual `.env` editing
 - **Scene export script**: `make export-scene` exports scene config from a running
   SceneScape instance as an importable zip file
 - **Per-camera pipeline configs**: DLStreamer pipeline configs are generated dynamically
   per camera from zone_config.json
+- **Benchmark submodule**: Benchmark targets now use performance-tools submodule
+  instead of backend benchmarks
 - **Stream density benchmarking**: Integrated performance-tools submodule with `make benchmark`,
-  `make benchmark-stream-density`,   `make consolidate-metrics`, and `make plot-metrics` targets
+  `make benchmark-stream-density`, `make consolidate-metrics`, and `make plot-metrics` targets
 - **App-specific controller configs**: Tracker and reid configs moved from SceneScape to
   each app's `configs/` directory (POI: cosine/0.97, SAD: L2/30)
 
-**Bug Fixes**:
+**Fixed**:
 
 - Fixed offline search returning false positives due to missing similarity threshold
 - Fixed UI crash on search results when accessing removed `search_stats` fields
 - Fixed non-enrolled persons not found in search (cross-domain embedding gap between
   OpenVINO enrollment and DLStreamer runtime)
 - Resolved merge conflicts from suryam/poi branch (entry/exit grouped tracks)
-
-**Breaking Changes**:
-
-- Search API response format changed: `visits[]` → `appearances[]` with entry/exit
-  similarity and frame URLs
-- Environment setup: `make init-env` replaced by `make init` (generates .env from
-  zone_config.json)
-- Benchmark targets now use performance-tools submodule instead of backend benchmarks
 
 ### Version 1.0.0
 
