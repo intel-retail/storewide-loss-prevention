@@ -10,9 +10,9 @@ This section collects the guides for the Suspicious Activity Detection applicati
 :::{toctree}
 :hidden:
 
-Setup SceneScape <./scenescape-setup.md>
-./pattern-authoring-guide.md
-Benchmarking <./benchmarking.md>
+Setup SceneScape <./how-to-guides/scenescape-setup.md>
+./how-to-guides/pattern-authoring-guide.md
+Benchmarking <./how-to-guides/benchmarking.md>
 
 :::
 hide_directive-->
