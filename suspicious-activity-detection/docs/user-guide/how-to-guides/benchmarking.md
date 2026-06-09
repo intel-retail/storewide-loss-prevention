@@ -16,7 +16,6 @@ make download-sample-data   # downloads video to scenescape/sample_data/
 make download-models        # downloads models to models/ (detect_models/, reid_models/, vlm_models/)
 ```
 
-
 ## Quick Start
 
 ### Single-Scene Benchmark
@@ -47,10 +46,10 @@ make benchmark-stream-density
 At each iteration the framework:
 
 1. Updates `stream_density` in `configs/zone_config.json`.
-2. Re-runs `init.sh` to regenerate `.env` and the DLStreamer pipeline config.
+2. Re-runs `init.sh` to regenerate `.env` and the DL Streamer pipeline config.
 3. Generates `docker/docker-compose.cameras.yaml` with additional RTSP
    camera streams (`lp-cams-N`) for each new camera.
-4. Restarts `scene-import`, `lp-video` (DLStreamer), and `swlp-service`.
+4. Restarts `scene-import`, `lp-video` (DL Streamer), and `swlp-service`.
 5. Collects latency samples from `swlp-service` docker logs and
    `vlm_application_metrics` files.
 
@@ -95,7 +94,7 @@ Set `REGISTRY=false` to force a local build when running `make benchmark` or
 
 Both `make benchmark` and `make benchmark-stream-density` use the `DEVICE`
 parameter to select an inference device profile (same as `make up`). The
-profile controls the DLStreamer decode chain, detection device, and
+profile controls the DL Streamer decode chain, detection device, and
 re-identification device:
 
 ```bash

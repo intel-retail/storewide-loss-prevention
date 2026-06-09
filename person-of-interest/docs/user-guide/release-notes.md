@@ -18,13 +18,13 @@
   (spaced 10 seconds apart) for more robust matching
 - **Entry/exit frame capture**: Search results include entry and exit frames per track,
   with zone-level entry/exit frames for dwell records
-- **Track purity filter**: Prevents false positives from DLStreamer track ID reuse by
+- **Track purity filter**: Prevents false positives from DL Streamer track ID reuse by
   checking per-POI event counts and filtering tracks with < 40% purity
 - **Dynamic SceneScape configuration**: All environment variables are now auto-generated
   from `configs/zone_config.json` via `make init` — eliminates manual `.env` editing
 - **Scene export script**: `make export-scene` exports scene config from a running
   SceneScape instance as an importable zip file
-- **Per-camera pipeline configs**: DLStreamer pipeline configs are generated dynamically
+- **Per-camera pipeline configs**: DL Streamer pipeline configs are generated dynamically
   per camera from zone_config.json
 - **Stream density benchmarking**: Integrated performance-tools submodule with `make benchmark`,
   `make benchmark-stream-density`,   `make consolidate-metrics`, and `make plot-metrics` targets
@@ -36,7 +36,7 @@
 - Fixed offline search returning false positives due to missing similarity threshold
 - Fixed UI crash on search results when accessing removed `search_stats` fields
 - Fixed non-enrolled persons not found in search (cross-domain embedding gap between
-  OpenVINO enrollment and DLStreamer runtime)
+  OpenVINO™ enrollment and DL Streamer runtime)
 - Resolved merge conflicts from suryam/poi branch (entry/exit grouped tracks)
 
 **Breaking Changes**:
@@ -56,11 +56,11 @@
 - Real-time POI face matching using FAISS cosine similarity on 256-d embeddings from
   `face-reidentification-retail-0095`
 - POI enrollment via REST API with automatic face detection and embedding generation
-  using Intel® OpenVINO™
+  using OpenVINO™
 - Historical search API — upload an image and get a timeline of appearances across all
   cameras, with region dwell times and thumbnails
 - Multi-strategy alert delivery — WebSocket (to UI), MQTT publish, webhook POST, and
-  logging, with configurable dedup and suppression
+  logging, with configurable deduplication and suppression
 - React + TypeScript UI for POI management, real-time alert monitoring, and historical
   investigation
 - Cache-Aside pattern for object-to-POI mapping — avoids repeated FAISS searches for the
@@ -91,5 +91,5 @@
   configured, thumbnails may be empty.
 - SceneScape integration is required for region tracking and dwell time features; without
   SceneScape, only per-camera tracking is available.
-- Alert dedup window is per `(object_id, poi_id)` pair — a different POI match for the same
+- Alert deduplication window is per `(object_id, poi_id)` pair — a different POI match for the same
   person will generate a new alert immediately.

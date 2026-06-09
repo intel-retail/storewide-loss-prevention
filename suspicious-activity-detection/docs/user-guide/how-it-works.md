@@ -17,7 +17,7 @@ The main services in this deployment are:
 - [Behavioral Analysis Service](#behavioral-analysis-service)
 - [Alert Service](#alert-service)
 - [Frame Storage (SeaweedFS / MinIO)](#frame-storage-seaweedfs--minio)
-- [Store Wide Loss Prevention Suspicious UI](#store-wide-loss-prevention-suspicious-ui)
+- [Store-Wide Loss Prevention Suspicious UI](#store-wide-loss-prevention-suspicious-ui)
 
 The following sections describe each service in more detail.
 
@@ -25,7 +25,7 @@ The following sections describe each service in more detail.
 
 Intel® SceneScape provides the upstream tracking pipeline:
 
-- **DLStreamer pipeline:** Person detection (`person-detection-retail-0013`)
+- **DL Streamer pipeline:** Person detection (`person-detection-retail-0013`)
   and re-identification (`person-reidentification-retail-0277`) on the camera
   stream.
 - **Controller:** Multi-camera fusion, persistent person identity (`object_id`),
@@ -86,7 +86,7 @@ swlp-service:
 
 - **Time-window dedup:** Per alert type, configurable in `alert-config.yaml`
   (for example, `CONCEALMENT` window 60 s, `LOITERING` window 120 s). Uses
-  `sha1(scene_id, person_id, zone_id)` as the dedup key.
+  `sha1(scene_id, person_id, zone_id)` as the deduplication key.
 - **Delivery routing:** Each alert type maps to one or more delivery
   channels — typically an MQTT topic per type plus a structured log entry.
 - **Persistence:** Recent alerts are retained for retrieval via the LP REST
@@ -116,7 +116,7 @@ bucket: behavioral-frames
 - **Evidence retention:** Per-alert prefix keeps the frames that backed the
   alert; retention is configurable.
 
-### Store Wide Loss Prevention Suspicious UI
+### Store-Wide Loss Prevention Suspicious UI
 
 The **Gradio UI** provides a web-based dashboard:
 
@@ -145,7 +145,7 @@ Putting the pieces together:
    session, and returns a list of actions.
 4. **Action execution** —
    - `alert` actions build an `Alert` object, apply the configured
-     `fire_once_per` dedup, build a `details` payload from YAML, and
+     `fire_once_per` deduplication, build a `details` payload from YAML, and
      publish to the Alert Service.
    - `escalate` actions invoke a registered escalation service. For
      HIGH_VALUE zones this starts the Behavioral Analysis Orchestrator,
@@ -186,12 +186,12 @@ while sharing common infrastructure (MQTT, frame storage, configuration).
 
 | Concern | File |
 |---------|------|
-| Detection rules, thresholds, severity, dedup, escalation | `configs/rules.yaml` |
+| Detection rules, thresholds, severity, deduplication, escalation | `configs/rules.yaml` |
 | Session flags (zone-visited / external) | `configs/rules.yaml` (`session_flags:`) |
 | Zone name → type mapping | `configs/zone_config.json` |
-| Alert routing and time-window dedup | `configs/alert-config.yaml` |
+| Alert routing and time-window deduplication | `configs/alert-config.yaml` |
 | MQTT, storage, services | `configs/.env.example` / `docker/.env` |
-| DLStreamer pipeline template | `configs/pipeline-config.json` |
+| DL Streamer pipeline template | `configs/pipeline-config.json` |
 
-Most behavior changes are YAML edits — adding a new rule, severity, dedup
+Most behavior changes are YAML edits — adding a new rule, severity, deduplication
 scope, or alert type does not require Python changes.

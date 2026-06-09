@@ -36,7 +36,7 @@ make init
 
 Use `make init` to generate `.env` and pipeline configs from `zone_config.json`. If you
 only need to create `.env` from `.env.example`, run `make init-env` instead. See
-[Get Started](../get-started.md#step-2-initialize-environment) for required variables.
+[Get Started](../get-started.md#4-initialize-environment) for the required variables.
 
 ## Step 3: Build the Docker Images
 

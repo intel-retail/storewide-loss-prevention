@@ -37,7 +37,7 @@ Before starting, ensure these files are in place:
 |------|---------|
 | `configs/.env.example` | Reference for all environment variables; copied to `docker/.env` by `init.sh` |
 | `configs/zone_config.json` | Zone name → type mapping (for example, `aisle1` → `HIGH_VALUE`) |
-| `configs/rules.yaml` | Declarative rules: triggers, conditions, actions, and dedup scope |
+| `configs/rules.yaml` | Declarative rules: triggers, conditions, actions, and deduplication scope |
 | `../scenescape/webserver/storewide-loss-prevention.zip` | Scene map + zone definitions imported into SceneScape |
 | `../scenescape/sample_data/lp-camera1.mp4` | Sample video used by the camera replay |
 
@@ -60,7 +60,7 @@ exists, the download is skipped.
 
 ## 5. Download AI Models
 
-The first run requires downloading the OpenVINO and VLM models:
+The first run requires downloading the OpenVINO™ and VLM models:
 
 ```bash
 make download-models
@@ -147,7 +147,6 @@ continue to run normally.
 7. Starts all SceneScape and LP containers.
 8. Imports the scene map into SceneScape.
 
-
 ## 7. View Logs
 
 ```bash
@@ -168,9 +167,9 @@ Once running:
 
 | Service | URL | Credentials |
 |---------|-----|-------------|
-| SceneScape UI | https://localhost | `admin` / password printed by `make up` |
-| Gradio Dashboard | http://localhost:7860 | — |
-| LP REST API | http://localhost:8082 | — |
+| SceneScape UI | `https://localhost` | `admin` / password printed by `make up` |
+| Gradio Dashboard | `http://localhost:7860` | — |
+| LP REST API | `http://localhost:8082` | — |
 | LP logs | `make logs` | View all service logs |
 
 From the Gradio dashboard you can observe live alerts, evidence frames, and
@@ -191,7 +190,7 @@ curl http://localhost:8082/api/v1/lp/status
 
 ## 11. Tune Detection Behavior
 
-Detection thresholds, dedup scope, and severity escalation are defined
+Detection thresholds, deduplication scope, and severity escalation are defined
 declaratively in `configs/rules.yaml`. Edit the file and restart the
 swlp-service to apply changes:
 
@@ -247,4 +246,3 @@ get-started/system-requirements.md
 
 :::
 hide_directive-->
-
