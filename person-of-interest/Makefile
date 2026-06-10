@@ -217,15 +217,43 @@ _stop-metrics-collector:
 		$(COMPOSE_POI) --profile benchmark rm -f metrics-collector 2>/dev/null || true; \
 	fi
 
+# Check for python3-venv prerequisite and auto-install if missing
+.PHONY: _check-venv
+_check-venv:
+	@if ! python3 -c "import venv" 2>/dev/null; then \
+		echo "$(YELLOW)python3-venv not found. Attempting to install...$(NC)"; \
+		if command -v apt-get >/dev/null 2>&1; then \
+			echo "  Running: sudo apt-get install -y python3-venv"; \
+			sudo apt-get update -qq && sudo apt-get install -y python3-venv || { \
+				echo "$(RED)Failed to install python3-venv$(NC)"; \
+				echo "Please install manually: sudo apt install python3-venv"; \
+				exit 1; \
+			}; \
+			echo "$(GREEN)python3-venv installed successfully$(NC)"; \
+		elif command -v yum >/dev/null 2>&1; then \
+			echo "  Running: sudo yum install -y python3-venv"; \
+			sudo yum install -y python3-venv || { \
+				echo "$(RED)Failed to install python3-venv$(NC)"; \
+				echo "Please install manually: sudo yum install python3-venv"; \
+				exit 1; \
+			}; \
+			echo "$(GREEN)python3-venv installed successfully$(NC)"; \
+		else \
+			echo "$(RED)ERROR: python3-venv is not installed and could not auto-install$(NC)"; \
+			echo "Please install the python3-venv package for your system manually."; \
+			exit 1; \
+		fi; \
+	fi
+
 .PHONY: benchmark
-benchmark: _benchmark-fresh-start _benchmark-enroll _start-metrics-collector ## Single-scene POI benchmark with auto-enroll
+benchmark: _check-venv _benchmark-fresh-start _benchmark-enroll _start-metrics-collector ## Single-scene POI benchmark with auto-enroll
 	@$(MAKE) --no-print-directory poi-benchmark BENCHMARK_RESOURCE_CONFIG=$(BENCHMARK_RESOURCE_CONFIG); ret=$$?; \
 		$(MAKE) --no-print-directory _stop-metrics-collector; \
 		$(MAKE) --no-print-directory _benchmark-cleanup; \
 		exit $$ret
 
 .PHONY: benchmark-stream-density
-benchmark-stream-density: _benchmark-fresh-start _benchmark-enroll _start-metrics-collector ## Stream density with auto-enroll
+benchmark-stream-density: _check-venv _benchmark-fresh-start _benchmark-enroll _start-metrics-collector ## Stream density with auto-enroll
 	@$(MAKE) --no-print-directory poi-benchmark-stream-density BENCHMARK_RESOURCE_CONFIG=$(BENCHMARK_RESOURCE_CONFIG); ret=$$?; \
 		$(MAKE) --no-print-directory _stop-metrics-collector; \
 		$(MAKE) --no-print-directory _benchmark-cleanup; \
