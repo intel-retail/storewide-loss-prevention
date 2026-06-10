@@ -34,6 +34,9 @@ Important current limitation: the existing BA frame path stores full camera fram
 focused on `HIGH_VALUE` zones. Offline recall needs a recall-specific capture/index path
 that can include aisle zones and crop the person ROI before embedding.
 
+For example, if the investigator asks for `aisle2`, the system can only answer if frames
+for `aisle2` were already captured, stored, and indexed during that time window.
+
 ## 3. Design Decision
 
 Use VSS for **embedding generation**, not as the owner of the recall index.
@@ -53,7 +56,39 @@ VSS should provide:
 Reason: the VSS video-search ingestion path is file/video oriented. This recall use case is
 person-visit oriented and depends on SWLP metadata that VSS does not own.
 
-## 4. Architecture
+`2:00-3:00 PM` means a historical query over pre-stored/indexed evidence. It is not a live
+VLM scan at query time. Live MQTT frames must be captured and indexed continuously, or video
+files must be ingested beforehand, so the query can search existing vectors.
+
+## 4. Input And Storage Model
+
+Current BA capture is event-driven for `HIGH_VALUE` zones. VLM recall needs broader
+coverage:
+
+1. **Recall-enabled zones**
+   - Add a config flag/list for zones that should be searchable, for example `aisle2`,
+     `aisle7`, `checkout`, `exit`, or all configured zones.
+   - Do not hard-code recall to `HIGH_VALUE`.
+
+2. **Continuous or scheduled capture**
+   - While a person is visible in a recall-enabled zone, sample frames at a controlled rate.
+   - Store person crops or ROI-focused frames with SceneScape timestamps.
+   - The sample rate can be lower than live detection, but it must be enough for visual
+     confirmation and attribute recall.
+
+3. **Historical indexing**
+   - On visit exit or session expiry, create/update the vector record for that person visit.
+   - The index must be ready before an investigator asks the question.
+
+4. **Optional pre-stored video input**
+   - If the source is a pre-recorded store video instead of live SceneScape MQTT, run the
+     same pipeline as a backfill job: extract frames, associate them with zones/persons,
+     store evidence, generate embeddings, and write Qdrant records.
+
+So for `Show me the person in a blue shirt between 2:00-3:00 PM near aisle2`, the required
+input is already-indexed evidence for `aisle2` during `2:00-3:00 PM`.
+
+## 5. Architecture
 
 ```mermaid
 flowchart LR
@@ -73,7 +108,7 @@ flowchart LR
     API --> S3
 ```
 
-## 5. Indexing Flow
+## 6. Indexing Flow
 
 ```mermaid
 sequenceDiagram
@@ -86,16 +121,16 @@ sequenceDiagram
     participant VSS as VSS Embedding Service
     participant QD as Qdrant
 
-    SC->>RFA: camera frame {camera_name, timestamp, jpeg}
-    SM-->>RFA: active session context {person_id, camera, zone, bbox, entry_ts}
+    SC->>RFA: camera frame message
+    SM-->>RFA: active session context
     RFA->>RFA: sample frame and crop person ROI
     RFA->>S3: store recall frame
     SM->>IDX: visit finalized on EXITED or PERSON_LOST
     IDX->>S3: list frames for visit
-    IDX->>IDX: select best keyframes / compact montage
+    IDX->>IDX: select keyframes or montage
     IDX->>VLM: extract appearance attributes + caption
     VLM-->>IDX: structured attributes
-    IDX->>VSS: embed crop/montage and/or caption
+    IDX->>VSS: embed crop montage or caption
     VSS-->>IDX: vector
     IDX->>QD: upsert vector + SWLP payload
 ```
@@ -119,29 +154,29 @@ thumbnail_key  : SeaweedFS key
 frame_keys     : ordered SeaweedFS frame keys
 ```
 
-## 6. Query Flow
+## 7. Query Flow
 
 ```mermaid
 sequenceDiagram
     participant U as Investigator
     participant API as SWLP Search API
-    participant VLM as OVMS VLM parser/verifier
+    participant VLM as OVMS VLM parser
     participant VSS as VSS Embedding Service
     participant QD as Qdrant
     participant S3 as SeaweedFS
 
-    U->>API: Show me the person in a blue shirt between 2:00-3:00 PM near aisle 7
+    U->>API: search request
     API->>VLM: parse query into semantic text + filters
-    VLM-->>API: semantic_text, time_range, zone_hint, attributes
-    API->>API: resolve aisle 7 to zone_id/camera_id; convert local time to epoch_ms
-    API->>VSS: embed semantic_text
+    VLM-->>API: parsed query fields
+    API->>API: resolve zone and time filters
+    API->>VSS: embed query text
     VSS-->>API: query vector
-    API->>QD: vector search with hard filters {time overlap, zone_id/camera_id}
+    API->>QD: vector search with payload filters
     QD-->>API: candidate person visits
     opt precision mode
         API->>S3: fetch top-N thumbnails
         API->>VLM: verify requested attributes
-        VLM-->>API: yes/no + confidence
+        VLM-->>API: verification confidence
     end
     API-->>U: grouped results with thumbnail + montage URLs
 ```
@@ -154,11 +189,12 @@ AND zone_id IN resolved_zone_ids
 AND optional camera_id IN resolved_camera_ids
 ```
 
-## 7. Components To Build
+## 8. Components To Build
 
 1. **Recall Frame Adapter**: `swlp-service/services/recall_frame_adapter.py`
    - Register as another camera-image consumer or fan out from `MQTTService`.
    - Use active `PersonSession` state to associate frames with person/zone/camera.
+   - Capture all recall-enabled zones, not only `HIGH_VALUE` zones.
    - Sample frames; do not embed every MQTT frame.
    - Crop person ROI from `session.bbox` or SceneScape camera bounds.
    - Store selected frames under a recall prefix in SeaweedFS.
@@ -183,9 +219,10 @@ AND optional camera_id IN resolved_camera_ids
 
 6. **Investigator Search UI**: `ui/ui_gradio.py`
    - Query box, time range, zone/camera filters.
+   - Zone selector should use configured zone names such as `aisle2` / `aisle7`.
    - Results gallery grouped by `person_id` with thumbnail and montage playback.
 
-## 8. API Shape
+## 9. API Shape
 
 Request:
 
@@ -222,17 +259,105 @@ Response:
 }
 ```
 
-## 9. Phased Plan
+## 10. Phased Plan
 
 1. **Index foundation**: Qdrant, VSS embedding client, recall frame adapter, recall indexer.
 2. **Search API**: query parser, zone/time resolution, vector search, thumbnail endpoint.
 3. **UI**: Investigator Search tab/section with result gallery and montage playback.
 4. **Precision**: optional VLM re-rank, better crop selection, named vectors for image + text.
 
-## 10. Open Decisions
+## 11. Open Questions For Review
 
-- Which zones are recall-enabled: all zones, selected zones, or zone config flag?
-- Where to run recall indexer: inside `swlp-service` or as a separate service?
-- Which VSS embedding mode to use first: image crop, montage image, caption text, or named vectors?
-- Retention policy for recall frames, attributes, and vectors.
-- Store-local timezone source for natural-language time parsing.
+Use this section for the architecture/product discussion before implementation.
+
+### Input Coverage
+
+- Should recall work only for persons inside a region boundary, or also for persons near a
+   region/camera view even if SceneScape did not emit a region enter event?
+- Do we need recall across all cameras by default, or should the query stay scoped to the
+   camera(s) attached to the requested zone?
+
+### Video / Clip Storage
+
+- Do we need to store actual video clips for each region, or is storing sampled JPG frames
+   enough and generating a montage on demand acceptable?
+- If actual clips are required, who creates them: SceneScape/DLStreamer, SWLP, VSS, or a
+   separate recorder service?
+- If SWLP stores actual video clips, should those clips also be given to VSS for ingestion
+   and search, or should VSS only receive extracted frames/embeddings?
+- Should clips be stored per camera, per region, per person visit, or as continuous
+   time-based segments such as 1-minute MP4 files?
+- For `Show me the person in a blue shirt between 2:00-3:00 PM near aisle 7`, should the UI
+   play only the matched person's cropped montage, the full aisle camera clip, or both?
+- If we store per-region clips, how do we handle overlapping regions visible in the same
+   camera frame without duplicating video storage too much?
+- What playback quality is expected: thumbnail only, GIF/montage, short MP4 time-lapse, or
+   smooth full-fps video?
+
+### Frame Capture And Indexing
+
+- What capture rate is acceptable for recall: 1 fps, 5 fps, current BA cadence, or a
+   separate per-zone recall cadence?
+- Should the recall adapter crop each person ROI before storing, or store full frames and
+   crop later during indexing?
+- How do we select the best keyframes for appearance search: largest bbox, least occluded,
+   highest pose confidence, or evenly sampled frames?
+- Should indexing happen only when a visit exits, periodically during long visits, or both?
+- How do we backfill the index if frames or videos already exist before this feature is
+   enabled?
+
+### Query Semantics
+
+- When the query says `between 2:00-3:00 PM`, which timezone should be used: store-local
+   timezone, browser timezone, or explicit timezone in the request?
+- Should user-entered zone names like `aisle 7`, `aisle7`, and `aisle_7` be normalized to
+   the same configured zone?
+- If the query includes a zone name that is not configured, should the API return an error,
+   search all cameras, or ask the user to refine the query?
+- Should structured UI filters override the natural-language parse when both are present?
+- How should results be grouped: by `person_id`, by camera, by zone visit, or by continuous
+   timeline?
+
+### VSS Integration
+
+- Are we using only VSS Multimodal Embedding Serving, or do we also want to deploy VSS
+   search/data-prep services for demos?
+- If stored clips are sent to VSS, does VSS become a secondary searchable video index, or
+   does SWLP still remain the primary search index with VSS used only for enrichment?
+- Which embedding should be primary: cropped person image, compact montage image, VLM
+   caption text, or multiple named vectors?
+- Does the selected VSS embedding endpoint support the exact input types we need for both
+   indexing and query embedding?
+- If VSS owns any storage/index internally, how will we join VSS results back to SWLP
+   `person_id`, `zone_id`, `camera_id`, and frame/clip URLs?
+
+### Storage, Retention, And Privacy
+
+- How long should recall evidence be retained: hours, days, or configurable per store?
+- Should retention apply equally to raw frames/video, generated clips, VLM attributes, and
+   vector embeddings?
+- Who is allowed to use investigator recall, and do we need audit logs for every query and
+   viewed clip?
+- Are appearance attributes such as clothing, age range, and gender presentation allowed by
+   the product/privacy requirements, or should some fields be removed?
+
+### API And UI
+
+- Should the API return a generated montage URL immediately, or generate clips lazily when
+   the investigator opens a result?
+- Should the UI show confidence, matched attributes, camera, zone, and exact time range for
+   each result?
+- Should investigators be able to refine results, for example `same person`, `show next
+   camera`, or `expand time window`?
+- What is the expected maximum result count and response latency for a one-hour query?
+
+### Operational Concerns
+
+- Can the existing hardware handle continuous recall capture plus VLM/indexing, or do we
+   need a separate service/container and rate limits?
+- What happens when VSS, Qdrant, or OVMS is down: buffer frames, skip indexing, or mark
+   visits as pending?
+- How do we monitor index lag so investigators know whether a recent time window is fully
+   searchable?
+- Do we need a reindex job when prompts, embedding models, zone mappings, or retention
+   policies change?
