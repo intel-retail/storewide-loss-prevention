@@ -51,7 +51,7 @@ init:
 		exit 1; \
 	fi
 	@echo "  HOST_IP=$(HOST_IP) (used for WebRTC ICE candidates)"
-	@$(MAKE) -C $(SCENESCAPE_DIR) APP_DIR=$(CURDIR) RESOURCE_CONFIG=$(RESOURCE_CONFIG) init
+	@$(MAKE) -C $(SCENESCAPE_DIR) APP_DIR=$(CURDIR) RESOURCE_CONFIG=$(RESOURCE_CONFIG) init download-models init-sample-data init-volumes
 	@# Pre-create bind-mounted directories as the host user so poi-backend
 	@# (which runs as HOST_UID:HOST_GID) can write uploads and results.
 	@mkdir -p data/uploads data/faiss results
@@ -359,12 +359,10 @@ poi-benchmark: ## Run a single-scene POI benchmark (detection-to-alert latency)
 		echo "  Fixed ownership of $(RESULTS_PATH)"; \
 	fi
 	$(BENCHMARK_VENV) && \
-	python3 $(POI_STREAM_DENSITY) \
+	python3 $(POI_STREAM_DENSITY) run $(CURDIR) \
 		--single_run \
 		--scenes 1 \
 		--benchmark_duration $(BENCHMARK_DURATION) \
-		--poi_scripts_dir $(CURDIR)/benchmark \
-		--app_dir $(CURDIR) \
 		--target_latency_ms $(BENCHMARK_TARGET_LATENCY_MS) \
 		--latency_metric $(BENCHMARK_LATENCY_METRIC) \
 		--results_dir $(CURDIR)/$(RESULTS_PATH) \
@@ -391,18 +389,14 @@ poi-benchmark-stream-density: ## Iteratively increase scenes until POI latency t
 		echo "  Fixed ownership of $(RESULTS_PATH)"; \
 	fi
 	$(BENCHMARK_VENV) && \
-	python3 $(POI_STREAM_DENSITY) \
-		--poi_scripts_dir $(CURDIR)/benchmark \
-		--app_dir $(CURDIR) \
-		--target_latency_ms $(BENCHMARK_TARGET_LATENCY_MS) \
-		--latency_metric $(BENCHMARK_LATENCY_METRIC) \
-		--scene_increment $(BENCHMARK_SCENE_INCREMENT) \
-		--init_duration $(BENCHMARK_INIT_DURATION) \
-		--stabilise_duration $(BENCHMARK_STABILISE_DURATION) \
-		--max_iterations $(BENCHMARK_MAX_ITERATIONS) \
-		--max_alert_wait $(BENCHMARK_MAX_ALERT_WAIT) \
-		--results_dir $(CURDIR)/$(RESULTS_PATH) \
-		--resource_config $(BENCHMARK_RESOURCE_CONFIG)
+	python3 $(POI_STREAM_DENSITY) run $(CURDIR) \
+			--single_run \
+			--scenes 1 \
+			--benchmark_duration $(BENCHMARK_DURATION) \
+			--target_latency_ms $(BENCHMARK_TARGET_LATENCY_MS) \
+			--latency_metric $(BENCHMARK_LATENCY_METRIC) \
+			--results_dir $(CURDIR)/$(RESULTS_PATH) \
+			--resource_config $(BENCHMARK_RESOURCE_CONFIG)
 
 
 .PHONY: poi-stream-density
