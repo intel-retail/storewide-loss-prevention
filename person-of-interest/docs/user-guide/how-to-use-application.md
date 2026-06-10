@@ -17,7 +17,7 @@ After deployment, access the system at:
 
 - **Initialization**: Wait a few seconds after startup for Redis, MQTT connection, and FAISS
   index to initialize.
-- **SceneScape Required**: Ensure Intel® SceneScape and DLStreamer pipelines are running
+- **SceneScape Required**: Ensure Intel® SceneScape and DL Streamer pipelines are running
   before starting the POI system.
 - **Recommended Browser**: Use Google Chrome for an optimal WebSocket experience.
 
@@ -60,7 +60,7 @@ Receive instant notifications when an enrolled POI is detected on any camera.
 **Alert Flow:**
 
 ```text
-Camera → DLStreamer → MQTT → POI Backend → FAISS Match → Alert Service → UI (WebSocket)
+Camera → DL Streamer → MQTT → POI Backend → FAISS Match → Alert Service → UI (WebSocket)
 ```
 
 #### 3. **Historical Search (Offline Investigation)**

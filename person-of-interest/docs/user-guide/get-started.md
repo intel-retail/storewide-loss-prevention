@@ -33,8 +33,8 @@ Before starting, ensure these files are in place:
 | File | Purpose |
 |------|---------|
 | `configs/zone_config.json` | Central configuration: scene, cameras, models, SceneScape images, zones |
-| `configs/res/*.env` | Device resource configs for DLStreamer pipeline (GPU, CPU, NPU profiles) |
-| `configs/pipeline-config.json` | DLStreamer pipeline template (rendered per camera by `init.sh`) |
+| `configs/res/*.env` | Device resource configs for DL Streamer pipeline (GPU, CPU, NPU profiles) |
+| `configs/pipeline-config.json` | DL Streamer pipeline template (rendered per camera by `init.sh`) |
 | `../scenescape/webserver/conference-room.zip` | Scene map + zone definitions imported into SceneScape |
 | `../scenescape/sample_data/Camera_01.mp4` | Sample video used by the camera replay |
 
@@ -76,7 +76,7 @@ The `zone_config.json` file defines:
 
 - `scene_name`, `scene_zip` for SceneScape scene setup
 - `cameras[]` as an array of `{name, video}` camera entries
-- `models` as the comma-separated OpenVINO model list
+- `models` as the comma-separated OpenVINO™ model list
 - `scenescape{}` for registry, version, and controller/manager image tags
 - `store{}` for store name and ID
 - `services{}` for ports, log level, and SeaweedFS settings
@@ -162,7 +162,7 @@ inference device, pre-process backend, model precision, and throughput options.
 
 - `docker/.env` — all environment variables for Docker Compose
 - SceneScape TLS certificates and secrets
-- Per-camera DLStreamer pipeline configuration files
+- Per-camera DL Streamer pipeline configuration files
 
 ## 5. Pull or Build Images
 
@@ -190,8 +190,8 @@ for detailed build options.
 
 ## 6. Download Models
 
-The OpenVINO face detection and re-identification models are required for both enrollment
-and DLStreamer inference:
+The OpenVINO™ face detection and re-identification models are required for both enrollment
+and DL Streamer inference:
 
 ```bash
 make download-models
@@ -213,7 +213,7 @@ make up
 > a different machine, verify `HOST_IP` in `docker/.env` is set to the correct
 > network-reachable IP.
 
-The DLStreamer pipeline runs four inference stages using the device and precision
+The DL Streamer pipeline runs four inference stages using the device and precision
 selected by `DEVICE` during `make init`:
 
 - **Person detection**: `person-detection-retail-0013`
@@ -235,7 +235,7 @@ make demo
 `make up` performs the following steps automatically:
 
 1. Detects and cleans stale Docker networks (if present).
-2. Starts SceneScape services (manager, controller, broker, DLStreamer, etc.).
+2. Starts SceneScape services (manager, controller, broker, DL Streamer, etc.).
 3. Polls SceneScape web health (up to 150 seconds).
 4. Resolves the SceneScape scene UID for the POI backend.
 5. Starts POI services (backend, UI, Redis, alert service).
@@ -288,7 +288,7 @@ All values in `docker/.env` are auto-generated from `configs/zone_config.json` b
 | ---------------------- | ------------------------------ | ----------- |
 | `scene_name`, `scene_zip` | `SCENE_NAME`, `SCENE_ZIP` | Scene name and scene archive used by SceneScape |
 | `cameras[]` | `CAMERA_NAME`, `VIDEO_FILE`, `CAMERA_NAME_2`, `VIDEO_FILE_2` | Camera names and input videos for generated pipelines |
-| `models`, `model_precision` | `MODELS`, `MODEL_PRECISION` | OpenVINO model list and precision |
+| `models`, `model_precision` | `MODELS`, `MODEL_PRECISION` | OpenVINO™ model list and precision |
 | `scenescape{}` | `SCENESCAPE_REGISTRY`, `SCENESCAPE_VERSION`, image settings | SceneScape image source and version selection |
 | `store{}` | `STORE_NAME`, `STORE_ID` | Store metadata used by the stack |
 | `services{}` | `LP_SERVICE_PORT`, `LOG_LEVEL`, `SEAWEEDFS_*` | Service ports, logging, and SeaweedFS settings |
@@ -342,7 +342,7 @@ See [Build from Source](./get-started/build-from-source.md) for detailed build o
 - Use `make export-scene` to export scene configuration from a running SceneScape instance.
 - Store scene zip files referenced by `scene_zip` in the repository's `scenescape/webserver/`
   directory.
-- `make init` generates DLStreamer pipeline configuration files per camera from
+- `make init` generates DL Streamer pipeline configuration files per camera from
   `configs/pipeline-config.json` and writes them into
   `scenescape/dlstreamer-pipeline-server/`.
 
