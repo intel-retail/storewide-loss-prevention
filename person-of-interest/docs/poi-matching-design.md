@@ -6,7 +6,7 @@ The POI (Person of Interest) system performs **real-time face re-identification*
 
 ```
 ┌─────────────────┐     RTSP      ┌──────────────────┐    MQTT     ┌──────────────┐
-│  IP Cameras     │──────────────▶│  DLStreamer       │───────────▶│  MQTT Broker │
+│  IP Cameras     │──────────────▶│  DL Streamer       │───────────▶│  MQTT Broker │
 │  (Camera_01/02) │               │  (lp-video)       │            │  (Mosquitto) │
 └─────────────────┘               │                    │            └──────┬───────┘
                                   │ person-detection   │                   │
@@ -48,7 +48,7 @@ The POI (Person of Interest) system performs **real-time face re-identification*
 The historical search API (`POST /api/v1/search`) searches the all-detections index:
 
 ### Detection Index Search
-Searches the `DetectionIndexRepository` (every face seen by DLStreamer, 7-day retention):
+Searches the `DetectionIndexRepository` (every face seen by DL Streamer, 7-day retention):
 - Generates a query embedding from the uploaded image via OpenVINO
 - Uses cosine similarity (IndexFlatIP on L2-normalized vectors)
 - Applies configurable threshold (`SEARCH_SIMILARITY_THRESHOLD`, default 0.65)
@@ -155,7 +155,7 @@ This is the core online path — happens for every camera frame at ~10 FPS.
 ### Sequence
 
 ```
-DLStreamer Pipeline (per frame at 10 FPS)
+DL Streamer Pipeline (per frame at 10 FPS)
   │
   ├─ person-detection-retail-0013 (threshold 0.5)
   ├─ clip-reid-market1501 (body re-id, GPU)
@@ -280,7 +280,7 @@ ID Mapping:
   MatchResult                                      │
 ```
 
-**Purpose**: Avoid repeated FAISS searches for the same tracked person within a short window. The DLStreamer tracker assigns stable `person_int_id` per camera, so `cam:Camera_02:1` stays the same across frames while the person is tracked.
+**Purpose**: Avoid repeated FAISS searches for the same tracked person within a short window. The DL Streamer tracker assigns stable `person_int_id` per camera, so `cam:Camera_02:1` stays the same across frames while the person is tracked.
 
 ---
 
@@ -444,7 +444,7 @@ thumbnail_routes.init(event_repo)
 Camera Frame (10 FPS)
     │
     ▼
-DLStreamer: Detect Person → Detect Face → Generate 256-d Embedding
+DL Streamer: Detect Person → Detect Face → Generate 256-d Embedding
     │
     ▼ (MQTT, ~10 msgs/sec per camera)
 POI Backend: Extract face embedding from sub_objects
@@ -472,7 +472,7 @@ Thumbnail: MQTT getimage → ring buffer lookup → bbox crop → Redis store
 
 | Stage | Latency |
 |-------|---------|
-| DLStreamer inference (person+face detect+reid) | ~50-100ms |
+| DL Streamer inference (person+face detect+reid) | ~50-100ms |
 | MQTT publish → consumer receive | ~1-5ms |
 | Embedding decode + validation | <1ms |
 | FAISS search (IndexFlatIP, <10 vectors) | <0.1ms |
@@ -489,10 +489,10 @@ Thumbnail: MQTT getimage → ring buffer lookup → bbox crop → Redis store
 |-----------|---------|---------|-------------|
 | Similarity threshold | `SIMILARITY_THRESHOLD` | 0.6 | Minimum cosine similarity for online match |
 | Search threshold | `SEARCH_SIMILARITY_THRESHOLD` | 0.65 | Minimum cosine similarity for offline search |
-| Face confidence filter | (hardcoded) | 0.80 | Minimum DLStreamer face detection confidence |
+| Face confidence filter | (hardcoded) | 0.80 | Minimum DL Streamer face detection confidence |
 | Object cache TTL | `OBJECT_CACHE_TTL` | 300s | Cache matched object_id → poi_id |
 | Alert dedup TTL | `ALERT_DEDUP_TTL` | 300s | Suppress duplicate alerts |
-| Alert-service dedup window | config.yaml | 60s | Field-hash dedup at alert-service |
+| Alert-service dedup window | config.yaml | 60s | Field-hash deduplication at alert-service |
 | FAISS dimension | (hardcoded) | 256 | face-reidentification-retail-0095 output |
 | FAISS top_k (online) | `SEARCH_TOP_K` | 10 | Max candidates from POI FAISS search |
 | FAISS top_k (offline) | `DETECTION_INDEX_TOP_K` | 20 | Max candidates from detection index |
@@ -567,7 +567,7 @@ User uploads suspect image ────────▶  POST /api/v1/search    �
 
 ### Detection Index Lifecycle
 
-The detection index stores embeddings for **every face** seen by DLStreamer cameras,
+The detection index stores embeddings for **every face** seen by DL Streamer cameras,
 providing a searchable history independent of POI enrollment.
 
 ```
@@ -605,7 +605,7 @@ EventConsumer._handle_camera_event()
 | `object_id` | `uuid` or `cam:{camera}:{int_id}` | Stable within one appearance window |
 | `appearance_id` | `{object_id}@{unix_timestamp}` | Globally unique per appearance — prevents cross-person contamination when tracker IDs are recycled |
 
-The `@timestamp` suffix ensures that if DLStreamer reuses `person_id=1` for a different
+The `@timestamp` suffix ensures that if DL Streamer reuses `person_id=1` for a different
 physical person (after the gate expires), the new person gets a new appearance_id.
 
 ### Entry vs Exit Vectors
@@ -689,7 +689,7 @@ EventConsumer._handle_camera_event()
 | **Trigger** | Every MQTT face detection message | User uploads image via API |
 | **FAISS Index** | POI index (enrolled suspects only) | Detection index (all faces, 7-day retention) |
 | **Index type** | Disk-persisted (`IndexFlatIP` + `IndexIDMap`) | In-memory, rebuilt from Redis on restart |
-| **Embedding source** | DLStreamer face sub_object (base64 decoded) | OpenVINO inference on uploaded image |
+| **Embedding source** | DL Streamer face sub_object (base64 decoded) | OpenVINO inference on uploaded image |
 | **Normalization** | Both enrollment and query L2-normalized | Both stored vectors and query L2-normalized |
 | **Similarity metric** | Cosine (Inner Product on L2-normed vectors) | Cosine (same) |
 | **Threshold** | `SIMILARITY_THRESHOLD` (default 0.55) | `SEARCH_SIMILARITY_THRESHOLD` (default 0.65) |
@@ -699,4 +699,4 @@ EventConsumer._handle_camera_event()
 | **Grouping** | Per POI ID | Per track/appearance ID |
 | **Frame evidence** | Thumbnail capture from MQTT/RTSP | Entry + exit frames from Redis |
 | **Model** | face-reidentification-retail-0095 (256-d) | face-reidentification-retail-0095 (256-d) |
-| **Preprocessing** | DLStreamer resize (128×128, raw float32) | OpenVINO resize (128×128, raw float32) |
+| **Preprocessing** | DL Streamer resize (128×128, raw float32) | OpenVINO resize (128×128, raw float32) |

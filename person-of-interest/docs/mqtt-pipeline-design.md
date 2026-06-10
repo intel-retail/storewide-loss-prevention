@@ -12,7 +12,7 @@
 
 ## Topic 1: `scenescape/data/camera/{camera_id}`
 
-**Published by:** DLStreamer pipeline server (runs person + face detection + reid models)
+**Published by:** DL Streamer Pipeline Server (runs person + face detection + reid models)
 
 **Raw payload structure:**
 ```json
@@ -283,7 +283,7 @@ KEY:  track:frame:{track_id}:last_seen  → JPEG binary (most recent frame)
 Camera Feed
     │
     ▼
-DLStreamer Pipeline Server
+DL Streamer Pipeline Server
   (person-detection-retail-0013 +
    face-detection-retail-0004 +
    face-reidentification-retail-0095 +

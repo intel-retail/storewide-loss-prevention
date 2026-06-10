@@ -22,7 +22,7 @@ running the Store-wide Loss Prevention application.
 
 - **Storage:**
   - Minimum free disk space: 30 GB.
-  - Recommended: 60 GB+ to accommodate Docker images, OpenVINO models, the
+  - Recommended: 60 GB+ to accommodate Docker images, OpenVINO™ models, the
     VLM weights (Qwen2.5-VL is several GB), sample video, and frame storage
     for behavioral analysis.
 
@@ -51,7 +51,7 @@ running the Store-wide Loss Prevention application.
     plugin.
   - Ability to run containers with:
     - Device mappings for GPU/NPU (for the swlp-service, behavioral-analysis,
-      and DLStreamer pipeline server).
+      and DL Streamer pipeline server).
     - Bind mounts for sample video and generated TLS certificates.
 
 - **Python (for helper scripts and tools):**
@@ -69,14 +69,14 @@ running the Store-wide Loss Prevention application.
 The application bundles several AI workloads, each with its own models and
 inputs or outputs:
 
-- **Person Detection (SceneScape DLStreamer pipeline):**
+- **Person Detection (SceneScape DL Streamer pipeline):**
   - **Model:** `person-detection-retail-0013` from Open Model Zoo, converted
     to OpenVINO IR.
   - **Input:** Camera frames (BGR) from the RTSP source or replayed video.
   - **Output:** Per-frame bounding boxes used by SceneScape's tracker.
   - **Target devices:** Intel CPU or GPU via OpenVINO (`DETECTION_DEVICE`).
 
-- **Person Re-Identification (SceneScape DLStreamer pipeline):**
+- **Person Re-Identification (SceneScape DL Streamer pipeline):**
   - **Model:** `person-reidentification-retail-0277` from Open Model Zoo,
     converted to OpenVINO IR.
   - **Input:** Cropped person patches from the detector.
