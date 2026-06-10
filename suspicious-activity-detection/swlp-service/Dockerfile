@@ -18,7 +18,7 @@ RUN pip install --no-cache-dir uv==0.9.22
 
 # Copy detection service
 COPY swlp-service/ /app/
-
+COPY swlp-service/third_party_programs_swlp-service.txt ./
 # Copy and install rule-engine package
 COPY rule-engine/ /tmp/rule-engine/
 

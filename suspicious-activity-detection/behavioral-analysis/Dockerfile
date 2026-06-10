@@ -8,7 +8,7 @@ WORKDIR /app
 
 # Copy only requirements.txt first for dependency caching
 COPY requirements.txt .
-
+COPY third_party_programs_behaviour-service.txt ./
 # Install Python dependencies (cached unless requirements.txt changes)
 # - Base image already provides numpy and openvino via apt — skip reinstalling them
 # - Clean up afterwards to reduce layer size
