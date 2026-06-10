@@ -1,7 +1,7 @@
 services:
   # ── POI Backend ────────────────────────────────────────
   poi-backend:
-    image: ${POI_BACKEND_IMAGE:-intel/poi-backend:2026.1.0-rc1}
+    image: ${POI_BACKEND_IMAGE:-intel/poi-backend:2026.1.0-rc2}
     build:
       context: .
       dockerfile: backend/Dockerfile
@@ -51,7 +51,7 @@ services:
 
   # ── UI ─────────────────────────────────────────────────
   ui:
-    image: ${POI_UI_IMAGE:-intel/poi-ui:2026.1.0-rc1}
+    image: ${POI_UI_IMAGE:-intel/poi-ui:2026.1.0-rc2}
     build:
       context: .
       dockerfile: ui/Dockerfile
