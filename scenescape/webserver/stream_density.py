@@ -34,16 +34,23 @@ def clone_scene_zip(
     base_scene_name: str,
     base_camera_name: str,
     density: int,
+    base_camera_count: int = 1,
 ) -> List[str]:
     """
     Clone *base_zip_path* ``density`` times into *output_dir*.
 
     Each clone gets:
-      - A unique scene name:  ``{base_scene_name}``  (copy 1 = original),
-        ``{base_scene_name}-2``, ``{base_scene_name}-3``, …
-      - A unique camera name: ``{base_camera_name}`` (copy 1),
-        ``{base_camera_name}-2``, …
+      - A unique scene name:  ``{base_scene_name}-2``, ``{base_scene_name}-3``, …
+      - A unique camera name: ``{base_camera_name}-{base_camera_count+1}``, …
       - Fresh UIDs for scene, cameras, and regions.
+
+    ``base_camera_count`` tells the function how many cameras already exist
+    so it can assign non-conflicting indices to the new clones.
+
+    Examples (base_camera_name="Camera_01"):
+      base_camera_count=1 (default): Camera_01-2, Camera_01-3, …
+      base_camera_count=2 (POI — Camera_01 + Camera_02 always present):
+        Camera_01-3, Camera_01-4, …  ← avoids collision with Camera_02
 
     Returns a list of generated zip file paths.
     """
@@ -68,8 +75,14 @@ def clone_scene_zip(
     generated: List[str] = []
 
     for i in range(2, density + 1):
+        # Scene suffix stays sequential (conference room-2, -3, …) for readability.
+        # Camera index is offset by base_camera_count so the new camera name never
+        # collides with the pre-existing base cameras.
+        #   base_camera_count=1: i=2 → Camera_01-2, i=3 → Camera_01-3
+        #   base_camera_count=2: i=2 → Camera_01-3, i=3 → Camera_01-4
+        cam_idx = base_camera_count + (i - 1)
         scene_name = f"{base_scene_name}-{i}"
-        camera_name = f"{base_camera_name}-{i}"
+        camera_name = f"{base_camera_name}-{cam_idx}"
 
         # Deep copy and update the scene JSON
         scene_data = json.loads(json.dumps(base_json))
@@ -156,14 +169,14 @@ def expand_scene_configs(base_scene: dict, density: int) -> List[dict]:
 
 def main():
     if len(sys.argv) < 2:
-        print("Usage: stream_density.py clone-zip <base_zip> <output_dir> <scene_name> <camera_name> <density>")
+        print("Usage: stream_density.py clone-zip <base_zip> <output_dir> <scene_name> <camera_name> <density> [base_camera_count]")
         sys.exit(1)
 
     command = sys.argv[1]
 
     if command == "clone-zip":
-        if len(sys.argv) != 7:
-            print("Usage: stream_density.py clone-zip <base_zip> <output_dir> <scene_name> <camera_name> <density>")
+        if len(sys.argv) not in (7, 8):
+            print("Usage: stream_density.py clone-zip <base_zip> <output_dir> <scene_name> <camera_name> <density> [base_camera_count]")
             sys.exit(1)
 
         base_zip = sys.argv[2]
@@ -171,8 +184,10 @@ def main():
         scene_name = sys.argv[4]
         camera_name = sys.argv[5]
         density = int(sys.argv[6])
+        base_camera_count = int(sys.argv[7]) if len(sys.argv) == 8 else 1
 
-        generated = clone_scene_zip(base_zip, output_dir, scene_name, camera_name, density)
+        generated = clone_scene_zip(base_zip, output_dir, scene_name, camera_name,
+                                    density, base_camera_count)
         for path in generated:
             print(path)
     else:

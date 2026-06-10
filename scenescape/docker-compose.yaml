@@ -165,6 +165,7 @@ services:
       - SCENE_ZIP=${SCENE_ZIP:-}
       - STREAM_DENSITY=${STREAM_DENSITY:-1}
       - CAMERA_NAME=${CAMERA_NAME:-}
+      - BASE_CAMERA_COUNT=${BASE_CAMERA_COUNT:-1}
       - SCENESCAPE_URL=https://web.scenescape.intel.com
       - SCENESCAPE_USER=admin
       - SUPASS=${SUPASS}

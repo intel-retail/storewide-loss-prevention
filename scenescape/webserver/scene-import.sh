@@ -17,6 +17,11 @@ SCENE_ZIP_NAME="${SCENE_ZIP:-}"
 STREAM_DENSITY="${STREAM_DENSITY:-1}"
 SCENE_NAME="${SCENE_NAME:-}"
 CAMERA_NAME="${CAMERA_NAME:-}"
+# Number of base cameras already present before cloning starts.
+# Cloned camera indices begin at BASE_CAMERA_COUNT+1 so they never collide
+# with an existing base camera (e.g. Camera_02).
+# POI sets this to 2 (Camera_01 + Camera_02); other apps default to 1.
+BASE_CAMERA_COUNT="${BASE_CAMERA_COUNT:-1}"
 SCENESCAPE_URL="${SCENESCAPE_URL:-https://web.scenescape.intel.com}"
 SCENESCAPE_USER="${SCENESCAPE_USER:-admin}"
 SCENESCAPE_PASSWORD="${SCENESCAPE_PASSWORD:-${SUPASS}}"
@@ -45,7 +50,7 @@ if [ "${STREAM_DENSITY}" -gt 1 ] && [ -n "${SCENE_ZIP_NAME}" ]; then
     CLONE_DIR=$(mktemp -d)
     echo "  Cloning base zip ${STREAM_DENSITY} times..."
     python3 /webserver/stream_density.py clone-zip \
-        "${BASE_ZIP}" "${CLONE_DIR}" "${SCENE_NAME}" "${CAMERA_NAME}" "${STREAM_DENSITY}" > /dev/null
+        "${BASE_ZIP}" "${CLONE_DIR}" "${SCENE_NAME}" "${CAMERA_NAME}" "${STREAM_DENSITY}" "${BASE_CAMERA_COUNT}" > /dev/null
     for f in "${CLONE_DIR}"/*.zip; do
         [ -f "$f" ] && ZIP_FILES+=("$f")
     done

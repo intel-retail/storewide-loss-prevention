@@ -222,9 +222,10 @@ def create_app() -> FastAPI:
 
     # Alerts endpoints
     @app.get("/api/v1/alerts")
-    async def get_alerts():
+    async def get_alerts(limit: int = 50):
+        """Return recent alerts.  Use ``?limit=N`` (max 500) to fetch more."""
         event_repo = RedisEventRepository()
-        return event_repo.get_recent_alerts(50)
+        return event_repo.get_recent_alerts(min(limit, 500))
 
     @app.delete("/api/v1/alerts")
     async def clear_alerts():

@@ -72,6 +72,11 @@ class AlertService:
 
         # Log start time for performance metrics — uses the DLStreamer frame
         # timestamp for true end-to-end latency (frame capture → alert dispatch).
+        # Two entries are written per alert:
+        #   unique_id="person-of-interest" → aggregate across all cameras
+        #   unique_id=camera_id            → per-camera (used by stream density
+        #                                    benchmark to isolate new-camera E2E)
+        camera_id = event.alert.match.get("camera_id", "")
         if user_log_start_time and event.timestamp:
             try:
                 frame_ts_ms = int(
@@ -79,9 +84,9 @@ class AlertService:
                         event.timestamp.replace("Z", "+00:00")
                     ).timestamp() * 1000
                 )
-                user_log_start_time(
-                    frame_ts_ms, "USECASE_1", "person-of-interest"
-                )
+                user_log_start_time(frame_ts_ms, "USECASE_1", "person-of-interest")
+                if camera_id:
+                    user_log_start_time(frame_ts_ms, "USECASE_1", camera_id)
             except Exception:
                 log.debug("Failed to log start time for alert=%s", event.alert.alert_id)
 
@@ -103,10 +108,12 @@ class AlertService:
             # alerts for different people; full TTL for stable UUIDs.
             ttl = 30 if event.object_id.startswith("cam:") else self._cfg.alert_dedup_ttl
             self._event_repo.mark_alert_sent(dedup_key, ttl=ttl)
-            # Log end time for performance metrics
+            # Log end time for performance metrics (aggregate + per-camera)
             if log_end_time:
                 try:
                     log_end_time("USECASE_1", "person-of-interest")
+                    if camera_id:
+                        log_end_time("USECASE_1", camera_id)
                 except Exception:
                     log.debug("Failed to log end time for alert=%s", event.alert.alert_id)
 

@@ -71,7 +71,7 @@ Tune timing with:
 
 ```bash
 make benchmark DEVICE=all-gpu.env \
-  BENCHMARK_TARGET_LATENCY_MS=5000 \
+  BENCHMARK_TARGET_LATENCY_MS=500 \
   BENCHMARK_DURATION=180
 ```
 

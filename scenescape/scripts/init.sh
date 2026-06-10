@@ -29,6 +29,7 @@ APP_DIR="$(cd "${APP_DIR}" && pwd)"
 APP_NAME="$(basename "${APP_DIR}")"
 SECRETS_DIR="${SCENESCAPE_DIR}/secrets"
 ENV_FILE="${APP_DIR}/docker/.env"
+APP_ENV_FILE="${APP_DIR}/.env"
 SAMPLE_DATA_DIR="${SCENESCAPE_DIR}/sample_data"
 ZONE_CONFIG="${APP_DIR}/configs/zone_config.json"
 
@@ -129,7 +130,9 @@ print(f'BENCHMARK_LATENCY_METRIC=\"{bm.get(\"latency_metric\", \"avg\")}\"')
 print(f'BENCHMARK_SCENE_INCREMENT=\"{bm.get(\"scene_increment\", 1)}\"')
 print(f'BENCHMARK_INIT_DURATION=\"{bm.get(\"init_duration\", 90)}\"')
 print(f'BENCHMARK_STABILISE_DURATION=\"{bm.get(\"stabilise_duration\", 30)}\"')
+print(f'BENCHMARK_DURATION=\"{bm.get(\"duration\", 120)}\"')
 print(f'BENCHMARK_MAX_ITERATIONS=\"{bm.get(\"max_iterations\", 50)}\"')
+print(f'BENCHMARK_MAX_ALERT_WAIT=\"{bm.get(\"max_alert_wait\", 180)}\"')
 print(f'BENCHMARK_MIN_THROUGHPUT_RATIO=\"{bm.get(\"min_throughput_ratio\", 0.5)}\"')
 print(f'RESULTS_PATH=\"{bm.get(\"results_path\", \"./results\")}\"')
 " 2>/dev/null)"
@@ -454,7 +457,9 @@ BENCHMARK_LATENCY_METRIC=${BENCHMARK_LATENCY_METRIC}
 BENCHMARK_SCENE_INCREMENT=${BENCHMARK_SCENE_INCREMENT}
 BENCHMARK_INIT_DURATION=${BENCHMARK_INIT_DURATION}
 BENCHMARK_STABILISE_DURATION=${BENCHMARK_STABILISE_DURATION}
+BENCHMARK_DURATION=${BENCHMARK_DURATION}
 BENCHMARK_MAX_ITERATIONS=${BENCHMARK_MAX_ITERATIONS}
+BENCHMARK_MAX_ALERT_WAIT=${BENCHMARK_MAX_ALERT_WAIT}
 BENCHMARK_MIN_THROUGHPUT_RATIO=${BENCHMARK_MIN_THROUGHPUT_RATIO}
 RESULTS_PATH=${RESULTS_PATH}
 
@@ -492,6 +497,34 @@ HOST_IP=${HOST_IP}
 HOST_UID=$(id -u)
 HOST_GID=$(id -g)
 EOF
+
+# Keep app-level .env benchmark knobs synced only for POI.
+if [ "${APP_NAME}" = "person-of-interest" ]; then
+    mkdir -p "$(dirname "${APP_ENV_FILE}")"
+    touch "${APP_ENV_FILE}"
+
+    upsert_env_var() {
+        local file="$1"
+        local key="$2"
+        local value="$3"
+        if grep -qE "^${key}=" "${file}"; then
+            sed -i "s|^${key}=.*|${key}=${value}|" "${file}"
+        else
+            printf "%s=%s\n" "${key}" "${value}" >> "${file}"
+        fi
+    }
+
+    upsert_env_var "${APP_ENV_FILE}" "BENCHMARK_TARGET_LATENCY_MS" "${BENCHMARK_TARGET_LATENCY_MS}"
+    upsert_env_var "${APP_ENV_FILE}" "BENCHMARK_LATENCY_METRIC" "${BENCHMARK_LATENCY_METRIC}"
+    upsert_env_var "${APP_ENV_FILE}" "BENCHMARK_SCENE_INCREMENT" "${BENCHMARK_SCENE_INCREMENT}"
+    upsert_env_var "${APP_ENV_FILE}" "BENCHMARK_INIT_DURATION" "${BENCHMARK_INIT_DURATION}"
+    upsert_env_var "${APP_ENV_FILE}" "BENCHMARK_STABILISE_DURATION" "${BENCHMARK_STABILISE_DURATION}"
+    upsert_env_var "${APP_ENV_FILE}" "BENCHMARK_DURATION" "${BENCHMARK_DURATION}"
+    upsert_env_var "${APP_ENV_FILE}" "BENCHMARK_MAX_ITERATIONS" "${BENCHMARK_MAX_ITERATIONS}"
+    upsert_env_var "${APP_ENV_FILE}" "BENCHMARK_MAX_ALERT_WAIT" "${BENCHMARK_MAX_ALERT_WAIT}"
+    upsert_env_var "${APP_ENV_FILE}" "BENCHMARK_MIN_THROUGHPUT_RATIO" "${BENCHMARK_MIN_THROUGHPUT_RATIO}"
+    upsert_env_var "${APP_ENV_FILE}" "RESULTS_PATH" "${RESULTS_PATH}"
+fi
 
 echo ""
 echo -e "${GREEN}=== Init complete ===${NC}"
