@@ -40,6 +40,8 @@ async def search_history(
     Returns appearances grouped by track ID, with entry/exit frames and
     zone dwell information where available.
     """
+    
+    t0 = time.perf_counter()
     if _detection_index is None:
         raise HTTPException(503, "Detection index not available")
 
@@ -59,7 +61,7 @@ async def search_history(
     # survive time-range and similarity filtering.  With multiple cameras at
     # different angles, the same person may score very differently — a narrow
     # top-k can miss an entire camera's detections.
-    t0 = time.perf_counter()
+    
     top_k = max(1, min(top_k, 200))
     total_vecs = _detection_index.total_vectors()
     # Search wide enough to capture cross-camera results where the same person
@@ -67,7 +69,7 @@ async def search_history(
     # two cameras, a minimum of 2000 ensures both cameras' vectors are reached.
     search_k = min(max(top_k * 50, 2000), total_vecs) if total_vecs > 0 else 2000
     hits = _detection_index.search(query_vector, top_k=search_k)
-    query_latency_ms = (time.perf_counter() - t0) * 1000
+    
 
     if hits:
         sims = sorted((s for _, s in hits), reverse=True)
@@ -158,7 +160,7 @@ async def search_history(
 
     # Sort by best similarity (max of entry and exit) descending
     appearances.sort(key=lambda a: a["similarity"], reverse=True)
-
+    query_latency_ms = (time.perf_counter() - t0) * 1000
     return {
         "event_type": "offline_search_result",
         "query_range": {"start": start_time, "end": end_time},
