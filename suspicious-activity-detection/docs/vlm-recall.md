@@ -288,21 +288,49 @@ Components map to the folders above:
    the bridge `/api/v1/lp/recall/search` and links each `clip_url`.
 8. **Compose wiring** (`docker/docker-compose.yaml`): bridge service on the VSS network.
 
-Example `configs/cameras.yaml`:
+### 11.1 `configs/cameras.yaml`
+
+This is the single source of truth for the camera -> tag mapping. Each camera is configured once;
+the bridge reads this file at startup (`app/config.py`) to drive both ingestion (which streams to
+segment) and tagging (what tags each clip gets).
 
 ```yaml
+# configs/cameras.yaml
 cameras:
   cam1:
-    rtsp_url: null            # null = file-ingest only (demo / backfill)
-    area_label: lp-camera1
+    rtsp_url: rtsp://localhost:8554/cam1        # live camera                      
+    source_file: null
+    area_label: lp-camera1                       # human location label, also a search tag
     store_id: store-001
-    enabled: true
-  cam-12:
-    rtsp_url: "rtsp://10.0.0.12:554/stream"
+    enabled: true                                # false = skip this camera entirely
+    segment_seconds: 60                          # clip length for RTSP segmenting
+    extra_tags: []                               # optional static tags appended to every clip
+
+  cam-2:
+    rtsp_url: null                               # null = file-ingest only (no RTSP stream)
+    source_file: /data/clips/entrance-backfill.mp4   # pre-recorded MP4 to ingest
     area_label: entrance
     store_id: store-001
     enabled: true
+    extra_tags: ["front-of-store"]
 ```
+
+Field reference:
+
+| Field | Type | Required | Meaning |
+|-------|------|----------|---------|
+| `<camera id>` (map key) | string | yes | Stable camera id, e.g. `cam1`. Becomes the first/primary search tag and `camera_id` in the mapping DB. |
+| `rtsp_url` | string or `null` | yes | Live RTSP URL. `null` -> this camera is **file-ingest only** (uses `source_file`); the segmenter is not started for it. |
+| `source_file` | path or `null` | only if `rtsp_url` is null | Path to a pre-recorded MP4 to ingest (the `cam1` / `lp-camera1.mp4` case). |
+| `area_label` | string | yes | Human location label (e.g. `entrance`, `aisle-7-cam`). Added as a tag so investigators can filter by area, not just camera id. |
+| `store_id` | string | recommended | Store identifier; added as a tag for multi-store deployments. |
+| `enabled` | bool | yes | `false` skips the camera (no segmenting, no ingest). |
+| `segment_seconds` | int | no (default 60) | RTSP clip length. Lower = fresher index and finer time granularity, more uploads. Ignored for file ingest. |
+| `extra_tags` | list[str] | no | Static tags appended to every clip from this camera. |
+
+The resulting tag list per clip is:
+`[<camera id>, area_label, store_id, *extra_tags]` (plus an optional `date_bucket`). For `cam1`
+that is `["cam1", "lp-camera1", "store-001"]`, matching the Section 12 walkthrough.
 
 ## 12. Concrete Walkthrough: File Already On Disk Tagged `cam1`
 
@@ -402,7 +430,117 @@ The bridge resolves `cam1` -> tag `cam1`, calls VSS `POST /manager/search` with
 This is the minimum viable path: one file, one tag, one search. Live RTSP cameras use the same
 uploader and mapping store; only the source (segmenter vs file) differs.
 
-## 13. Phased Plan
+## 13. Integration With The SWLP Docker Compose
+
+### 13.0 Prerequisite Environment Variables
+
+Export these before starting the VSS search stack (`source setup.sh --search`). They cover the
+registry/tag, service credentials, and the embedding/VLM model selection that the stack has no
+defaults for:
+
+```bash
+export REGISTRY_URL=intel
+export TAG=latest
+export MINIO_ROOT_USER=minio
+export MINIO_ROOT_PASSWORD=minio_pswd
+export POSTGRES_USER=postgres
+export POSTGRES_PASSWORD=postgres
+export RABBITMQ_USER=rabbitmq
+export RABBITMQ_PASSWORD=rabbitmq
+export MULTIMODAL_EMBEDDING_MODEL="CLIP/clip-vit-b-32"
+export TEXT_EMBEDDING_MODEL="QwenText/qwen3-embedding-0.6b"
+export VLM_TARGET_DEVICE="GPU"
+export VLM_MODEL_NAME="OpenVINO/Phi-3.5-vision-instruct-int8-ov"
+export ENABLED_WHISPER_MODELS="tiny.en,small.en,medium.en"
+export OD_MODEL_NAME="yolov8l-worldv2"
+```
+
+Notes for our integration:
+
+- `MULTIMODAL_EMBEDDING_MODEL` (here `CLIP/clip-vit-b-32`) is the **only model variable strictly
+  required** for `--search`; it is the embedding model the recall bridge depends on. The same
+  model must be used for indexing and query embedding.
+- `MINIO_*` and `POSTGRES_*` are mandatory credentials for the upload-storage and
+  pipeline-manager-metadata containers we rely on.
+- `TEXT_EMBEDDING_MODEL`, `VLM_*`, `ENABLED_WHISPER_MODELS`, `OD_MODEL_NAME`, and `RABBITMQ_*`
+  belong to the summary / unified pipelines and are not exercised by clip upload -> embedding ->
+  search. Keep them exported (they are harmless) if you run a combined stack; they can be omitted
+  for a pure `--search` bring-up.
+- These same credentials must match what the `vss-recall-bridge` uses when it talks to the stack.
+
+When the VSS search stack starts, nine containers come up. Not all are needed for our
+integration (clip upload -> embedding -> search). Classification:
+
+| VSS container | Role | Needed for integration? |
+|---------------|------|-------------------------|
+| `pipeline-manager` | upload + embedding-trigger + search API (`/manager/*`) | **Required** — the bridge talks to this |
+| `video-search` (search-ms) | runs the semantic search over VDMS | **Required** — backs `POST /search` |
+| `vdms-dataprep` | extracts frames + creates embeddings on upload | **Required** — builds the index |
+| `vdms-vector-db` | VDMS vector store | **Required** — holds the vectors |
+| `multimodal-embedding-serving` | generates image/text embeddings | **Required** — embedding model |
+| `minio-service` | object storage for uploaded videos/frames | **Required** — upload target |
+| `postgres-service` | pipeline-manager metadata DB | **Required** — pipeline-manager dependency |
+| `nginx` | reverse proxy exposing the `/manager/` prefix | **Optional** — only if the bridge uses `/manager/` URLs; otherwise call `pipeline-manager:3000` directly on the shared network |
+| `vss-singleton-ui` | VSS's own React search UI | **Not needed** — we reuse the SWLP dashboard (`ui/ui_gradio.py`) |
+
+So **7 required, 1 optional (`nginx`), 1 droppable (`vss-singleton-ui`)**.
+
+### 13.1 How to wire them in
+
+The VSS services are defined across
+`edge-ai-libraries/sample-applications/video-search-and-summarization/docker/compose.*.yaml`
+(notably `compose.base.yaml` and `compose.search.yaml`) on the `vs_network`. Two viable options:
+
+1. **Separate stacks, shared network (recommended).** Keep running the VSS stack via
+   `source setup.sh --search`. In the SWLP compose, attach the new `vss-recall-bridge` service
+   (and nothing else) to the VSS network so it can reach `pipeline-manager` by name:
+
+   ```yaml
+   # suspicious-activity-detection/docker/docker-compose.yaml
+   services:
+     vss-recall-bridge:
+       build:
+         context: ../vss-recall-bridge
+       image: intel/swlp-vss-recall-bridge:${TAG}
+       environment:
+         VSS_BASE_URL: http://pipeline-manager:3000      # direct, no nginx
+         # or via proxy: http://nginx:80/manager
+         RECALL_DB_PATH: /data/recall.db
+       volumes:
+         - vss-recall-clips:/clips
+         - vss-recall-db:/data
+       networks:
+         - storewide-lp
+         - vs_network
+
+   networks:
+     vs_network:
+       external: true        # created by the VSS stack
+
+   volumes:
+     vss-recall-clips:
+     vss-recall-db:
+   ```
+
+   This keeps the VSS stack independently upgradeable and avoids copying 7 service definitions
+   into the SWLP compose. The bridge is the only new SWLP-owned container.
+
+2. **Single merged compose.** Copy the 7 required VSS service definitions (omit `nginx` and
+   `vss-singleton-ui`) into the SWLP compose and bring everything up together. More control, but
+   you take on maintaining the VSS service config and its env/model variables
+   (`MULTIMODAL_EMBEDDING_MODEL`, MinIO/Postgres creds, etc.). Prefer option 1 unless a single
+   `docker compose up` is a hard requirement.
+
+### 13.2 Network reachability
+
+- If `VSS_BASE_URL = http://pipeline-manager:3000`, the bridge skips `nginx` entirely and you do
+  **not** need to start `nginx` or `vss-singleton-ui`.
+- If you keep the `/manager/` prefix (`http://nginx:80/manager`), include `nginx` but you can
+  still drop `vss-singleton-ui`.
+- The bridge's own search API (`/api/v1/lp/recall/*`) stays on the SWLP side and is what the
+  existing dashboard calls — no VSS UI involved.
+
+## 14. Phased Plan
 
 1. **File-ingest MVP**: `file_ingest.py` + remux + VSS upload/embedding + mapping row + search
    proxy, demoed on `lp-camera1.mp4` tagged `cam1` (Section 12).
@@ -411,7 +549,7 @@ uploader and mapping store; only the source (segmenter vs file) differs.
    "Recall Search" panel added to the existing `ui/ui_gradio.py` dashboard.
 4. **Hardening**: retention/cleanup, multi-camera scale, backpressure.
 
-## 14. Optional Future: SWLP-Owned Vector Index
+## 15. Optional Future: SWLP-Owned Vector Index
 
 Camera tagging makes a SWLP-owned vector DB (e.g. Qdrant) **unnecessary** for the current query.
 Add one later **only** if a hard requirement appears that stock VSS cannot meet:
@@ -424,7 +562,7 @@ In that case SWLP would generate person crops, call VSS Multimodal Embedding Ser
 only, and own the index/payload itself. This is intentionally out of scope for the selected
 approach.
 
-## 15. Open Questions
+## 16. Open Questions
 
 ### Ingestion / timing
 
