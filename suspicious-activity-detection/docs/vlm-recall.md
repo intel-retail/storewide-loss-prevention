@@ -60,6 +60,65 @@ person-visit oriented and depends on SWLP metadata that VSS does not own.
 VLM scan at query time. Live MQTT frames must be captured and indexed continuously, or video
 files must be ingested beforehand, so the query can search existing vectors.
 
+### 3.1 VSS Sample App Findings (Validated)
+
+Reviewed the reference app at
+`edge-ai-libraries/sample-applications/video-search-and-summarization` to confirm what it can
+and cannot do for the `aisle 7` query. Summary: it is a file-ingest semantic search system with
+**time and tag filters only**. It does **not** natively derive `aisle 7` (or any zone) from raw
+video.
+
+| Capability | VSS sample app | Evidence |
+|------------|----------------|----------|
+| Appearance / "blue shirt" similarity | Yes, multimodal embeddings + VDMS retrieval | `search-ms/server.py`, `search-ms/src/vdms_retriever/retriever.py` |
+| Time-window filter (`2:00-3:00 PM`) | Yes, explicit `time_filter` + NL time parsing on `created_at` | `search-ms/server.py` `QueryRequest`, `src/utils/time_filters.py` |
+| Tag filter | Yes, but tags are **manually supplied at upload** | `pipeline-manager/.../video.controller.ts`, `video.service.ts` |
+| Native `aisle2` / zone extraction | No | search query model exposes only `query`, `tags`, `timeFilter` (`search.model.ts`) |
+| Person identity / cross-camera grouping | No | ingestion is per-video-file, no `person_id` |
+| Live region/zone events | No | "ingestion only supports video files; it does not support live-streaming inputs" (`how-it-works/video-search.md`) |
+
+Key consequence for `person in blue shirt in aisle 7 between 2:00-3:00 PM`:
+
+- VSS can answer **"blue shirt"** (embedding) and **"2:00-3:00 PM"** (time filter).
+- VSS cannot answer **"aisle 7"** unless aisle is injected as metadata at ingestion time.
+- In the VSS sample app the only injection point is the **tag** field, which is per-video and
+  manually set, not per-frame/per-zone. So a single store-camera video cannot be split into
+  `aisle 2` vs `aisle 7` regions by VSS alone.
+
+Therefore "process the video using VSS" is **not** sufficient on its own to recover `aisle 7`.
+Zone awareness must come from SWLP/SceneScape (region polygons + region enter/exit events),
+not from the VSS app.
+
+This validates the Section 3 decision: **use VSS for embedding generation only**, and keep
+zone/time/person ownership and payload filtering in SWLP.
+
+### 3.2 Concrete Reuse Boundary
+
+Reuse from the VSS sample app:
+
+- **Multimodal Embedding Serving** only (the `multimodal-embedding-ms` microservice). Wrap it
+  behind the SWLP `EMBEDDING_BACKEND=vss_multimodal` client. This is the single dependency.
+- Optionally borrow patterns (not the services) for: temporal segment aggregation
+  (`retriever.py`) and natural-language time parsing (`time_filters.py`).
+
+Do **not** reuse for the recall index:
+
+- VSS Data Prep / VDMS ingestion path (file/video oriented, no `person_id`/`zone_id`).
+- VSS Pipeline Manager search model (only `tags` + `timeFilter`, no zone/person/camera).
+- VSS directory watcher (whole-file `.mp4` ingestion, not person-visit oriented).
+
+SWLP owns and must implement (not available in VSS):
+
+- `person_id` identity + cross-camera grouping (from `SessionManager`).
+- `zone_id` / `zone_name` resolution from SceneScape region events.
+- `camera_id`, visit `start_ms` / `end_ms`.
+- Qdrant payload schema and the combined filter
+  (`time ∩ zone ∩ camera ∩ person`) described in Section 7.
+- Person-ROI crop before embedding (VSS embeds whole frames/clips, not person crops).
+
+So the only thing that flows into VSS is a person crop / montage / caption; everything that
+makes `aisle2` answerable stays in SWLP.
+
 ## 4. Input And Storage Model
 
 Current BA capture is event-driven for `HIGH_VALUE` zones. VLM recall needs broader
@@ -85,8 +144,8 @@ coverage:
      same pipeline as a backfill job: extract frames, associate them with zones/persons,
      store evidence, generate embeddings, and write Qdrant records.
 
-So for `Show me the person in a blue shirt between 2:00-3:00 PM near aisle2`, the required
-input is already-indexed evidence for `aisle2` during `2:00-3:00 PM`.
+So for `Show me the person in a blue shirt between 2:00-3:00 PM near aisle 7`, the required
+input is already-indexed evidence for `aisle 7` during `2:00-3:00 PM`.
 
 ## 5. Architecture
 
@@ -181,12 +240,20 @@ sequenceDiagram
     API-->>U: grouped results with thumbnail + montage URLs
 ```
 
-Search filter logic:
+> Cross-modal requirement: the query path embeds **text** while indexing (Section 6) embeds an
+> **image crop/montage**. Text-to-image search only works if the VSS model provides a shared
+> image-text embedding space. If the selected model does not, make the VLM **caption text** the
+> primary indexed vector so both sides embed text. This is tracked in Section 11 (VSS
+> Integration: "Which embedding should be primary").
+
+Search filter logic (vector similarity, then payload filters):
 
 ```text
-start_ms < query_end_ms AND end_ms > query_start_ms
-AND zone_id IN resolved_zone_ids
+vector_score >= score_threshold
+AND start_ms < query_end_ms AND end_ms > query_start_ms
+AND zone_id IN resolved_zone_ids            # one zone name may resolve to multiple zone_ids
 AND optional camera_id IN resolved_camera_ids
+AND optional person_id == requested_person_id
 ```
 
 ## 8. Components To Build
@@ -231,29 +298,39 @@ Request:
   "query": "person in a blue shirt between 2:00-3:00 PM near aisle 7",
   "time_start": null,
   "time_end": null,
-  "zone": null,
-  "camera_id": null,
+  "zones": null,
+  "camera_ids": null,
   "limit": 20,
   "rerank": true
 }
 ```
 
-Response:
+- `zones`: optional list of zone names (e.g. `["aisle 7"]`). Each name is normalized and may
+  resolve to multiple `zone_id`s. When null, zone is taken from the natural-language parse.
+- `camera_ids`: optional list; when null, search spans all cameras attached to the resolved
+  zones.
+
+Response (clips grouped by `person_id`; grouping is performed by the API, the UI renders it):
 
 ```json
 {
-  "results": [
+  "groups": [
     {
-      "clip_id": "...",
       "person_id": "...",
-      "camera_id": "lp-camera1",
-      "zone_name": "aisle 7",
-      "start_time": "2026-06-10T14:05:12Z",
-      "end_time": "2026-06-10T14:06:03Z",
-      "score": 0.87,
-      "attributes": {"upper_color": "blue", "upper_type": "shirt"},
-      "thumbnail_url": "/api/v1/lp/search/clips/.../thumbnail",
-      "montage_url": "/api/v1/lp/search/clips/.../montage"
+      "best_score": 0.87,
+      "clips": [
+        {
+          "clip_id": "...",
+          "camera_id": "lp-camera1",
+          "zone_name": "aisle 7",
+          "start_time": "2026-06-10T14:05:12Z",
+          "end_time": "2026-06-10T14:06:03Z",
+          "score": 0.87,
+          "attributes": {"upper_color": "blue", "upper_type": "shirt"},
+          "thumbnail_url": "/api/v1/lp/search/clips/.../thumbnail",
+          "montage_url": "/api/v1/lp/search/clips/.../montage"
+        }
+      ]
     }
   ]
 }
@@ -319,6 +396,10 @@ Use this section for the architecture/product discussion before implementation.
    timeline?
 
 ### VSS Integration
+
+> Partially answered in Section 3.1 / 3.2: VSS sample app provides only embeddings +
+> time/tag filters and cannot derive `aisle2`. Recommended use is **embedding serving only**,
+> with SWLP as the primary index. Remaining items below are still open.
 
 - Are we using only VSS Multimodal Embedding Serving, or do we also want to deploy VSS
    search/data-prep services for demos?
