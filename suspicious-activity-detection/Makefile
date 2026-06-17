@@ -7,7 +7,7 @@
 # No SceneScape source checkout required.
 # SceneScape-specific targets are in scenescape/Makefile.
 
-TAG ?= 2026.1.0-rc2
+TAG ?= 2026.1.0
 REGISTRY ?= true
 
 SCENESCAPE_DIR := ../scenescape
