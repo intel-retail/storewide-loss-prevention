@@ -191,7 +191,7 @@ async def lifespan(app: FastAPI):
 def create_app() -> FastAPI:
     app = FastAPI(
         title="POI Re-identification System",
-        version="1.0.0",
+        version="2026.1.0",
         lifespan=lifespan,
     )
 

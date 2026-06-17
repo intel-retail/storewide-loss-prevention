@@ -60,10 +60,10 @@ Minimal example:
   "models": "person-detection-retail-0013,face-detection-retail-0004,face-reidentification-retail-0095",
   "scenescape": {
     "registry": "",
-    "version": "v2026.1.0-rc1",
+    "version": "2026.1.0",
     "controller_image": "intel/scenescape-controller",
     "manager_image": "intel/scenescape-manager",
-    "dlstreamer_version": "2026.1.0-ubuntu24-rc1.1"
+    "dlstreamer_version": "2026.1.0-ubuntu24"
   },
   "store": {
     "name": "Retail",
@@ -167,8 +167,8 @@ inference device, pre-process backend, model precision, and throughput options.
 ## 5. Pull or Build Images
 
 Pre-built container images are available on Docker Hub. The `docker-compose.yml`
-references them directly (`intel/poi-backend:2026.1.0-rc1` and
-`intel/poi-ui:2026.1.0-rc1`), so `make up` will pull them automatically if they
+references them directly (`intel/poi-backend:2026.1.0` and
+`intel/poi-ui:2026.1.0`), so `make up` will pull them automatically if they
 are not already present locally.
 
 To explicitly pull before starting:
@@ -247,7 +247,7 @@ This launches the following containers:
 | `poi-backend`        | `poi-backend`                | 8000  |
 | `poi-ui`             | `poi-ui`                     | 3000  |
 | `poi-redis`          | `redis:8.6.2`                | 6379  |
-| `poi-alert-service`  | `intel/alert-service:0.0.1`  | 8001  |
+| `poi-alert-service`  | `intel/alert-service:2026.1.0`  | 8001  |
 
 > **Note:** Use `make up` for subsequent starts after the initial setup. SceneScape
 > is started automatically by the `up` target.
