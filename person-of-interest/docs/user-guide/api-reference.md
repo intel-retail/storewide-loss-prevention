@@ -1,6 +1,6 @@
 # API Reference
 
-**Version: 1.0.0**
+**Version: 2026.1.0**
 
 ## Base URL
 

@@ -105,7 +105,7 @@ services:
 
   # ── Metrics Collector (benchmark profile only) ──────────
   metrics-collector:
-    image: ${REGISTRY_BENCHMARK:-intel/retail-benchmark:2026.0.0}
+    image: ${REGISTRY_BENCHMARK:-intel/retail-benchmark:2026.1.0}
     container_name: poi-metrics-collector
     profiles:
       - benchmark

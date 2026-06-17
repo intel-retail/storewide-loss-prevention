@@ -174,7 +174,7 @@ BENCHMARK_VENV := cd $(PERF_TOOLS_DIR) && \
 	pip3 install -q -e . && \
 	cd $(CURDIR)
 
-TAG ?= 2026.0.0
+TAG ?= 2026.1.0
 REGISTRY_BENCHMARK ?= intel/retail-benchmark:$(TAG)
 
 .PHONY: fetch-benchmark
@@ -572,7 +572,7 @@ up:
 		echo "$(BLUE)=== Creating .env from .env.example ===$(NC)"; \
 		cp .env.example .env; \
 	fi
-	@# If storewide-lp exists without proper Compose labels, remove it so Compose recreates it correctly
+	@# Remove stale storewide-lp network missing Compose labels so Compose recreates it correctly
 	@if docker network inspect storewide-lp >/dev/null 2>&1 && \
 	   [ "$$(docker network inspect storewide-lp --format '{{index .Labels "com.docker.compose.network"}}')" != "storewide-lp" ]; then \
 		$(COMPOSE_POI) down 2>/dev/null || true; \
@@ -582,9 +582,7 @@ up:
 			echo "$(YELLOW)=== WARNING: storewide-lp network has missing Compose labels but could not be removed (in use by other containers?) ===$(NC)"; \
 		fi; \
 	fi
-	@# Let SceneScape Compose create and label storewide-lp before POI attaches to it
-	@# Pre-flight: if this is a fresh deployment (no web container) but stale DB volumes
-	@# exist from a previous run, remove them to prevent password mismatch on first start.
+	@# Remove orphan DB volumes from a previous deployment to prevent DB password mismatch on first start
 	@if ! docker inspect storewide-lp-web-1 >/dev/null 2>&1; then \
 		if docker volume inspect storewide-lp_vol-db >/dev/null 2>&1; then \
 			echo "$(BLUE)=== Removing orphan DB volumes (fresh deployment with stale volumes) ===$(NC)"; \
@@ -594,7 +592,7 @@ up:
 		echo "$(BLUE)=== Clearing stale FAISS index (fresh deployment) ===$(NC)"; \
 		rm -f data/faiss/poi.index data/faiss/id_map.json; \
 	fi
-	@# Validate HOST_IP is set — required for WebRTC ICE candidates (camera streams)
+	@# HOST_IP is required for WebRTC ICE candidates (camera streams in the UI)
 	@HOST_IP_VAL="$$(grep -E '^HOST_IP=.+' docker/.env 2>/dev/null | cut -d= -f2-)"; \
 	if [ -z "$$HOST_IP_VAL" ]; then \
 		echo ""; \
@@ -611,21 +609,12 @@ up:
 		echo ""; \
 		exit 1; \
 	fi
-	@# Ensure sample videos are copied into the Docker volume before starting cameras
-	@$(MAKE) -C $(SCENESCAPE_DIR) APP_DIR=$(CURDIR) init-sample-data
-	@# Ensure required Docker volumes exist (ITEP-92808: missing init-volumes causes
-	@# SceneScape containers to fail on fresh deployments via make init + make up)
-	@$(MAKE) -C $(SCENESCAPE_DIR) APP_DIR=$(CURDIR) init-volumes
-	@# Ensure TLS key files are readable inside Docker containers (fixes SSL
-	@# Permission denied when container UID differs from host UID)
+	@$(MAKE) -C $(SCENESCAPE_DIR) APP_DIR=$(CURDIR) RESOURCE_CONFIG=$(RESOURCE_CONFIG) init init-sample-data init-volumes
 	@chmod 644 $(SCENESCAPE_DIR)/secrets/certs/*.key $(SCENESCAPE_DIR)/secrets/ca/*.key 2>/dev/null || true
 	@echo "$(BLUE)=== Starting SceneScape services ===$(NC)"
-	-$(COMPOSE_SCENESCAPE) up -d --no-recreate
-	@# If the web container is unhealthy due to a DB password mismatch (stale volume),
-	@# auto-reset the storewide-lp DB volumes and restart.  Only resets when pgserver
-	@# logs confirm "password authentication failed" — safe for first-run scenarios
-	@# where stale volumes exist from a previous deployment on the same machine.
-	@# Poll health status past the start_period (10s) + several intervals (10s each).
+	@# CONTROLLER_AUTH must be in the process environment (not just --env-file) for the
+	@# environment:-source Docker secret to be injected at container creation time.
+	-CONTROLLER_AUTH="$$(grep '^CONTROLLER_AUTH=' docker/.env | cut -d= -f2-)" $(COMPOSE_SCENESCAPE) up -d
 	@echo "  Waiting for SceneScape web health check..."; \
 	attempts=0; \
 	while [ $$attempts -lt 15 ]; do \
@@ -637,7 +626,7 @@ up:
 				$(COMPOSE_SCENESCAPE) stop pgserver web scene scene-import 2>/dev/null || true; \
 				docker volume rm storewide-lp_vol-db storewide-lp_vol-migrations 2>/dev/null && \
 					echo "  Removed storewide-lp_vol-db and storewide-lp_vol-migrations" || true; \
-				$(COMPOSE_SCENESCAPE) up -d; \
+				CONTROLLER_AUTH="$$(grep '^CONTROLLER_AUTH=' docker/.env | cut -d= -f2-)" $(COMPOSE_SCENESCAPE) up -d; \
 			else \
 				echo "$(YELLOW)=== SceneScape web unhealthy (not a DB password issue) — check logs with: docker logs storewide-lp-web-1 ===$(NC)"; \
 			fi; \

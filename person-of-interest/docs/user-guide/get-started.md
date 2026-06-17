@@ -60,10 +60,10 @@ Minimal example:
   "models": "person-detection-retail-0013,face-detection-retail-0004,face-reidentification-retail-0095",
   "scenescape": {
     "registry": "",
-    "version": "v2026.1.0-rc1",
+    "version": "2026.1.0",
     "controller_image": "intel/scenescape-controller",
     "manager_image": "intel/scenescape-manager",
-    "dlstreamer_version": "2026.1.0-ubuntu24-rc1.1"
+    "dlstreamer_version": "2026.1.0-ubuntu24"
   },
   "store": {
     "name": "Retail",
@@ -167,8 +167,8 @@ inference device, pre-process backend, model precision, and throughput options.
 ## 5. Pull or Build Images
 
 Pre-built container images are available on Docker Hub. The `docker-compose.yml`
-references them directly (`intel/poi-backend:2026.1.0-rc1` and
-`intel/poi-ui:2026.1.0-rc1`), so `make up` will pull them automatically if they
+references them directly (`intel/poi-backend:2026.1.0` and
+`intel/poi-ui:2026.1.0`), so `make up` will pull them automatically if they
 are not already present locally.
 
 To explicitly pull before starting:
@@ -235,10 +235,16 @@ make demo
 `make up` performs the following steps automatically:
 
 1. Detects and cleans stale Docker networks (if present).
-2. Starts SceneScape services (manager, controller, broker, DL Streamer, etc.).
-3. Polls SceneScape web health (up to 150 seconds).
-4. Resolves the SceneScape scene UID for the POI backend.
-5. Starts POI services (backend, UI, Redis, alert service).
+2. Removes any stale SceneScape controller container missing the `controller.auth` secret
+   (can occur after partial earlier runs — see [Troubleshooting](./troubleshooting.md#2-scenescape-controller-crash-loop-valueerror-invalid-userpassword)).
+3. Starts SceneScape services (manager, controller, broker, DL Streamer, etc.).
+4. Polls SceneScape web health (up to 150 seconds).
+5. Resolves the SceneScape scene UID for the POI backend.
+6. Starts POI services (backend, UI, Redis, alert service).
+
+> **Note:** If you see no events reaching the POI backend after startup, check
+> `docker logs storewide-lp-scene-1` for a `ValueError: Invalid user/password`
+> crash loop. Run `make down && make up` to fully recover.
 
 This launches the following containers:
 
@@ -247,7 +253,7 @@ This launches the following containers:
 | `poi-backend`        | `poi-backend`                | 8000  |
 | `poi-ui`             | `poi-ui`                     | 3000  |
 | `poi-redis`          | `redis:8.6.2`                | 6379  |
-| `poi-alert-service`  | `intel/alert-service:0.0.1`  | 8001  |
+| `poi-alert-service`  | `intel/alert-service:2026.1.0`  | 8001  |
 
 > **Note:** Use `make up` for subsequent starts after the initial setup. SceneScape
 > is started automatically by the `up` target.
