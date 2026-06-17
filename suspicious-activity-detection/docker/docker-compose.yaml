@@ -81,11 +81,8 @@ services:
     restart: unless-stopped
 
   # ---------- Store-wide Loss Prevention ----------
-  swlp-service:
-    build:
-      context: .
-      dockerfile: swlp-service/Dockerfile
-    image:  intel/swlp-service:${TAG}
+  scene-understanding-service:
+    image: intel/scene-understanding-service:${TAG}
     ports:
       - "${LP_SERVICE_PORT:-8082}:8082"
     networks:
@@ -124,7 +121,7 @@ services:
       ALERT_SERVICE_URL: ${ALERT_SERVICE_URL:-http://alert-service:8000}
       ANALYSIS_FPS: ${ANALYSIS_FPS:-1}
       ENABLE_UI: ${ENABLE_UI:-true}
-      USECASE_1: ${USECASE_1:-SWLP-Service}
+      USECASE_1: ${USECASE_1:-Scene-Understanding-Service}
       CONTAINER_RESULTS_PATH: /app/results/swlp
     volumes:
       - ./configs:/app/configs:ro
@@ -145,7 +142,7 @@ services:
     networks:
       - storewide-lp
     depends_on:
-      swlp-service:
+      scene-understanding-service:
         condition: service_healthy
     healthcheck:
       test: ["CMD-SHELL", "python -c 'import urllib.request; urllib.request.urlopen(\"http://localhost:7860/\")' || exit 1"]
@@ -154,15 +151,15 @@ services:
       retries: 10
       start_period: 10s
     environment:
-      - LP_BASE_URL=http://swlp-service:8082
+      - LP_BASE_URL=http://scene-understanding-service:8082
       - RECALL_BASE_URL=${RECALL_BASE_URL:-http://vss-recall-bridge:8080}
       - RECALL_API_KEY=${BRIDGE_API_KEY:-change-me}
       - MQTT_HOST=${MQTT_HOST:-broker.scenescape.intel.com}
       - MQTT_PORT=${MQTT_PORT:-1883}
       - MQTT_ALERT_TOPIC=alerts/#
       - TZ=${TZ:-}
-      - no_proxy=swlp-service,vss-recall-bridge,broker.scenescape.intel.com,localhost,127.0.0.1,10.0.0.0/8,172.16.0.0/12
-      - NO_PROXY=swlp-service,vss-recall-bridge,broker.scenescape.intel.com,localhost,127.0.0.1,10.0.0.0/8,172.16.0.0/12
+      - no_proxy=scene-understanding-service,vss-recall-bridge,broker.scenescape.intel.com,localhost,127.0.0.1,10.0.0.0/8,172.16.0.0/12
+      - NO_PROXY=scene-understanding-service,vss-recall-bridge,broker.scenescape.intel.com,localhost,127.0.0.1,10.0.0.0/8,172.16.0.0/12
       - http_proxy=
       - https_proxy=
       - HTTP_PROXY=
