@@ -98,7 +98,7 @@ up: validate-device
 		DOCKER_REGISTRY=$(REGISTRY_URL) $(COMPOSE_ALL) pull; \
 	else \
 		echo "Building LP images..."; \
-		BUILD_SERVICES="swlp-service behavioral-analysis"; \
+		BUILD_SERVICES="behavioral-analysis"; \
 		if [ "$(ENABLE_UI_LOWER)" = "true" ]; then \
 			BUILD_SERVICES="$$BUILD_SERVICES swlp-suscpicious-ui"; \
 		fi; \
@@ -205,13 +205,13 @@ status:
 run-lp:
 ifeq ($(REGISTRY_LOWER),true)
 	@echo "Pulling LP images from $(REGISTRY_URL)..."
-	DOCKER_REGISTRY=$(REGISTRY_URL) $(COMPOSE_ALL) pull swlp-service behavioral-analysis swlp-suscpicious-ui
+	DOCKER_REGISTRY=$(REGISTRY_URL) $(COMPOSE_ALL) pull  behavioral-analysis swlp-suscpicious-ui
 else
 	@echo "Building LP images..."
-	$(COMPOSE_ALL) build swlp-service behavioral-analysis swlp-suscpicious-ui
+	$(COMPOSE_ALL) build  behavioral-analysis swlp-suscpicious-ui
 endif
-	@echo "Starting LP services only (Scenescape must be running)..."
-	$(COMPOSE_ALL) up -d swlp-service behavioral-analysis swlp-suscpicious-ui
+	@echo "Starting LP services only (SceneScape must be running)..."
+	$(COMPOSE_ALL) up -d  behavioral-analysis swlp-suscpicious-ui
 
 .PHONY: down-lp
 down-lp:

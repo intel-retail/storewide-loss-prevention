@@ -82,7 +82,7 @@ services:
 
   # ---------- Store-wide Loss Prevention ----------
   scene-understanding-service:
-    image: intel/scene-understanding-service:${TAG}
+    image: scene-understanding-service:local
     ports:
       - "${LP_SERVICE_PORT:-8082}:8082"
     networks:
