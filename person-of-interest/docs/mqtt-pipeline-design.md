@@ -51,7 +51,7 @@
 
 **What we extract:**
 1. `camera_id` — from the MQTT topic itself
-2. `person[].id` — SceneScape tracking ID
+2. `person[].id` — Scenescape tracking ID
 3. `person[].sub_objects.face[].metadata.reid.embedding_vector` ← **face embedding (only source used for FAISS)**
 4. Embedding decode: `base64.b64decode(str)` → 1024 bytes → `struct.unpack("256f", raw)` → **256-dim float vector**
 
@@ -75,7 +75,7 @@ embedding vector → DetectionIndex.claim_track(track_id, vector, frame)
 
 ## Topic 2: `scenescape/regulated/scene/{scene_id}`
 
-**Published by:** SceneScape scene controller (regulated/smoothed tracking)
+**Published by:** Scenescape scene controller (regulated/smoothed tracking)
 
 **Raw payload structure:**
 ```json
@@ -224,7 +224,7 @@ TTL period (compose default: 5 seconds).
 
 ### 6. Region Presence & Dwell — `region:presence:*` + `region:dwell:*`
 
-Written when regions are configured as polygons in the SceneScape scene.
+Written when regions are configured as polygons in the Scenescape scene.
 
 ```
 KEY:  region:presence:{scene_id}:{region_id}:{object_id}    TTL=1h
@@ -309,7 +309,7 @@ DL Streamer Pipeline Server
        │                    └── NO  → nothing
        └── store event:{object_id}:{timestamp} in Redis  (always, TTL=7d)
 
-SceneScape Scene Controller
+Scenescape Scene Controller
     │
     └──► scenescape/regulated/scene/{scene_id}
               │

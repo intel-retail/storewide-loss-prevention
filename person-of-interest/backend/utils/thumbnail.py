@@ -3,7 +3,7 @@
 Two capture strategies are supported per camera:
 
 1. MQTT image topic (preferred when available):
-   SceneScape DLStreamer adapter publishes annotated frames on demand to
+   Scenescape DLStreamer adapter publishes annotated frames on demand to
    scenescape/image/camera/{camera_id} when a "getimage" command is sent.
    We subscribe to that topic, cache the latest received frame, and also
    proactively request a fresh frame at match time.  This eliminates RTSP
@@ -35,7 +35,7 @@ log = logging.getLogger("poi.thumbnail")
 # RTSP base URL pattern; override via RTSP_BASE_URL env var
 _RTSP_BASE_URL = os.getenv("RTSP_BASE_URL", "rtsp://mediaserver:8554")
 
-# MQTT broker for SceneScape image topic (same broker used by the MQTT consumer)
+# MQTT broker for Scenescape image topic (same broker used by the MQTT consumer)
 _MQTT_HOST = os.getenv("MQTT_HOST", "broker.scenescape.intel.com")
 _MQTT_PORT = int(os.getenv("MQTT_PORT", "1883"))
 
@@ -314,7 +314,7 @@ def normalize_bbox_px(bbox) -> Optional[tuple[int, int, int, int]]:
 
     Accepts:
       - list/tuple [x1, y1, x2, y2]  (DLStreamer bounding_box_px)
-      - dict {x, y, width, height}   (SceneScape center_of_mass / legacy)
+      - dict {x, y, width, height}   (Scenescape center_of_mass / legacy)
     Returns (x1, y1, x2, y2) or None if bbox is invalid/empty.
     """
     if bbox is None:

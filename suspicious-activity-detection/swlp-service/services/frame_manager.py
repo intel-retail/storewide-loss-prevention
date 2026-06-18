@@ -158,7 +158,7 @@ class FrameManager:
 
             ``{BA_BUCKET}/alerts/{person_id}/{alert_id}/frames/{ts_ms}.jpg``
 
-        ``last_frame_ts`` is the SceneScape ISO string echoed in
+        ``last_frame_ts`` is the Scenescape ISO string echoed in
         ``ba/results``; converted to epoch-ms it equals the filename used
         when the frame was first stored (see ``store_person_frame``). Any
         frames in the visit prefix whose filename ms <= cutoff_ms are

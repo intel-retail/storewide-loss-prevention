@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Monitor SceneScape MQTT topics for face detections and region events."""
+"""Monitor Scenescape MQTT topics for face detections and region events."""
 
 import json
 import sys
@@ -152,7 +152,7 @@ def on_message(client, userdata, msg):
 
 
 def main():
-    print(f"\n{COLORS['bold']}SceneScape MQTT Monitor{COLORS['reset']}")
+    print(f"\n{COLORS['bold']}Scenescape MQTT Monitor{COLORS['reset']}")
     print(f"Topics:")
     for topic, _ in TOPICS:
         print(f"  • {topic}")

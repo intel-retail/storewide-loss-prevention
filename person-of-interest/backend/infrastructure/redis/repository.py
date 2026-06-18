@@ -362,7 +362,7 @@ class RedisEventRepository(EventRepository):
         """Store which UUIDs are currently visible on a camera.
 
         Called from the external topic handler.  The list is a snapshot
-        from SceneScape's controller — replaced every frame (~1-3 Hz).
+        from Scenescape's controller — replaced every frame (~1-3 Hz).
         Stored as a Redis hash with the current epoch timestamp so
         readers can enforce freshness.
         """
@@ -458,7 +458,7 @@ class RedisEventRepository(EventRepository):
     def get_uuid_for_camera_bbox(
         self, camera_id: str, bbox: dict, iou_threshold: float = 0.3,
     ) -> Optional[str]:
-        """Find the SceneScape global UUID whose camera_bounds best overlaps with bbox.
+        """Find the Scenescape global UUID whose camera_bounds best overlaps with bbox.
 
         Returns the UUID with highest IoU above iou_threshold, or None.
         """

@@ -153,7 +153,7 @@ def mock_redis():
 
 @pytest.fixture
 def mock_event_payload():
-    """Sample MQTT scene event payload matching SceneScape format."""
+    """Sample MQTT scene event payload matching Scenescape format."""
     return {
         "id": "bfb9f86b-b152-4e7f-8099-7c251ed84630",
         "timestamp": "2025-01-15T12:30:00.000Z",

@@ -1,7 +1,7 @@
 """Camera API routes — returns cameras with stream URLs.
 
 Sources (in priority order):
-  1. SceneScape REST API (if configured)
+  1. Scenescape REST API (if configured)
   2. RTSP_PREWARM_CAMERAS env var (always available)
 """
 
@@ -49,17 +49,17 @@ def _cameras_from_config() -> list[dict]:
 def list_cameras():
     """List all cameras with stream metadata.
 
-    Returns cameras from SceneScape API when available,
+    Returns cameras from Scenescape API when available,
     otherwise falls back to configured camera list.
     Each camera includes a ``stream_path`` for building
     the MediaMTX WebRTC player URL on the client side.
 
     Declared as sync ``def`` so FastAPI runs the synchronous
-    SceneScape adapter calls in its threadpool executor.
+    Scenescape adapter calls in its threadpool executor.
     """
     cfg = get_config()
 
-    # Try SceneScape API first
+    # Try Scenescape API first
     cameras: list[dict] = []
     if _scenescape_adapter:
         cameras = _scenescape_adapter.list_cameras()
@@ -84,7 +84,7 @@ def list_cameras():
 
 @router.get("/{camera_id}")
 def get_camera(camera_id: str):
-    """Get a single camera from SceneScape.
+    """Get a single camera from Scenescape.
 
     Sync handler — adapter performs blocking I/O.
     """

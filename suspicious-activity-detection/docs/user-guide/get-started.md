@@ -2,7 +2,7 @@
 
 This guide walks you through building and running the Store-wide Loss
 Prevention reference application, including the swlp-service, the Behavioral
-Analysis Service (pose + VLM), and the supporting SceneScape stack.
+Analysis Service (pose + VLM), and the supporting Scenescape stack.
 
 Before you begin, review the
 [System Requirements](./get-started/system-requirements.md) to ensure your
@@ -38,11 +38,11 @@ Before starting, ensure these files are in place:
 | `configs/.env.example` | Reference for all environment variables; copied to `docker/.env` by `init.sh` |
 | `configs/zone_config.json` | Zone name → type mapping (for example, `aisle1` → `HIGH_VALUE`) |
 | `configs/rules.yaml` | Declarative rules: triggers, conditions, actions, and deduplication scope |
-| `../scenescape/webserver/storewide-loss-prevention.zip` | Scene map + zone definitions imported into SceneScape |
+| `../scenescape/webserver/storewide-loss-prevention.zip` | Scene map + zone definitions imported into Scenescape |
 | `../scenescape/sample_data/lp-camera1.mp4` | Sample video used by the camera replay |
 
 > **Note:** The video file name must match the camera name defined in the
-> SceneScape scene (for example, `lp-camera1.mp4` corresponds to camera
+> Scenescape scene (for example, `lp-camera1.mp4` corresponds to camera
 > `lp-camera1`).
 
 ## 4. Download Sample Video
@@ -85,7 +85,7 @@ suspicious-activity-detection/models/
 
 ## 6. Run the Sample
 
-### Run Everything (SceneScape + LP)
+### Run Everything (Scenescape + LP)
 
 ```bash
 make up
@@ -133,19 +133,19 @@ make up ENABLE_UI=true
 
 When the UI is disabled, the `swlp-suscpicious-ui` container is not built or
 started, and the Gradio dashboard at `http://localhost:7860` is unavailable.
-All other services (SceneScape, swlp-service, Behavioral Analysis, OVMS, etc.)
+All other services (Scenescape, swlp-service, Behavioral Analysis, OVMS, etc.)
 continue to run normally.
 
 `make up` performs the following steps automatically:
 
 1. Sources the selected device resource config (`configs/res/<DEVICE>`).
-2. Generates TLS certificates, SceneScape secrets, and `docker/.env`.
+2. Generates TLS certificates, Scenescape secrets, and `docker/.env`.
 3. Renders `pipeline-config.json` with device-specific settings.
 4. Copies the sample video into the Docker volume.
 5. Initializes Docker volumes with correct permissions.
 6. Builds the LP, Behavioral Analysis, and Gradio UI container images.
-7. Starts all SceneScape and LP containers.
-8. Imports the scene map into SceneScape.
+7. Starts all Scenescape and LP containers.
+8. Imports the scene map into Scenescape.
 
 ## 7. View Logs
 
@@ -167,7 +167,7 @@ Once running:
 
 | Service | URL | Credentials |
 |---------|-----|-------------|
-| SceneScape UI | `https://localhost` | `admin` / password printed by `make up` |
+| Scenescape UI | `https://localhost` | `admin` / password printed by `make up` |
 | Gradio Dashboard | `http://localhost:7860` | — |
 | LP REST API | `http://localhost:8082` | — |
 | LP logs | `make logs` | View all service logs |

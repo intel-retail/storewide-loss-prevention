@@ -20,7 +20,7 @@ You are a principal architect helping design and evolve this retail loss-prevent
 ```mermaid
 flowchart LR
     DLS[DLStreamer] -->|MQTT| MC[mqtt_consumer]
-    SS[SceneScape] -->|MQTT regions| SC[scenescape_consumer]
+    SS[Scenescape] -->|MQTT regions| SC[scenescape_consumer]
     MC -->|embedding 256-d| MS[MatchingService]
     MS -->|cosine search| FAISS[(FAISS IndexFlatIP)]
     MS -->|cache-aside| Redis[(Redis 8.x)]
@@ -41,7 +41,7 @@ flowchart LR
 |---|---|---|
 | Vector search | FAISS `IndexFlatIP` | Exact cosine on L2-normed vectors; retail scale (<10K POIs) doesn't need ANN |
 | Embedding model | `face-reidentification-retail-0095` | 256-d, optimised for Intel CPUs via OpenVINO |
-| Message bus | MQTT (paho) | Already used by SceneScape; low-latency pub/sub |
+| Message bus | MQTT (paho) | Already used by Scenescape; low-latency pub/sub |
 | Metadata store | Redis | Sub-ms reads for real-time matching; TTL for event expiry |
 | Architecture | Clean Architecture | Testable, swappable infrastructure layers |
 | MCP transport | stdio / streamable-http | stdio for Claude Desktop, HTTP for containerised deployment |

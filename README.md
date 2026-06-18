@@ -1,6 +1,6 @@
 # Store-wide Loss Prevention
 
-A suite of Intel® edge AI applications for retail loss prevention, powered by Intel® SceneScape spatial computing and Intel® OpenVINO™ inference.
+A suite of Intel® edge AI applications for retail loss prevention, powered by Scenescape spatial computing and Intel® OpenVINO™ inference.
 
 ## Use Cases
 
@@ -21,7 +21,7 @@ For full details see the [POI User Guide](person-of-interest/docs/user-guide/ind
 
 ### Suspicious Activity Detection
 
-MQTT-driven loss prevention service for Intel SceneScape retail deployments.
+MQTT-driven loss prevention service for Scenescape retail deployments.
 The service monitors person behavior across store zones using real-time tracking,
 manages session state and detection rules, and stores cropped person frames in
 SeaweedFS. Behavioral analysis (pose detection + VLM confirmation) runs as a

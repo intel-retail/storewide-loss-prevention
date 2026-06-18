@@ -1,4 +1,4 @@
-"""MQTT event consumer — processes SceneScape scene events for POI face matching.
+"""MQTT event consumer — processes Scenescape scene events for POI face matching.
 
 Primary topic: scenescape/data/camera/{camera_id}
   Payload: per-camera DLStreamer output with person detections and face sub_objects.
@@ -51,7 +51,7 @@ TOPIC_RE = CAMERA_TOPIC_RE
 # Minimum face detection confidence to attempt FAISS matching
 FACE_CONFIDENCE_THRESHOLD = 0.80
 
-# SceneScape reid_state values — kept for logging/observability purposes only.
+# Scenescape reid_state values — kept for logging/observability purposes only.
 # These no longer gate FAISS execution; they are recorded to reid:meta for MCP tools.
 REID_MATCHED_STATES = {"matched", "query_no_match"}
 
@@ -227,7 +227,7 @@ class EventConsumer:
                 camera_id, person_int_id, best_face_conf, len(embedding_vector),
             )
 
-            # ── Resolve global UUID from SceneScape ─────────────────────────
+            # ── Resolve global UUID from Scenescape ─────────────────────────
             # Resolution strategy (in priority order):
             #   1. Temporal continuity cache: cam:Camera:N → UUID (from prior resolution)
             #   2. External topic visibility: which UUIDs are visible on this camera

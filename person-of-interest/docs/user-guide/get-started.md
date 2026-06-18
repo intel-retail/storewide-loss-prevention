@@ -2,7 +2,7 @@
 
 This guide walks you through deploying and running the POI Re-identification
 system, including the POI backend, React UI, alert service, and the supporting
-SceneScape stack.
+Scenescape stack.
 
 Before you begin, review the
 [System Requirements](./get-started/system-requirements.md) to ensure your
@@ -32,10 +32,10 @@ Before starting, ensure these files are in place:
 
 | File | Purpose |
 |------|---------|
-| `configs/zone_config.json` | Central configuration: scene, cameras, models, SceneScape images, zones |
+| `configs/zone_config.json` | Central configuration: scene, cameras, models, Scenescape images, zones |
 | `configs/res/*.env` | Device resource configs for DL Streamer pipeline (GPU, CPU, NPU profiles) |
 | `configs/pipeline-config.json` | DL Streamer pipeline template (rendered per camera by `init.sh`) |
-| `../scenescape/webserver/conference-room.zip` | Scene map + zone definitions imported into SceneScape |
+| `../scenescape/webserver/conference-room.zip` | Scene map + zone definitions imported into Scenescape |
 | `../scenescape/sample_data/Camera_01.mp4` | Sample video used by the camera replay |
 
 > **Note:** The video file names must match the `video` entries in
@@ -74,13 +74,13 @@ Minimal example:
 
 The `zone_config.json` file defines:
 
-- `scene_name`, `scene_zip` for SceneScape scene setup
+- `scene_name`, `scene_zip` for Scenescape scene setup
 - `cameras[]` as an array of `{name, video}` camera entries
 - `models` as the comma-separated OpenVINO™ model list
 - `scenescape{}` for registry, version, and controller/manager image tags
 - `store{}` for store name and ID
 - `services{}` for ports, log level, and SeaweedFS settings
-- `scenescape_api{}` for SceneScape REST API endpoint settings
+- `scenescape_api{}` for Scenescape REST API endpoint settings
 - `benchmark{}` for stream-density benchmark parameters
 
 ## 4. Initialize Environment
@@ -109,7 +109,7 @@ export no_proxy=$NO_PROXY
 
 > **Important:** Add `web.scenescape.intel.com` and your machine's IP to
 > `NO_PROXY` so that internal Docker-to-Docker traffic does not go through
-> the proxy. Failing to do so may cause SceneScape scene imports or API
+> the proxy. Failing to do so may cause Scenescape scene imports or API
 > calls to fail with connection errors.
 >
 > These variables are propagated into Docker containers via the
@@ -161,7 +161,7 @@ inference device, pre-process backend, model precision, and throughput options.
 `make init` generates the following from `configs/zone_config.json`:
 
 - `docker/.env` — all environment variables for Docker Compose
-- SceneScape TLS certificates and secrets
+- Scenescape TLS certificates and secrets
 - Per-camera DL Streamer pipeline configuration files
 
 ## 5. Pull or Build Images
@@ -235,9 +235,9 @@ make demo
 `make up` performs the following steps automatically:
 
 1. Detects and cleans stale Docker networks (if present).
-2. Starts SceneScape services (manager, controller, broker, DL Streamer, etc.).
-3. Polls SceneScape web health (up to 150 seconds).
-4. Resolves the SceneScape scene UID for the POI backend.
+2. Starts Scenescape services (manager, controller, broker, DL Streamer, etc.).
+3. Polls Scenescape web health (up to 150 seconds).
+4. Resolves the Scenescape scene UID for the POI backend.
 5. Starts POI services (backend, UI, Redis, alert service).
 
 This launches the following containers:
@@ -249,7 +249,7 @@ This launches the following containers:
 | `poi-redis`          | `redis:8.6.2`                | 6379  |
 | `poi-alert-service`  | `intel/alert-service:2026.1.0`  | 8001  |
 
-> **Note:** Use `make up` for subsequent starts after the initial setup. SceneScape
+> **Note:** Use `make up` for subsequent starts after the initial setup. Scenescape
 > is started automatically by the `up` target.
 
 ## 8. View Logs
@@ -271,7 +271,7 @@ Once running:
 
 | Service | URL | Credentials |
 |---------|-----|-------------|
-| SceneScape UI | https://localhost | `admin` / password printed by `make init` |
+| Scenescape UI | https://localhost | `admin` / password printed by `make init` |
 | POI UI | http://\<host-ip\>:3000 | — |
 | POI Backend API | http://\<host-ip\>:8000/docs | — |
 | POI logs | `make logs` | View all service logs |
@@ -286,10 +286,10 @@ All values in `docker/.env` are auto-generated from `configs/zone_config.json` b
 
 | `zone_config.json` Key | Generated `docker/.env` Values | Description |
 | ---------------------- | ------------------------------ | ----------- |
-| `scene_name`, `scene_zip` | `SCENE_NAME`, `SCENE_ZIP` | Scene name and scene archive used by SceneScape |
+| `scene_name`, `scene_zip` | `SCENE_NAME`, `SCENE_ZIP` | Scene name and scene archive used by Scenescape |
 | `cameras[]` | `CAMERA_NAME`, `VIDEO_FILE`, `CAMERA_NAME_2`, `VIDEO_FILE_2` | Camera names and input videos for generated pipelines |
 | `models`, `model_precision` | `MODELS`, `MODEL_PRECISION` | OpenVINO™ model list and precision |
-| `scenescape{}` | `SCENESCAPE_REGISTRY`, `SCENESCAPE_VERSION`, image settings | SceneScape image source and version selection |
+| `scenescape{}` | `SCENESCAPE_REGISTRY`, `SCENESCAPE_VERSION`, image settings | Scenescape image source and version selection |
 | `store{}` | `STORE_NAME`, `STORE_ID` | Store metadata used by the stack |
 | `services{}` | `LP_SERVICE_PORT`, `LOG_LEVEL`, `SEAWEEDFS_*` | Service ports, logging, and SeaweedFS settings |
 | `benchmark{}` | `BENCHMARK_*`, `RESULTS_PATH` | Stream-density benchmark configuration |
@@ -337,9 +337,9 @@ make build
 
 See [Build from Source](./get-started/build-from-source.md) for detailed build options.
 
-## SceneScape Configuration
+## Scenescape Configuration
 
-- Use `make export-scene` to export scene configuration from a running SceneScape instance.
+- Use `make export-scene` to export scene configuration from a running Scenescape instance.
 - Store scene zip files referenced by `scene_zip` in the repository's `scenescape/webserver/`
   directory.
 - `make init` generates DL Streamer pipeline configuration files per camera from

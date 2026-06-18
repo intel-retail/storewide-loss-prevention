@@ -73,7 +73,7 @@ async def lifespan(app: FastAPI):
     config = ConfigService()
     app.state.config = config
 
-    # 1b. Discover zones from SceneScape API (match by region name)
+    # 1b. Discover zones from Scenescape API (match by region name)
     ss_client = SceneScapeClient(config)
     app.state.scenescape_client = ss_client
     ss_user = os.environ.get("SCENESCAPE_API_USER", "")
@@ -86,11 +86,11 @@ async def lifespan(app: FastAPI):
             if authenticated:
                 break
             wait = 2 ** attempt  # 1, 2, 4, 8, 16 seconds
-            logger.warning("SceneScape auth failed, retrying", attempt=attempt + 1, retry_in=wait)
+            logger.warning("Scenescape auth failed, retrying", attempt=attempt + 1, retry_in=wait)
             await asyncio.sleep(wait)
 
         if not authenticated:
-            logger.error("SceneScape API authentication failed after retries")
+            logger.error("Scenescape API authentication failed after retries")
         else:
             # Resolve scene_name → scene_id for each configured scene
             for scene_name in config.get_scene_names():
@@ -118,7 +118,7 @@ async def lifespan(app: FastAPI):
                 else:
                     logger.warning("Zone discovery found no matching regions")
             else:
-                logger.warning("No regions found in SceneScape")
+                logger.warning("No regions found in Scenescape")
     else:
         logger.warning(
             "SCENESCAPE_API_USER / SCENESCAPE_API_PASSWORD not set, "
@@ -199,10 +199,10 @@ async def lifespan(app: FastAPI):
     # MQTT scene data → session manager (liveness: cameras, bbox, last_seen)
     mqtt_svc.register_scene_data_handler(session_mgr.on_scene_data)
 
-    # MQTT region events → session manager (enter/exit with dwell from SceneScape)
+    # MQTT region events → session manager (enter/exit with dwell from Scenescape)
     mqtt_svc.register_region_event_handler(session_mgr.on_region_event)
 
-    # MQTT region data → session manager (continuous dwell checking via SceneScape feed)
+    # MQTT region data → session manager (continuous dwell checking via Scenescape feed)
     mqtt_svc.register_region_data_handler(session_mgr.on_region_data)
 
     # MQTT camera images → FrameCaptureService (store only). The

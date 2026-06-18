@@ -1,6 +1,6 @@
 # Copyright (C) 2026 Intel Corporation
 # SPDX-License-Identifier: Apache-2.0
-"""MQTT service – subscribes to SceneScape topics and dispatches callbacks."""
+"""MQTT service – subscribes to Scenescape topics and dispatches callbacks."""
 
 import asyncio
 import json
@@ -20,7 +20,7 @@ logger = structlog.get_logger(__name__)
 
 class MQTTService:
     """
-    Connects to the SceneScape MQTT broker, subscribes to scene-data
+    Connects to the Scenescape MQTT broker, subscribes to scene-data
     and camera-image topics, and forwards payloads to registered handlers.
     """
 

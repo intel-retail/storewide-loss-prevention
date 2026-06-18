@@ -40,7 +40,7 @@ async def search_history(
     Returns appearances grouped by track ID, with entry/exit frames and
     zone dwell information where available.
     """
-    
+
     t0 = time.perf_counter()
     if _detection_index is None:
         raise HTTPException(503, "Detection index not available")
@@ -61,7 +61,7 @@ async def search_history(
     # survive time-range and similarity filtering.  With multiple cameras at
     # different angles, the same person may score very differently — a narrow
     # top-k can miss an entire camera's detections.
-    
+
     top_k = max(1, min(top_k, 200))
     total_vecs = _detection_index.total_vectors()
     # Search wide enough to capture cross-camera results where the same person
@@ -69,7 +69,7 @@ async def search_history(
     # two cameras, a minimum of 2000 ensures both cameras' vectors are reached.
     search_k = min(max(top_k * 50, 2000), total_vecs) if total_vecs > 0 else 2000
     hits = _detection_index.search(query_vector, top_k=search_k)
-    
+
 
     if hits:
         sims = sorted((s for _, s in hits), reverse=True)
@@ -203,7 +203,7 @@ def _build_grouped_appearance(
 
     # ── Exit frame and timestamp ──
     # Priority: rolling Redis exit (fresh, within 15min) → promoted FAISS exit (permanent)
-    #         → durable final_exit record (from promotion or SceneScape exit)
+    #         → durable final_exit record (from promotion or Scenescape exit)
     exit_frame_url = None
     exit_timestamp = None
     exit_bbox = None
@@ -226,7 +226,7 @@ def _build_grouped_appearance(
                 exit_frame_url = f"/api/v1/frames/{_encode_key(f'detection:frame:{exit_faiss_id}')}"
 
     # Final fallback: durable final_exit record — always available after
-    # promotion or SceneScape region exit, regardless of FAISS top-k.
+    # promotion or Scenescape region exit, regardless of FAISS top-k.
     # Fill any missing exit fields independently.
     if _detection_index is not None and (
         not exit_timestamp or not exit_frame_url or not exit_bbox
@@ -248,7 +248,7 @@ def _build_grouped_appearance(
                 exit_sim = final_exit.get("similarity")
 
     # ── Zone dwells ──
-    # Region dwells are keyed by the SceneScape UUID (object_id used by
+    # Region dwells are keyed by the Scenescape UUID (object_id used by
     # ScenescapeRegionConsumer), while the detection index track_id is an
     # appearance_id like "cam:Camera_02:1@1715100000" or "uuid-abc@1715100000".
     # Extract the base object_id (before @timestamp) and also try the full

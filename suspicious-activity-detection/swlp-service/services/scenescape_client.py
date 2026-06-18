@@ -1,6 +1,6 @@
 # Copyright (C) 2026 Intel Corporation
 # SPDX-License-Identifier: Apache-2.0
-"""SceneScape REST API client — fetches regions and authenticates via Token."""
+"""Scenescape REST API client — fetches regions and authenticates via Token."""
 
 from typing import Dict, List, Optional
 
@@ -14,7 +14,7 @@ logger = structlog.get_logger(__name__)
 
 class SceneScapeClient:
     """
-    Connects to the SceneScape REST API to fetch regions and map
+    Connects to the Scenescape REST API to fetch regions and map
     them to zone types using exact region names from zone_config.json.
     """
 
@@ -29,7 +29,7 @@ class SceneScapeClient:
         self._token: Optional[str] = None
 
     async def authenticate(self, username: str, password: str) -> bool:
-        """Obtain an API token from SceneScape."""
+        """Obtain an API token from Scenescape."""
         url = f"{self.base_url}{self.auth_path}"
         try:
             conn = aiohttp.TCPConnector(ssl=False) if not self.verify_ssl else None
@@ -42,22 +42,22 @@ class SceneScapeClient:
                     if resp.status == 200:
                         data = await resp.json()
                         self._token = data.get("token")
-                        logger.info("SceneScape API authenticated")
+                        logger.info("Scenescape API authenticated")
                         return True
                     else:
                         body = await resp.text()
                         logger.error(
-                            "SceneScape auth failed",
+                            "Scenescape auth failed",
                             status=resp.status,
                             body=body[:200],
                         )
                         return False
         except Exception as e:
-            logger.error("SceneScape auth error", error=str(e))
+            logger.error("Scenescape auth error", error=str(e))
             return False
 
     async def fetch_regions(self) -> List[dict]:
-        """Fetch all regions from SceneScape REST API."""
+        """Fetch all regions from Scenescape REST API."""
         if not self._token:
             logger.warning("Not authenticated, cannot fetch regions")
             return []
@@ -74,14 +74,14 @@ class SceneScapeClient:
                 ) as resp:
                     if resp.status == 200:
                         data = await resp.json()
-                        # SceneScape API returns paginated: {count, results: [...]}
+                        # Scenescape API returns paginated: {count, results: [...]}
                         if isinstance(data, dict) and "results" in data:
                             regions = data["results"]
                         elif isinstance(data, list):
                             regions = data
                         else:
                             regions = []
-                        logger.info("Fetched regions from SceneScape", count=len(regions))
+                        logger.info("Fetched regions from Scenescape", count=len(regions))
                         return regions
                     else:
                         body = await resp.text()
@@ -92,11 +92,11 @@ class SceneScapeClient:
                         )
                         return []
         except Exception as e:
-            logger.error("SceneScape regions fetch error", error=str(e))
+            logger.error("Scenescape regions fetch error", error=str(e))
             return []
 
     async def fetch_scenes(self) -> List[dict]:
-        """Fetch all scenes from SceneScape REST API."""
+        """Fetch all scenes from Scenescape REST API."""
         if not self._token:
             logger.warning("Not authenticated, cannot fetch scenes")
             return []
@@ -119,7 +119,7 @@ class SceneScapeClient:
                             scenes = data
                         else:
                             scenes = []
-                        logger.info("Fetched scenes from SceneScape", count=len(scenes))
+                        logger.info("Fetched scenes from Scenescape", count=len(scenes))
                         return scenes
                     else:
                         body = await resp.text()
@@ -130,7 +130,7 @@ class SceneScapeClient:
                         )
                         return []
         except Exception as e:
-            logger.error("SceneScape scenes fetch error", error=str(e))
+            logger.error("Scenescape scenes fetch error", error=str(e))
             return []
 
     async def resolve_scene_id(self, scene_name: str) -> Optional[str]:
@@ -148,7 +148,7 @@ class SceneScapeClient:
 
     def map_zones(self, regions: List[dict]) -> Dict[str, dict]:
         """
-        Match SceneScape regions to zone types using exact names from config.
+        Match Scenescape regions to zone types using exact names from config.
 
         Returns {region_uuid: {"name": ..., "type": ..., "scene": ...}}
         """
@@ -179,11 +179,11 @@ class SceneScapeClient:
                     zone_type=zone_type,
                 )
 
-        # Warn about expected zones not found in SceneScape
+        # Warn about expected zones not found in Scenescape
         missing = set(zone_name_map.keys()) - matched_names
         for name in missing:
             logger.warning(
-                "Expected zone not found in SceneScape — create a region with this name",
+                "Expected zone not found in Scenescape — create a region with this name",
                 zone_name=name,
                 expected_type=zone_name_map[name],
             )
@@ -194,12 +194,12 @@ class SceneScapeClient:
         """Full flow: authenticate → fetch regions → map by name → return zones."""
         authenticated = await self.authenticate(username, password)
         if not authenticated:
-            logger.warning("SceneScape auth failed, zone discovery skipped")
+            logger.warning("Scenescape auth failed, zone discovery skipped")
             return {}
 
         regions = await self.fetch_regions()
         if not regions:
-            logger.warning("No regions found in SceneScape")
+            logger.warning("No regions found in Scenescape")
             return {}
 
         return self.map_zones(regions)

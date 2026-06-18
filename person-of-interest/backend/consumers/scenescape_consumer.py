@@ -1,4 +1,4 @@
-"""SceneScape region consumer — UUID camera_bounds mapping + native region events.
+"""Scenescape region consumer — UUID camera_bounds mapping + native region events.
 
 Subscribes to TWO topics:
   1. scenescape/regulated/scene/{scene_id}
@@ -6,7 +6,7 @@ Subscribes to TWO topics:
        Entry/exit is NOT derived here (no stateful diffing).
 
   2. scenescape/event/region/{scene_id}/{region_id}/{suffix}
-     → SceneScape's native region entry/exit events with server-computed dwell.
+     → Scenescape's native region entry/exit events with server-computed dwell.
        Provides explicit ``entered`` / ``exited`` lists — no diffing needed.
 """
 
@@ -35,11 +35,11 @@ _UUID_LOG_INTERVAL = 60  # seconds
 
 
 class ScenescapeRegionConsumer:
-    """Handles SceneScape region tracking via two complementary topics.
+    """Handles Scenescape region tracking via two complementary topics.
 
     - Regulated scene: UUID→camera_bounds mapping (supports UUID resolution
       in the camera topic MQTT consumer for POI matching).
-    - Region event: native ENTERED/EXITED events with dwell from SceneScape.
+    - Region event: native ENTERED/EXITED events with dwell from Scenescape.
     """
 
     def __init__(self, event_service: EventService, event_repo=None, detection_index=None) -> None:
@@ -100,7 +100,7 @@ class ScenescapeRegionConsumer:
     def handle_region_event(self, scene_id: str, region_id: str, data: dict) -> None:
         """Process scenescape/event/region/{scene_id}/{region_id}/{suffix}.
 
-        SceneScape sends explicit ``entered`` and ``exited`` lists with
+        Scenescape sends explicit ``entered`` and ``exited`` lists with
         server-computed dwell time — no stateful diffing required.
 
         Payload format:
@@ -166,7 +166,7 @@ class ScenescapeRegionConsumer:
             except Exception:
                 log.exception("Error storing region exit for obj %s region %s", object_id, region_id)
 
-            # Store durable final exit for offline search — bridges SceneScape
+            # Store durable final exit for offline search — bridges Scenescape
             # region exit to the detection-level appearance so search can find
             # exit data by track_id without relying on FAISS top-k.
             if self._detection_index is not None:
@@ -180,7 +180,7 @@ class ScenescapeRegionConsumer:
                             "source": "scenescape",
                         })
                         log.info(
-                            "Final exit stored (SceneScape): obj=%s appearance=%s",
+                            "Final exit stored (Scenescape): obj=%s appearance=%s",
                             object_id, appearance_id,
                         )
                     else:

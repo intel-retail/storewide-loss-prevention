@@ -16,7 +16,7 @@ echo "=== Storewide Loss Prevention - Install ==="
 
 # ---- Generate secrets (if not already present) ----
 if [ ! -f "${SECRETS_DIR}/browser.auth" ]; then
-    echo "[1/2] Generating SceneScape secrets..."
+    echo "[1/2] Generating Scenescape secrets..."
     chmod +x "${SECRETS_DIR}/generate_secrets.sh"
     bash "${SECRETS_DIR}/generate_secrets.sh"
 else

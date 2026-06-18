@@ -1,4 +1,4 @@
-"""SceneScape REST API adapter."""
+"""Scenescape REST API adapter."""
 
 from __future__ import annotations
 
@@ -16,7 +16,7 @@ log = logging.getLogger("poi.scenescape")
 
 
 class ScenescapeAPIAdapter:
-    """Adapter Pattern — wraps the SceneScape REST API."""
+    """Adapter Pattern — wraps the Scenescape REST API."""
 
     def __init__(self) -> None:
         self._cfg = get_config()
@@ -24,7 +24,7 @@ class ScenescapeAPIAdapter:
         self._token = self._cfg.scenescape_api_token
         self._session = requests.Session()
         self._session.verify = False
-        # Bypass any HTTP proxy for internal SceneScape traffic.
+        # Bypass any HTTP proxy for internal Scenescape traffic.
         # Python requests does not support wildcard NO_PROXY entries (e.g. *.intel.com),
         # so we set proxies explicitly on the session.
         self._session.proxies = {"http": None, "https": None}
@@ -37,12 +37,12 @@ class ScenescapeAPIAdapter:
             self._session.headers["Authorization"] = f"Token {self._token}"
 
     def _fetch_token(self, username: str, password: str) -> str:
-        """Obtain an auth token from the SceneScape API using username/password."""
+        """Obtain an auth token from the Scenescape API using username/password."""
         if not self._base_url:
             return ""
         try:
             # Remove any existing Authorization header before authenticating —
-            # SceneScape validates the header first and returns 401 "Invalid token"
+            # Scenescape validates the header first and returns 401 "Invalid token"
             # if a stale token is present, even on the auth endpoint itself.
             self._session.headers.pop("Authorization", None)
             resp = self._session.post(
@@ -53,10 +53,10 @@ class ScenescapeAPIAdapter:
             resp.raise_for_status()
             token = resp.json().get("token", "")
             if token:
-                log.info("Obtained SceneScape API token for user '%s'", username)
+                log.info("Obtained Scenescape API token for user '%s'", username)
             return token
         except requests.RequestException:
-            log.exception("Failed to obtain SceneScape API token for user '%s'", username)
+            log.exception("Failed to obtain Scenescape API token for user '%s'", username)
             return ""
 
     def _refresh_token(self) -> bool:
@@ -82,7 +82,7 @@ class ScenescapeAPIAdapter:
 
     def list_cameras(self) -> list[dict]:
         if not self._base_url:
-            log.warning("SceneScape API URL not configured")
+            log.warning("Scenescape API URL not configured")
             return []
         try:
             resp = self._get_with_retry(f"{self._base_url}/api/v1/cameras")
@@ -91,7 +91,7 @@ class ScenescapeAPIAdapter:
                 return data
             return data.get("results", data.get("cameras", []))
         except requests.RequestException:
-            log.exception("Failed to fetch cameras from SceneScape")
+            log.exception("Failed to fetch cameras from Scenescape")
             return []
 
     def get_camera(self, camera_id: str) -> Optional[dict]:

@@ -3,9 +3,9 @@
 # SPDX-License-Identifier: Apache-2.0
 
 """
-UUID Monitor — SceneScape Person Detection Analyzer
+UUID Monitor — Scenescape Person Detection Analyzer
 
-Subscribes to SceneScape MQTT topics, tracks unique person UUIDs across
+Subscribes to Scenescape MQTT topics, tracks unique person UUIDs across
 cameras, and captures annotated frames at the moment each new UUID is
 first detected.
 
@@ -275,7 +275,7 @@ def print_summary(output_dir: str, elapsed: float):
 def main():
     global running
 
-    parser = argparse.ArgumentParser(description="SceneScape UUID Monitor")
+    parser = argparse.ArgumentParser(description="Scenescape UUID Monitor")
     parser.add_argument(
         "--duration", type=int,
         default=MONITOR_DURATION,
@@ -329,7 +329,7 @@ def main():
 
     client.loop_start()
 
-    print(f"\n  Monitoring SceneScape for {args.duration}s ...")
+    print(f"\n  Monitoring Scenescape for {args.duration}s ...")
     print(f"  Output: {out}\n")
 
     start = time.time()
