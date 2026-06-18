@@ -8,7 +8,7 @@ Tests (run in order):
   3. FAISS match           — query the same embedding; expect similarity ≥ threshold
   4. MQTT consumer         — feed a fake camera MQTT payload through EventConsumer;
                              verify match fires and best_face_bbox is the face ROI
-  5. UUID cross-camera     — subscribe to live SceneScape MQTT for N seconds and
+  5. UUID cross-camera     — subscribe to live Scenescape MQTT for N seconds and
                              confirm the same UUID appears on ≥ 2 different cameras
   6. Thumbnail visualise   — if a thumbnail was stored (Redis present), save it as
                              /tmp/poi_thumbnail.jpg and print its path

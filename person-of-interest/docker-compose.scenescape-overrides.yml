@@ -1,6 +1,6 @@
-# SceneScape overrides for the POI application.
+# Scenescape overrides for the POI application.
 # Layered on top of scenescape/docker-compose.yaml — not used standalone.
-# NOTE: Do NOT patch SceneScape Python files here. The SceneScape codebase is
+# NOTE: Do NOT patch Scenescape Python files here. The Scenescape codebase is
 #       owned by a separate team. Use config files and env vars instead.
 services:
   # Fix WebRTC playback in Docker: MediaMTX must use a fixed UDP port for

@@ -1,4 +1,4 @@
-"""MQTT adapter for SceneScape event ingestion."""
+"""MQTT adapter for Scenescape event ingestion."""
 
 from __future__ import annotations
 
@@ -30,7 +30,7 @@ _REGULATED_TOPIC_RE = re.compile(r"scenescape/regulated/scene/[^/]+$")
 _REGULATED_TOPIC = "scenescape/regulated/scene/+"
 
 # Native region event topic: scenescape/event/region/{scene_id}/{region_id}/{suffix}
-# SceneScape sends explicit entered/exited lists with server-computed dwell time.
+# Scenescape sends explicit entered/exited lists with server-computed dwell time.
 _REGION_EVENT_TOPIC = "scenescape/event/region/+/+/+"
 _REGION_EVENT_RE = re.compile(
     r"scenescape/event/region/(?P<scene_id>[^/]+)/(?P<region_id>[^/]+)/(?P<suffix>[^/]+)$"
@@ -44,7 +44,7 @@ _IMAGE_TOPIC = "scenescape/image/camera/+"
 
 
 class MQTTAdapter:
-    """Adapter Pattern — wraps paho-mqtt to subscribe to SceneScape events."""
+    """Adapter Pattern — wraps paho-mqtt to subscribe to Scenescape events."""
 
     def __init__(self, on_event: Callable[[str, dict], None],
                  on_region_event: Optional[Callable[[str, dict], None]] = None,
@@ -70,7 +70,7 @@ class MQTTAdapter:
                 tls_version=ssl.PROTOCOL_TLS_CLIENT,
             )
             # Skip hostname verification for self-signed certs (CN may not match broker hostname).
-            # Controlled by MQTT_TLS_INSECURE env var (default: true for SceneScape compatibility).
+            # Controlled by MQTT_TLS_INSECURE env var (default: true for Scenescape compatibility).
             self._client.tls_insecure_set(self._cfg.mqtt_tls_insecure)
 
         log.info("Connecting to MQTT %s:%d", self._cfg.mqtt_host, self._cfg.mqtt_port)

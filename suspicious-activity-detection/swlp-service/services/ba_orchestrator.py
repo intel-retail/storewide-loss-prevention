@@ -20,7 +20,7 @@ BA itself is stateless: each request causes BA to fetch the latest K
 frames from the bucket and run pose+VLM once.
 
 Stops cleanly on:
-  - explicit stop() call (driven by SceneScape EXITED event), OR
+  - explicit stop() call (driven by Scenescape EXITED event), OR
   - explicit stop_all() call (PERSON_LOST).
 """
 
@@ -202,7 +202,7 @@ class BehavioralAnalysisOrchestrator:
                             self._mqtt.publish_raw(
                                 self._cmd_topic_pattern.replace("{camera_name}", cam),
                                 "getimage"
-                            )                           
+                            )
                         except Exception:
                             logger.exception(
                                 "getimage publish failed",

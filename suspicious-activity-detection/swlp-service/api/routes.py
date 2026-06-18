@@ -59,7 +59,7 @@ async def get_alert_count(request: Request) -> Dict[str, int]:
 async def get_sessions(request: Request, include_pending: bool = False) -> List[Dict[str, Any]]:
     """Return active person sessions with per-zone visit summary.
 
-    By default, only sessions whose SceneScape re-id state has progressed
+    By default, only sessions whose Scenescape re-id state has progressed
     beyond initial collection are returned, so flickering/transient ghost
     tracks don't show up in the UI.  Pass ?include_pending=true to see
     everything (including ``pending_collection`` tracks).
@@ -227,10 +227,10 @@ async def delete_zone(request: Request, region_id: str) -> Dict[str, str]:
 
 @router.post("/zones/discover")
 async def discover_zones(request: Request) -> Dict[str, Any]:
-    """Trigger re-discovery of zones from SceneScape API."""
+    """Trigger re-discovery of zones from Scenescape API."""
     ss_client = getattr(request.app.state, "scenescape_client", None)
     if not ss_client:
-        raise HTTPException(status_code=503, detail="SceneScape client not configured")
+        raise HTTPException(status_code=503, detail="Scenescape client not configured")
 
     config = _get_config(request)
     regions = await ss_client.fetch_regions()

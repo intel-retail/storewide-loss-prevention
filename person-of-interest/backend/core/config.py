@@ -25,7 +25,7 @@ class Config:
     Implements the Singleton pattern — only one instance exists.
     """
 
-    # MQTT / SceneScape
+    # MQTT / Scenescape
     mqtt_host: str = ""
     mqtt_port: int = 1883
     mqtt_topic_event: str = ""
@@ -70,7 +70,7 @@ class Config:
     api_host: str = "0.0.0.0"
     api_port: int = 8000
 
-    # SceneScape API
+    # Scenescape API
     scenescape_api_url: str = ""
     scenescape_api_token: str = ""
     scenescape_api_user: str = ""

@@ -5,7 +5,7 @@
 """
 Stream Density scene cloning utility.
 
-Clones a SceneScape scene .zip file N times with unique scene names,
+Clones a Scenescape scene .zip file N times with unique scene names,
 camera IDs, and UIDs for stream density testing.
 
 Usage (called by scene-import.sh):
@@ -105,7 +105,7 @@ def clone_scene_zip(
 
         # Build the new zip
         #
-        # SceneScape's ImportScene.extractZip() flattens all files into a
+        # Scenescape's ImportScene.extractZip() flattens all files into a
         # directory named after the zip (minus .zip).  loadScene() then:
         #   1. Expects exactly ONE .json file in the extract dir
         #   2. Matches resource files by checking:  scene_name in filename

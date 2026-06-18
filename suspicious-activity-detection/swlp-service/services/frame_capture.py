@@ -30,14 +30,14 @@ class CapturedFrameTracker:
     FrameCaptureService and BehavioralAnalysisOrchestrator.
 
     Holds two pieces of state:
-      * ``_latest`` -- the most recent SceneScape ISO timestamp the
+      * ``_latest`` -- the most recent Scenescape ISO timestamp the
         capture service has stored for this key. Read once per cycle by
         the orchestrator and published as ``last_frame_ts``.
       * ``_remaining`` -- a per-cycle quota the orchestrator sets
         immediately before issuing its burst of ``getimage`` commands.
         FrameCaptureService decrements it on each accepted frame and
         ignores further frames once it hits zero, so we never store more
-        than ``frame_capture_count`` frames per cycle even if SceneScape
+        than ``frame_capture_count`` frames per cycle even if Scenescape
         publishes additional unsolicited images on the camera topic.
     """
 
@@ -120,9 +120,9 @@ class FrameCaptureService:
             logger.exception("Invalid base64 image", camera=camera_name)
             return
 
-        # Use SceneScape's timestamp for the stored frame so the bucket
+        # Use Scenescape's timestamp for the stored frame so the bucket
         # filename (ms_since_epoch) matches the `last_frame_ts` we publish
-        # on ba/requests. Drop the frame if SceneScape did not give us a
+        # on ba/requests. Drop the frame if Scenescape did not give us a
         # parseable timestamp -- BA needs the two to be aligned.
         if not scenescape_frame_ts:
             logger.warning("Missing scenescape timestamp; dropping frame", camera=camera_name)
@@ -153,7 +153,7 @@ class FrameCaptureService:
 
             # Enforce the orchestrator's per-cycle quota: store at most
             # `frame_capture_count` frames per (scene, person, region)
-            # cycle, regardless of how many images SceneScape pushes us.
+            # cycle, regardless of how many images Scenescape pushes us.
             if self._tracker is not None and not self._tracker.try_consume(
                 session.scene_id, session.object_id, zone_id,
             ):

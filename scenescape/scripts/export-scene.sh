@@ -2,7 +2,7 @@
 # Copyright (C) 2026 Intel Corporation
 # SPDX-License-Identifier: Apache-2.0
 #
-# Export SceneScape scene configuration (scene, cameras, regions, map image)
+# Export Scenescape scene configuration (scene, cameras, regions, map image)
 # to a zip file that can be used by scene-import.sh / init.sh.
 #
 # Usage:
@@ -12,7 +12,7 @@
 #   ./scenescape/scripts/export-scene.sh person-of-interest
 #   ./scenescape/scripts/export-scene.sh person-of-interest --scene "conference room"
 #
-# The script reads SceneScape connection info from zone_config.json,
+# The script reads Scenescape connection info from zone_config.json,
 # fetches the scene/cameras/regions via REST API, downloads the map image,
 # and packages everything into a zip under scenescape/webserver/.
 #
@@ -94,7 +94,7 @@ if [ -z "${SUPASS}" ]; then
     exit 1
 fi
 
-# ---- SceneScape API connection ----
+# ---- Scenescape API connection ----
 SCENESCAPE_URL="${API_BASE_URL}"
 CA_CERT="${SCENESCAPE_DIR}/secrets/certs/scenescape-ca.pem"
 CURL_TLS_FLAGS="-k"
@@ -106,7 +106,7 @@ OUTPUT_DIR="${SCENESCAPE_DIR}/webserver"
 WORK_DIR=$(mktemp -d)
 trap "rm -rf ${WORK_DIR}" EXIT
 
-echo -e "${GREEN}=== SceneScape Scene Export ===${NC}"
+echo -e "${GREEN}=== Scenescape Scene Export ===${NC}"
 echo "  Scene:      ${SCENE_NAME}"
 echo "  Output:     ${OUTPUT_DIR}/${SCENE_ZIP}"
 echo "  API:        ${SCENESCAPE_URL}"
@@ -169,7 +169,7 @@ if not target:
 scene_uid = target.get("uid", "")
 print(f"  Found scene: {target['name']} (uid={scene_uid})")
 
-# Build the export JSON (same format as SceneScape import expects)
+# Build the export JSON (same format as Scenescape import expects)
 export = {
     "uid": scene_uid,
     "name": target.get("name", ""),
@@ -315,4 +315,4 @@ echo ""
 echo "This zip can be imported by:"
 echo "  1. scene-import.sh (automatic on docker compose up)"
 echo "  2. init.sh (set scene_zip in zone_config.json)"
-echo "  3. SceneScape UI > Import Scene"
+echo "  3. Scenescape UI > Import Scene"

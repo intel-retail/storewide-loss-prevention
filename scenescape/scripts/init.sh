@@ -41,8 +41,8 @@ NC='\033[0m'
 echo -e "${GREEN}=== Storewide Loss Prevention - Full Stack Init ===${NC}"
 echo ""
 
-# ---- Step 1: Generate SceneScape secrets ----
-echo -e "${YELLOW}[1/4] Generating SceneScape secrets...${NC}"
+# ---- Step 1: Generate Scenescape secrets ----
+echo -e "${YELLOW}[1/4] Generating Scenescape secrets...${NC}"
 SECRETS_GENERATED=0
 if [ -f "${SECRETS_DIR}/django/secrets.py" ] && [ -f "${SECRETS_DIR}/certs/scenescape-ca.pem" ]; then
     echo "  Secrets already exist, skipping generation."
@@ -97,7 +97,7 @@ else:
 print(f'MODELS=\"{cfg.get(\"models\", \"\")}\"')
 print(f'MODEL_PRECISION=\"{cfg.get(\"model_precision\", \"FP32\")}\"')
 
-# SceneScape images
+# Scenescape images
 ss = cfg.get('scenescape', {})
 print(f'SCENESCAPE_REGISTRY=\"{ss.get(\"registry\", \"\")}\"')
 print(f'SCENESCAPE_VERSION=\"{ss.get(\"version\", \"latest\")}\"')
@@ -106,7 +106,7 @@ print(f'SCENESCAPE_MANAGER_IMAGE=\"{ss.get(\"manager_image\", \"intel/scenescape
 print(f'DLSTREAMER_VERSION=\"{ss.get(\"dlstreamer_version\", \"2026.1.0-20260331-weekly-ubuntu24\")}\"')
 print(f'SCENESCAPE_API_USER=\"{ss.get(\"api_user\", \"admin\")}\"')
 
-# SceneScape API
+# Scenescape API
 api = cfg.get('scenescape_api', {})
 print(f'SCENESCAPE_API_URL=\"{api.get(\"base_url\", \"https://localhost\")}\"')
 
@@ -163,7 +163,7 @@ fi
 SCENE_ZIP_PATH="${SCENESCAPE_DIR}/webserver/${SCENE_ZIP}"
 if [ -n "${SCENE_ZIP}" ] && [ ! -f "${SCENE_ZIP_PATH}" ]; then
     echo -e "${YELLOW}WARNING: Scene zip not found at ${SCENE_ZIP_PATH}${NC}"
-    echo "  Scene import will be skipped. Import manually via SceneScape UI."
+    echo "  Scene import will be skipped. Import manually via Scenescape UI."
 fi
 
 # Validate video exists
@@ -193,14 +193,14 @@ fi
 # Validate app-specific controller configs exist
 if [ ! -f "${APP_DIR}/configs/tracker-config.json" ]; then
     echo -e "${YELLOW}WARNING: tracker-config.json not found in ${APP_DIR}/configs/${NC}"
-    echo "  SceneScape will use default from scenescape/controller/tracker-config.json"
+    echo "  Scenescape will use default from scenescape/controller/tracker-config.json"
 fi
 if [ ! -f "${APP_DIR}/configs/reid-config.json" ]; then
     echo -e "${YELLOW}WARNING: reid-config.json not found in ${APP_DIR}/configs/${NC}"
-    echo "  SceneScape will use default from scenescape/controller/reid-config.json"
+    echo "  Scenescape will use default from scenescape/controller/reid-config.json"
 fi
 
-# Resolve controller config paths (app-specific or SceneScape default)
+# Resolve controller config paths (app-specific or Scenescape default)
 if [ -f "${APP_DIR}/configs/tracker-config.json" ]; then
     TRACKER_CONFIG="${APP_DIR}/configs/tracker-config.json"
 else
@@ -425,7 +425,7 @@ REID_CONFIG=${REID_CONFIG}
 MODELS=${MODELS}
 MODEL_PRECISION=${MODEL_PRECISION}
 
-# ---- SceneScape images (from zone_config.json) ----
+# ---- Scenescape images (from zone_config.json) ----
 SCENESCAPE_REGISTRY=${SCENESCAPE_REGISTRY}
 SCENESCAPE_VERSION=${SCENESCAPE_VERSION}
 SCENESCAPE_CONTROLLER_IMAGE=${SCENESCAPE_CONTROLLER_IMAGE}
@@ -446,7 +446,7 @@ SEAWEEDFS_S3_PORT=${SEAWEEDFS_S3_PORT}
 SEAWEEDFS_MASTER_PORT=${SEAWEEDFS_MASTER_PORT}
 SEAWEEDFS_VOLUME_PORT=${SEAWEEDFS_VOLUME_PORT}
 
-# ---- SceneScape API (from zone_config.json scenescape_api.base_url) ----
+# ---- Scenescape API (from zone_config.json scenescape_api.base_url) ----
 SCENESCAPE_API_URL=${SCENESCAPE_API_URL}
 SCENESCAPE_API_USER=${SCENESCAPE_API_USER}
 SCENESCAPE_API_PASSWORD=${SUPASS}
@@ -551,8 +551,8 @@ echo "Next steps:"
 echo "  1. Place your video in scenescape/sample_data/${VIDEO_FILE}"
 echo "  2. Place your scene zip in scenescape/webserver/${SCENE_ZIP}"
 echo "  3. Start from your app directory:"
-echo "       make run-scenescape   (SceneScape only)"
+echo "       make run-scenescape   (Scenescape only)"
 echo "       make demo             (full stack)"
 echo ""
-echo "  4. Open SceneScape UI:  https://localhost"
+echo "  4. Open Scenescape UI:  https://localhost"
 echo "     Login: admin / ${SUPASS}"

@@ -3,7 +3,7 @@
 """
 Session Manager — owns the live state of every person currently in the store.
 
-Consumes three SceneScape MQTT feeds:
+Consumes three Scenescape MQTT feeds:
   1. scene-data    (scenescape/data/scene/+/+)    — position updates, camera visibility
   2. region-events (scenescape/event/region/+/+/+) — native ENTERED / EXITED with dwell
   3. region-data   (scenescape/data/region/+/+)    — continuous per-frame object presence
@@ -29,7 +29,7 @@ class SessionManager:
     Maintains a PersonSession for every active object_id.
 
     Scene-data messages keep the session alive (last_seen, cameras, bbox).
-    Region-event messages drive ENTERED / EXITED events using SceneScape's
+    Region-event messages drive ENTERED / EXITED events using Scenescape's
     native boundary detection and dwell calculation.
     Sessions are expired when absent for longer than session_timeout.
     """
@@ -50,7 +50,7 @@ class SessionManager:
         # multi-scene. Canonical id is the earliest UUID in a re-id chain;
         # all later flickering UUIDs are aliased to it via _oid_alias below.
         self._sessions: Dict[tuple, PersonSession] = {}
-        # Canonical-id alias: maps any flickering raw oid SceneScape emits
+        # Canonical-id alias: maps any flickering raw oid Scenescape emits
         # back to the first oid we saw for that physical person, so all
         # downstream state (sessions, frame folders, dedup) stays unified.
         self._oid_alias: Dict[tuple, str] = {}  # (scene_id, raw_oid) -> canonical_oid
@@ -94,7 +94,7 @@ class SessionManager:
     ) -> str:
         """Map a (possibly flickering) raw oid to a stable canonical oid.
 
-        SceneScape often assigns a fresh UUID to the same physical person
+        Scenescape often assigns a fresh UUID to the same physical person
         every couple of seconds; each new track lists older UUIDs in
         ``previous_ids_chain``. We collapse the lineage onto the first
         canonical id we have already recorded for any ancestor in the chain.
@@ -105,7 +105,7 @@ class SessionManager:
             return self._oid_alias[skey]
 
         for prev in prev_chain or []:
-            # SceneScape emits chain items as dicts ({"id": "...", "timestamp": ..., ...})
+            # Scenescape emits chain items as dicts ({"id": "...", "timestamp": ..., ...})
             # but older payloads may use bare UUID strings. Handle both.
             if isinstance(prev, dict):
                 prev_str = str(prev.get("id") or "")
@@ -162,7 +162,7 @@ class SessionManager:
 
         Updates session liveness (last_seen), cameras, bbox.
         Does NOT fire ENTERED/EXITED events — those come from on_region_event()
-        via SceneScape's native region events.
+        via Scenescape's native region events.
         """
         # Filter by resolved scene_ids (supports multiple scenes)
         accepted_scene_ids = self.config.get_accepted_scene_ids()
@@ -206,7 +206,7 @@ class SessionManager:
                 session.last_seen = now
                 session.current_cameras = list(cameras)
                 session.bbox = bbox
-                # Promote reid_state once SceneScape upgrades to "matched".
+                # Promote reid_state once Scenescape upgrades to "matched".
                 if reid_state and (not session.reid_state or reid_state == "matched"):
                     prev_state = session.reid_state
                     session.reid_state = reid_state
@@ -217,7 +217,7 @@ class SessionManager:
                     if cam not in session.camera_history:
                         session.camera_history.append(cam)
             else:
-                # Prefer SceneScape's first_seen (track origin time) when
+                # Prefer Scenescape's first_seen (track origin time) when
                 # provided; fall back to local now if absent / unparseable.
                 first_seen_str = obj.get("first_seen")
                 first_seen = now
@@ -248,7 +248,7 @@ class SessionManager:
         """
         Process a scenescape/event/region/{scene_id}/{region_id}/{suffix} message.
 
-        SceneScape provides native enter/exit lists with dwell time,
+        Scenescape provides native enter/exit lists with dwell time,
         so we consume them directly instead of diffing region sets.
         """
         scene_id_filter = self.config.get_accepted_scene_ids()
@@ -265,7 +265,7 @@ class SessionManager:
             prev_chain = obj.get("previous_ids_chain") or []
             oid = self._resolve_canonical(scene_id, raw_oid, prev_chain)
 
-            # Prefer SceneScape's per-region ``entered`` timestamp as the
+            # Prefer Scenescape's per-region ``entered`` timestamp as the
             # authoritative visit anchor (becomes the BA bucket folder
             # name and visit key). Falls back to local ``now`` if absent.
             ss_entered_iso = (
@@ -332,7 +332,7 @@ class SessionManager:
         """
         Process a scenescape/data/region/{scene_id}/{region_id} message.
 
-        Continuous feed: every frame, SceneScape publishes all objects
+        Continuous feed: every frame, Scenescape publishes all objects
         currently inside the region, each carrying ``regions.{name}.dwell``.
         We forward this dwell as a LOITER event; the rule engine's
         ``loitering`` rule (rules.yaml) decides whether to actually alert
@@ -367,11 +367,11 @@ class SessionManager:
             if session and session.loiter_alerted.get(region_id):
                 continue
 
-            # Read SceneScape's authoritative dwell for this region.
+            # Read Scenescape's authoritative dwell for this region.
             rinfo = (obj.get("regions") or {}).get(region_id)
             if not isinstance(rinfo, dict):
                 # Fall back to the first region entry if the topic id key
-                # doesn't appear (older SceneScape payload shape).
+                # doesn't appear (older Scenescape payload shape).
                 for _rname, _rinfo in (obj.get("regions") or {}).items():
                     if isinstance(_rinfo, dict):
                         rinfo = _rinfo
@@ -437,7 +437,7 @@ class SessionManager:
         # Move aliases to grace-period tombstones instead of deleting
         # immediately. This allows late-arriving ``previous_ids_chain``
         # references to still find the canonical within the grace window,
-        # preventing SceneScape re-id flicker from creating orphan sessions.
+        # preventing Scenescape re-id flicker from creating orphan sessions.
         scene_id_expired, canonical_expired = skey
         grace_deadline = time.time() + self._alias_grace_seconds
         stale_aliases = [
@@ -467,11 +467,11 @@ class SessionManager:
     ) -> None:
         """Open a new visit for ``region_id``.
 
-        ``entry_dt`` (when provided) is SceneScape's authoritative
+        ``entry_dt`` (when provided) is Scenescape's authoritative
         per-region ``entered`` timestamp and becomes the visit anchor —
         i.e. the value stored in ``session.current_zones`` and used
         downstream as the BA bucket folder name. Falls back to ``now``
-        when SceneScape didn't supply one.
+        when Scenescape didn't supply one.
         """
         entry_ts = entry_dt or now
         zone_type = self.config.get_zone_type(region_id)
@@ -486,7 +486,7 @@ class SessionManager:
             return
 
         # Guard: skip duplicate ENTERED if person is already in this zone
-        # (SceneScape may publish on multiple topic suffixes or boundary jitter)
+        # (Scenescape may publish on multiple topic suffixes or boundary jitter)
         if session.is_in_zone(region_id):
             logger.debug(
                 "Duplicate zone_entry suppressed — person already in zone",
@@ -533,7 +533,7 @@ class SessionManager:
             return
 
         visit = session.close_visit(region_id, now)
-        # Use SceneScape's dwell time if provided, otherwise fall back to local calc
+        # Use Scenescape's dwell time if provided, otherwise fall back to local calc
         dwell = dwell_override if dwell_override is not None else (visit.duration_seconds if visit else 0.0)
 
         # Capture entry timestamp BEFORE exit_zone() drops it from current_zones,

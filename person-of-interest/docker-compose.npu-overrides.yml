@@ -4,7 +4,7 @@
 # NPU device access overrides for DLStreamer Pipeline Server containers.
 # Included automatically by the Makefile when DEVICE=all-npu.env or all-npu-cpu.env.
 #
-# Root cause (ITEP-92805): The base SceneScape docker-compose.yaml only maps
+# Root cause (ITEP-92805): The base Scenescape docker-compose.yaml only maps
 # /dev/dri (GPU). Intel NPU (MTL / WCL) is exposed as /dev/accel/accel0
 # (character device, major 261). Without this mapping the VCL compiler inside
 # the container reads device ID 0x0x0 and fails with:
@@ -23,5 +23,5 @@ services:
       - "/dev/dri:/dev/dri"
       - "/dev/accel:/dev/accel"
     device_cgroup_rules:
-    
+
       - "c 261:* rmw"  # Intel NPU accel devices (accel subsystem, major 261)
