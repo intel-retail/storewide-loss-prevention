@@ -7,7 +7,7 @@ Re-identification system. It is divided into the following sections:
   container failures, MQTT connectivity, and FAISS errors.
 - [Troubleshooting Docker Deployments](#troubleshooting-docker-deployments): Steps to address
   problems specific to Docker deployments.
-- [SceneScape Integration Issues](#scenescape-integration-issues): Issues related to MQTT
+- [Scenescape Integration Issues](#scenescape-integration-issues): Issues related to MQTT
   topics, embedding alignment, and camera connectivity.
 
 If you encounter any problems not addressed here, check the
@@ -36,7 +36,7 @@ If you encounter any problems not addressed here, check the
 - **Issue**: POIs are enrolled but no alerts appear in the UI.
 - **Solution**:
   - Verify MQTT connectivity: check `MQTT_HOST` and `MQTT_PORT` in `.env`
-  - Verify SceneScape DL Streamer is publishing to `scenescape/data/camera/+`
+  - Verify Scenescape DL Streamer is publishing to `scenescape/data/camera/+`
   - Check the similarity threshold: lower `SIMILARITY_THRESHOLD` if matches are too strict
   - Verify face embeddings are present in MQTT messages (face sub_objects required)
   - Check backend logs: `make logs | grep "poi.consumer"`
@@ -142,14 +142,14 @@ If you encounter any problems not addressed here, check the
 
 ### 2. Docker Network Issues
 
-- **Issue**: POI backend cannot connect to SceneScape MQTT broker.
+- **Issue**: POI backend cannot connect to Scenescape MQTT broker.
 - **Solution**: Ensure the `storewide-lp` external network exists:
 
   ```bash
   docker network create storewide-lp
   ```
 
-  Verify SceneScape containers are on the same network.
+  Verify Scenescape containers are on the same network.
 
 ### 3. Reset Application
 
@@ -163,14 +163,14 @@ make clean
 make up
 ```
 
-## SceneScape Integration Issues
+## Scenescape Integration Issues
 
 ### 1. MQTT Messages Not Received
 
 - **Issue**: Backend logs show no incoming MQTT events.
 - **Solution**:
   - Verify MQTT broker is accessible: `mosquitto_sub -h <MQTT_HOST> -t "scenescape/data/camera/#"`
-  - Check DL Streamer pipeline is running in SceneScape
+  - Check DL Streamer pipeline is running in Scenescape
   - Ensure camera feeds are active and producing detections
   - Verify `MQTT_CA_CERT` is set if the broker requires TLS
 
@@ -188,7 +188,7 @@ make up
 - **Issue**: The camera list API returns no cameras.
 - **Solution**:
   - Verify `SCENESCAPE_API_URL` and `SCENESCAPE_API_TOKEN` are correctly set in `.env`
-  - Test the SceneScape API directly:
+  - Test the Scenescape API directly:
 
     ```bash
     curl -k https://<scenescape-host>/api/v1/cameras \

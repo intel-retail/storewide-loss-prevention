@@ -69,18 +69,18 @@ running the Store-wide Loss Prevention application.
 The application bundles several AI workloads, each with its own models and
 inputs or outputs:
 
-- **Person Detection (SceneScape DL Streamer pipeline):**
+- **Person Detection (Scenescape DL Streamer pipeline):**
   - **Model:** `person-detection-retail-0013` from Open Model Zoo, converted
     to OpenVINO IR.
   - **Input:** Camera frames (BGR) from the RTSP source or replayed video.
-  - **Output:** Per-frame bounding boxes used by SceneScape's tracker.
+  - **Output:** Per-frame bounding boxes used by Scenescape's tracker.
   - **Target devices:** Intel CPU or GPU via OpenVINO (`DETECTION_DEVICE`).
 
-- **Person Re-Identification (SceneScape DL Streamer pipeline):**
+- **Person Re-Identification (Scenescape DL Streamer pipeline):**
   - **Model:** `person-reidentification-retail-0277` from Open Model Zoo,
     converted to OpenVINO IR.
   - **Input:** Cropped person patches from the detector.
-  - **Output:** Embedding vectors used by SceneScape's controller to assign
+  - **Output:** Embedding vectors used by Scenescape's controller to assign
     persistent `object_id` across cameras and time.
   - **Target devices:** Intel CPU or GPU via OpenVINO (`REID_DEVICE`).
 
@@ -109,7 +109,7 @@ inputs or outputs:
 - **Network Access:**
   - Local network connectivity to access the LP REST API
     (`http://<HOST_IP>:8082`), the Gradio dashboard
-    (`http://<HOST_IP>:7860`), and the SceneScape UI (`https://<HOST_IP>`).
+    (`http://<HOST_IP>:7860`), and the Scenescape UI (`https://<HOST_IP>`).
   - Optional outbound internet access to download Docker base images,
     OpenVINO models, and Qwen2.5-VL weights (if not pre-cached).
 
@@ -128,7 +128,7 @@ inputs or outputs:
 ## Browser Requirements
 
 - Modern web browser (Chrome, Edge, or Firefox) to access the Gradio
-  dashboard and SceneScape UI.
+  dashboard and Scenescape UI.
 - JavaScript enabled.
 
 These requirements are intended for development and evaluation environments.

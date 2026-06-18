@@ -19,7 +19,7 @@ where a queried person appeared across all cameras and time ranges.
 ## Overview
 
 The **POI Re-identification** system leverages OpenVINO™ face detection and
-re-identification models integrated with Intel® SceneScape spatial computing to deliver
+re-identification models integrated with Scenescape spatial computing to deliver
 real-time biometric person matching in multi-camera retail environments. By processing
 256-dimensional face embeddings at the edge using FAISS vector search, the system enables
 sub-second POI detection with minimal latency while maintaining data privacy — all biometric
@@ -46,23 +46,23 @@ processing stays local.
   scaling of backend, UI, and alert service.
 - **Flexible Deployment:** Docker Compose deployment with support for both local and
   registry-based image management.
-- **SceneScape Integration:** Leverages Intel® SceneScape for spatial scene understanding,
+- **Scenescape Integration:** Leverages Scenescape for spatial scene understanding,
   region tracking, and multi-camera calibration.
 
 ## How it Works
 
 This section provides a high-level architecture view of the POI Re-identification system
-and how it integrates with Intel® SceneScape and DL Streamer pipelines.
+and how it integrates with Scenescape and DL Streamer pipelines.
 
 ### System Architecture
 
 ```
-┌───────────────────────────────────────────────────────────────────────────────┐
-│                        Intel® SceneScape Platform                            │
+┌──────────────────────────────────────────────────────────────────────────────┐
+│                        Scenescape Platform                                   │
 │                                                                              │
 │  ┌─────────────┐    ┌──────────────────────────────────────────┐             │
-│  │  IP Cameras  │───▶│ DL Streamer Pipeline Server                │             │
-│  │  (RTSP)      │    │  ├─ person-detection-retail-0013         │             │
+│  │  IP Cameras  │───▶│ DL Streamer Pipeline Server                │          │
+│  │  (RTSP)      │    │  ├─ person-detection-retail-0013         │            │
 │  └─────────────┘    │  ├─ face-detection-retail-0004           │             │
 │                     │  ├─ face-reidentification-retail-0095    │             │
 │                     │  ├─ person-reidentification-retail-0277  │             │
@@ -131,7 +131,7 @@ Camera → DL Streamer → MQTT → MQTTConsumer → FAISS POI Search → AlertS
 5. The **ExitPromoterThread** (background, every 30s) promotes the last face embedding for
    ended tracks into FAISS as durable exit records, ensuring exit data survives Redis TTL
    expiry.
-6. The **RegionConsumer** receives SceneScape regulated scene events and stores region
+6. The **RegionConsumer** receives Scenescape regulated scene events and stores region
    entry/exit records with dwell times, indexed for fast batch lookups.
 
 ### Data Flow: Offline (Historical Search)
@@ -182,9 +182,9 @@ User uploads image → OpenVINO → Detection FAISS (search_k=2000) → Filter +
   Dedicated microservice for alert fan-out — dispatches POI match alerts via logging,
   WebSocket (to UI), and MQTT channels. Runs on port `8001`.
 
-- **Intel® SceneScape + DL Streamer**:
+- **Scenescape + DL Streamer**:
   Upstream inference pipeline providing person detection, face detection, and face
-  re-identification via MQTT. DL Streamer runs the OpenVINO models; SceneScape provides
+  re-identification via MQTT. DL Streamer runs the OpenVINO models; Scenescape provides
   spatial scene management, region tracking, and multi-camera UUID coordination.
 
 ### Key Features
@@ -195,7 +195,7 @@ User uploads image → OpenVINO → Detection FAISS (search_k=2000) → Filter +
   person appeared across all cameras, with region dwell times and thumbnails.
 - **Feature 3**: Multi-strategy alert delivery — WebSocket push to UI, MQTT publish, and
   webhook POST, with configurable deduplication and suppression.
-- **Feature 4**: Region entry/exit tracking with dwell time computation via SceneScape
+- **Feature 4**: Region entry/exit tracking with dwell time computation via Scenescape
   regulated scene events.
 
 ## Learn More

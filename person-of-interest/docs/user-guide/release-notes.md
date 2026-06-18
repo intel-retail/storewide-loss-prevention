@@ -13,7 +13,7 @@
 
 - **Search API response format**: `visits[]` changed to `appearances[]` with entry/exit
   similarity and frame URLs
-- **Dynamic SceneScape configuration**: All environment variables are now auto-generated
+- **Dynamic Scenescape configuration**: All environment variables are now auto-generated
   from `configs/zone_config.json` via `make init` that replaced `make init-env`.
   In result, manual editing of `.env` is not required.
 - Benchmark targets now use performance-tools submodule instead of backend benchmarks
@@ -27,14 +27,14 @@
 - **Track purity filter**: Prevents false positives from DL Streamer track ID reuse by
   checking per-POI event counts and filtering tracks with < 40% purity
 - **Scene export script**: `make export-scene` exports scene config from a running
-  SceneScape instance as an importable zip file
+  Scenescape instance as an importable zip file
 - **Per-camera pipeline configs**: DL Streamer pipeline configs are generated dynamically
   per camera from zone_config.json
 - **Benchmark submodule**: Benchmark targets now use performance-tools submodule
   instead of backend benchmarks
 - **Stream density benchmarking**: Integrated performance-tools submodule with `make benchmark`,
   `make benchmark-stream-density`, `make consolidate-metrics`, and `make plot-metrics` targets
-- **App-specific controller configs**: Tracker and reid configs moved from SceneScape to
+- **App-specific controller configs**: Tracker and reid configs moved from Scenescape to
   each app's `configs/` directory (POI: cosine/0.97, SAD: L2/30)
 
 **Fixed**:
@@ -63,7 +63,7 @@
   investigation
 - Cache-Aside pattern for object-to-POI mapping — avoids repeated FAISS searches for the
   same tracked person
-- Region entry/exit tracking with dwell time computation via Intel® SceneScape regulated
+- Region entry/exit tracking with dwell time computation via Scenescape regulated
   scene events
 - Docker Compose deployment with four services: backend, UI, Redis, and alert service
 - Full test suite with 110 passing tests covering matching, alerting, MQTT consumption,
@@ -87,7 +87,7 @@
   consider switching to `IndexIVFFlat` for approximate nearest neighbor search.
 - Thumbnail capture depends on RTSP stream availability from the camera; if RTSP is not
   configured, thumbnails may be empty.
-- SceneScape integration is required for region tracking and dwell time features; without
-  SceneScape, only per-camera tracking is available.
+- Scenescape integration is required for region tracking and dwell time features; without
+  Scenescape, only per-camera tracking is available.
 - Alert deduplication window is per `(object_id, poi_id)` pair — a different POI match for the same
   person will generate a new alert immediately.

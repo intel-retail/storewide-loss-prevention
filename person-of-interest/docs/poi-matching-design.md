@@ -659,7 +659,7 @@ Appearances are sorted by overall_similarity descending.
 
 ### UUID Resolution for Track Keys
 
-SceneScape regulated scene topic provides global UUIDs for tracked persons across
+Scenescape regulated scene topic provides global UUIDs for tracked persons across
 cameras. The MQTT consumer resolves these via IoU matching:
 
 ```
