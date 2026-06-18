@@ -80,7 +80,7 @@ services:
       - ./behavioral-analysis/config:/app/config:ro
     restart: unless-stopped
 
-  # ---------- Store-wide Loss Prevention ----------
+  # ---------- Scene Understanding Service ----------
   scene-understanding-service:
     image: scene-understanding-service:local
     ports:
@@ -124,7 +124,9 @@ services:
       USECASE_1: ${USECASE_1:-Scene-Understanding-Service}
       CONTAINER_RESULTS_PATH: /app/results/swlp
     volumes:
-      - ./configs:/app/configs:ro
+      # Only the two config files this service actually reads.
+      - ./configs/scene-config.yaml:/app/configs/scene-config.yaml:ro
+      - ./configs/rules.yaml:/app/configs/rules.yaml:ro
       - ../scenescape/secrets:/app/secrets:ro
       - ${RESULTS_PATH:-./results}:/app/results
     restart: unless-stopped
