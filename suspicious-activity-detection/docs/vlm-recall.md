@@ -187,6 +187,34 @@ For each clip:
 The mapping store lets us (a) translate a real-world time window to the right clips despite VSS
 storing upload time, and (b) join VSS results back to a camera and a playable clip URL.
 
+### 9.1 Where the Mapping DB lives
+
+The mapping store is a small, flat, relational table (one row per uploaded clip):
+`video_id, camera_id, area_label, capture_start, capture_end, tags, clip_url`. It holds **no
+video bytes** — clips live in VSS's MinIO; embeddings live in VDMS. Storage options:
+
+| Option | What it is | Use when |
+|--------|-----------|----------|
+| **SQLite (MVP default)** | one file in a bridge volume | single host, getting started |
+| **Dedicated Postgres database (chosen)** | a **separate** `recall_bridge` database created on VSS's existing `postgres-service` | shared/HA storage without a new container |
+
+We reuse the **process** of VSS's `postgres-service` but **not** its application database. The
+bridge owns a dedicated database (`recall_bridge`) so its `clips` table is fully isolated from
+VSS's own `video`/`search`/`tag` tables and TypeORM migrations:
+
+```sql
+CREATE DATABASE recall_bridge;   -- isolated from VSS's own pipeline-manager DB
+```
+
+```bash
+# bridge env (points at the SAME server, a SEPARATE database)
+RECALL_DB_URL=postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres-service:5432/recall_bridge
+```
+
+**Never** write the bridge's tables into VSS's own application database — that DB is private to
+the pipeline-manager (schema and migrations can change on any VSS upgrade, and
+`docker compose down -v` would wipe the mapping rows). Same server, different database.
+
 ## 10. Search Proxy + Enrichment
 
 Investigators call the bridge, not VSS directly:
@@ -202,20 +230,109 @@ POST /api/v1/lp/recall/search
 }
 ```
 
-The bridge translates this to a VSS call:
+The bridge does **not** rely on VSS's own `timeFilter` for the real-world window (see 10.1 for
+why). It sends only the appearance + tag query to VSS and applies the time window itself:
 
 ```text
 POST /manager/search
 {
   "query": "person in a blue shirt",
   "tags":  "entrance,cam-12",            # camera/area tags
-  "timeFilter": { "start": "...Z", "end": "...Z" }
+  "timeFilter": null                      # absolute window resolved by the bridge, not VSS
 }
 ```
 
 Then it enriches each VSS hit by joining `video_id` -> bridge mapping to attach `camera_id`,
 `area_label`, true `capture_start/end`, and a playable `clip_url`, and returns the enriched,
 sorted results to the UI.
+
+### 10.1 Capture-time filtering in the bridge (Option A)
+
+**Why not VSS's `timeFilter`.** Verified against the running stack: VSS stores `created_at` as the
+**upload** timestamp (a result for the demo clip returned `created_at:
+2026-06-19T07:58:54.696913+00:00`, matching its upload `createdAt` to the millisecond), and the
+public one-off `POST /manager/search` only honors a **relative** `{value, unit}` window — an
+absolute `{start, end}` is dropped by `normalizeTimeFilter`. So VSS time filtering answers
+"uploaded in this window", not "captured in this window", which is wrong for investigator recall
+and for backfilled clips.
+
+**What the bridge does instead.** The mapping DB already stores the **true**
+`capture_start/capture_end` per `videoId`. The bridge resolves the time window itself:
+
+1. **Pre-filter by capture time.** Select the `videoId`s whose capture window intersects the
+   requested `[time_start, time_end]`. Every axis is **optional** — a NULL predicate is a no-op, so
+   the same query handles "time + camera", "camera only", or "no filter at all":
+   ```sql
+   SELECT video_id FROM clips
+   WHERE (:time_start IS NULL OR capture_start < :time_end)
+     AND (:time_end   IS NULL OR capture_end   > :time_start)
+     AND (:cameras    IS NULL OR camera_id IN (:cameras));
+   ```
+   When **neither time nor camera** is given, the bridge skips the pre-filter entirely (candidate
+   set = everything) and relies purely on VSS's semantic ranking — see the fallback note below.
+2. **Appearance search in VSS.** Call `POST /manager/search` with the `query` and the camera/area
+   `tags`, and `timeFilter: null`.
+3. **Post-filter the hits.** Keep only VSS results whose `video_id` is in the pre-filtered set
+   (and optionally re-check overlap), then enrich and sort. When the pre-filter was skipped, this
+   step does **enrichment only** (attach camera/area/capture-time/clip_url to each VSS hit).
+
+This gives true capture-time recall, is immune to upload lag, and works for backfill. It needs no
+change to VSS — the bridge owns the time axis.
+
+**Fallback when the query has no time (or no camera).** Time and camera are optional hints, so the
+bridge degrades gracefully:
+
+| User query | Pre-filter candidate set | Behaviour |
+|------------|--------------------------|-----------|
+| appearance + camera + time | clips matching camera **AND** time overlap | tightest, fastest, most accurate |
+| appearance + camera (no time) | all clips for that camera, any time | post-filtered to that camera |
+| appearance only (no time, no camera) | none — pre-filter skipped | pure VSS semantic ranking; post-filter does enrichment only |
+
+```python
+candidates = mapping.prefilter(time_start, time_end, cameras)  # None when no time & no camera
+hits = vss_search(query, timeFilter=None)
+if candidates is not None:
+    hits = [h for h in hits if h.video_id in candidates]       # skipped when None
+hits = [enrich(h) for h in hits]                               # always runs
+```
+
+The no-filter path is where the **top-K caveat** (10.3) bites hardest: with nothing to pre-filter
+on, VSS ranks the appearance across the *entire* index and returns only its top-K by score, so over
+very large archives a true match could rank below K. A time or camera hint both speeds up recall
+and improves accuracy by shrinking the candidate set — but neither is required; the system still
+answers a bare appearance query.
+
+### 10.2 In-video position vs. real-world time
+
+There are **two different time axes**, and they answer different questions:
+
+| Axis | Field | Meaning | Example question |
+|------|-------|---------|------------------|
+| **In-video position** | `segment_start` / `segment_end` (seconds) | where inside a clip the match occurs | "red apple **between 1:00-2:00 of the video**" |
+| **Real-world capture time** | bridge `capture_start/end` | when the footage was recorded | "person in blue **between 2-3 PM**" |
+
+VSS returns `segment_start/segment_end` natively on every hit, so **in-video position needs no
+bridge logic** — just filter the returned segments. Real-world capture time is what 10.1 solves.
+
+To find an appearance **between minute 1 and 2 of a specific video**, search the phrase and keep
+hits whose segment overlaps `[60, 120]` seconds:
+
+```bash
+curl -s -X POST http://<HOST_IP>:12345/manager/search/query \
+  -H 'Content-Type: application/json' \
+  -d '{"query":"red apple"}' \
+| python3 -c "import sys,json;
+d=json.load(sys.stdin); res=d['results'][0]['results']
+for r in res:
+    m=r['metadata']
+    if m['segment_start'] < 120 and m['segment_end'] > 60:
+        print(m['video_id'][:8], f\"{m['segment_start']:.0f}-{m['segment_end']:.0f}s\", round(m['relevance_score'],3))"
+```
+
+(On the current demo clip `red apple` peaks at `32-40s` with a strong score and tapers off by
+`48s`; nothing overlaps the `60-120s` window, so the filter correctly returns no rows.) The bridge
+exposes this as an optional `video_pos_start`/`video_pos_end` (seconds) pair on
+`/api/v1/lp/recall/search` that post-filters on `segment_start/segment_end`.
 
 Response shape returned to the UI:
 
@@ -237,6 +354,66 @@ Response shape returned to the UI:
   ]
 }
 ```
+
+### 10.3 Worked example: how pre-filter and post-filter cooperate
+
+Investigator asks: *"person in a **red jacket** near the **entrance**, **yesterday 14:00-15:00**."*
+That query has three axes — **appearance** (semantic, VSS), **camera/area** (structured, mapping
+DB), and **real-world time** (structured, mapping DB, because VSS only knows upload time).
+
+**Step 1 — Pre-filter (before VSS).** Narrow the universe to clips that *could* match by camera
+and capture time. Note the **overlap** test (`start < end AND end > start`), so a clip spanning
+14:58-15:02 is still included:
+
+```sql
+SELECT video_id FROM clips
+WHERE capture_start < '2026-06-18T15:00:00'
+  AND capture_end   > '2026-06-18T14:00:00'
+  AND camera_id = 'entrance-cam';
+-- => ['vid_A', 'vid_B', 'vid_C']   (3 candidates out of ~10,000 clips that day)
+```
+
+**Step 2 — VSS appearance search (`timeFilter: null`).** VSS ranks "red jacket" across its *whole*
+index and cannot tell which hits are the right camera/time:
+
+```text
+vid_B  0.94   red jacket, entrance, yesterday 14:30      <- correct
+vid_Q  0.91   red jacket, aisle-3,  last week            <- wrong cam + time
+vid_A  0.88   red jacket, entrance, yesterday 14:05      <- correct
+vid_Z  0.85   red jacket, loading-dock, 3 days ago       <- wrong cam + time
+```
+
+**Step 3 — Post-filter (after VSS).** Intersect VSS hits with the pre-filtered candidate set, then
+enrich each survivor from its mapping row:
+
+```python
+candidates = {'vid_A', 'vid_B', 'vid_C'}            # from step 1
+hits = [h for h in vss_results if h.video_id in candidates]   # drops vid_Q, vid_Z
+for h in hits:                                       # enrich for the dashboard
+    row = mapping.get(h.video_id)
+    h.camera_id, h.area_label = row.camera_id, row.area_label
+    h.clip_url, h.capture_ts  = row.clip_url, row.capture_start
+# => 1. Front Entrance 14:30 score 0.94 [play]
+#    2. Front Entrance 14:05 score 0.88 [play]
+```
+
+**Why split into two filters:**
+
+| | Pre-filter | Post-filter |
+|---|---|---|
+| **When** | before VSS | after VSS |
+| **Filters on** | camera + real-world capture time | intersection with candidates + enrichment |
+| **Why needed** | shrinks candidates on axes VSS can't do | drops VSS hits that are semantically right but wrong cam/time; attaches `clip_url`/`area`/`capture_ts` for display |
+
+Mental model: **pre-filter = "which clips are eligible?"**, **VSS = "which eligible clips *look*
+right?"**, **post-filter = "keep eligible ∩ look-right, then make it presentable."**
+
+> **Top-K caveat.** Because the bridge passes `timeFilter: null`, VSS searches its whole index and
+> returns only its top-K by score (`AGGREGATION_INITIAL_K=1000`). In theory a true match could rank
+> below K and never reach the post-filter. Mitigations: raise VSS's K, or adopt the optional
+> SWLP-owned vector index (Section 15) keyed by capture time so the time filter and vector search
+> happen together. For store-scale recall over a bounded time window the pre-filtered candidate set
+> is small, so K=1000 is comfortably sufficient in practice.
 
 ## 11. Service Design And Folder Structure
 
@@ -263,7 +440,7 @@ suspicious-activity-detection/
     │   ├── clients/
     │   │   └── vss_client.py   # httpx client for /manager/* (upload, embed, search)
     │   └── store/
-    │       └── mapping.py      # SQLite/Postgres: videoId -> camera/time/tags/clip_url
+    │       └── mapping.py      # dedicated recall_bridge DB (PG) / SQLite: videoId -> camera/time/tags/clip_url
     ├── configs/
     │   └── cameras.yaml        # camera id -> rtsp_url, area_label, store_id, enabled
     ├── clips/                  # local segment/remux scratch (gitignored)
@@ -279,7 +456,9 @@ Components map to the folders above:
 2. **File Ingest** (`ingest/file_ingest.py`): one-shot ingest of an existing MP4 for a camera id.
 3. **Tag Mapper** (`ingest/tagger.py` + `configs/cameras.yaml`): camera -> tags.
 4. **VSS Client** (`clients/vss_client.py`): upload + embedding trigger + search + retries.
-5. **Mapping Store** (`store/mapping.py`): `videoId` -> camera/time/tags/clip URL (SQLite first).
+5. **Mapping Store** (`store/mapping.py`): `videoId` -> camera/time/tags/clip URL. SQLite for the
+   MVP; a dedicated `recall_bridge` database on VSS's `postgres-service` for shared/HA (never the
+   VSS app DB — see 9.1).
 6. **Search Proxy API** (`query/routes.py`): `POST /api/v1/lp/recall/search`,
    `GET /api/v1/lp/recall/clips/{clip_id}`.
 7. **Reuse the existing dashboard** (`ui/ui_gradio.py`): add a "Recall Search" panel to the
@@ -479,7 +658,7 @@ integration (clip upload -> embedding -> search). Classification:
 | `vdms-vector-db` | VDMS vector store | **Required** — holds the vectors |
 | `multimodal-embedding-serving` | generates image/text embeddings | **Required** — embedding model |
 | `minio-service` | object storage for uploaded videos/frames | **Required** — upload target |
-| `postgres-service` | pipeline-manager metadata DB | **Required** — pipeline-manager dependency |
+| `postgres-service` | pipeline-manager metadata DB | **Required** — pipeline-manager dependency; the bridge also reuses this server for its own **separate** `recall_bridge` database (see 9.1) |
 | `nginx` | reverse proxy exposing the `/manager/` prefix | **Optional** — only if the bridge uses `/manager/` URLs; otherwise call `pipeline-manager:3000` directly on the shared network |
 | `vss-singleton-ui` | VSS's own React search UI | **Not needed** — we reuse the SWLP dashboard (`ui/ui_gradio.py`) |
 
@@ -505,10 +684,10 @@ The VSS services are defined across
        environment:
          VSS_BASE_URL: http://pipeline-manager:3000      # direct, no nginx
          # or via proxy: http://nginx:80/manager
-         RECALL_DB_PATH: /data/recall.db
+         # dedicated database on VSS's postgres-service (NOT the VSS app DB)
+         RECALL_DB_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres-service:5432/recall_bridge
        volumes:
          - vss-recall-clips:/clips
-         - vss-recall-db:/data
        networks:
          - storewide-lp
          - vs_network
@@ -519,7 +698,6 @@ The VSS services are defined across
 
    volumes:
      vss-recall-clips:
-     vss-recall-db:
    ```
 
    This keeps the VSS stack independently upgradeable and avoids copying 7 service definitions
@@ -561,6 +739,49 @@ Add one later **only** if a hard requirement appears that stock VSS cannot meet:
 In that case SWLP would generate person crops, call VSS Multimodal Embedding Serving for vectors
 only, and own the index/payload itself. This is intentionally out of scope for the selected
 approach.
+
+## 15.1 Performance & Scale
+
+**Target SLA:** a VLM-recall query returns in **< 2 seconds even at 10M stored vectors**
+(investigator workflow — the user must never wait on the system).
+
+**Where the time goes.** The query critical path has three stages, and only one is expensive:
+
+| Stage | Work | Typical cost |
+|-------|------|--------------|
+| Pre-filter | Postgres `SELECT` of candidate `video_id`s by camera + capture time | ~1–5 ms |
+| **Appearance search** | **VDMS vector similarity over the index** | **the bottleneck** |
+| Post-filter + enrich | intersect with candidates, join mapping rows | ~5–20 ms |
+
+So the entire 2-second budget is effectively a budget on the **VDMS vector search**. Postgres and
+the bridge are negligible.
+
+**The scaling mismatch in the current design.** Today the bridge sends `timeFilter: null` and lets
+VSS search the **whole** index (`AGGREGATION_INITIAL_K=1000`). The camera/time pre-filter runs in
+Postgres *before* the search, but it does **not** shrink the vector search — VDMS still scores the
+full index every query, and we discard non-candidates only *afterward*. At small/medium scale
+(thousands–hundreds of thousands of vectors) this is comfortably < 2 s. At **10M vectors** it only
+holds if VDMS uses an **ANN index (HNSW/IVF)**; a brute-force/flat index will not meet the SLA.
+
+**What the SLA forces.** To *guarantee* < 2 s at 10M, the camera/time filter must happen **inside**
+the vector search, not after it — so only the relevant subset is scored. Two options:
+
+| Option | How it meets < 2 s @ 10M | Trade-off |
+|--------|--------------------------|-----------|
+| **A. Push the filter into VDMS** | Pass a server-side metadata constraint so VDMS scores only the candidate subset, not all 10M | Requires search-ms/VSS to accept a filter on **capture time** (a field we control); VSS today only filters `created_at` = upload time, the wrong axis |
+| **B. SWLP-owned ANN index (promotes §15)** | Own a Qdrant/VDMS index with `capture_time` + `camera_id` in the payload and HNSW ANN; filter + search happen together → sub-second at 10M is standard | No longer "stock VSS, unchanged"; SWLP owns indexing for the recall path |
+
+**Decision.** The thin-bridge design (this document) is correct and meets the SLA at MVP scale and
+is the right starting point. The **10M / < 2 s** requirement, however, breaks the "VSS alone is
+enough" premise: post-hoc filtering cannot guarantee sub-second latency at that scale. When the
+deployment approaches that scale, **Option B (SWLP-owned ANN index keyed by capture time +
+camera)** is the recommended path, with Option A as a cheaper alternative **iff** the live VDMS
+index is already HNSW and can accept a capture-time payload filter. This means §15 is promoted from
+"optional future" to **required at 10M scale**.
+
+**Action before committing to a path:** verify the index type VDMS uses in the running stack
+(HNSW vs flat) and whether search-ms can pass a payload/metadata filter on a bridge-controlled
+capture-time field. That single check decides A vs B.
 
 ## 16. Open Questions
 
