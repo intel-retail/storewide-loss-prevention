@@ -9,13 +9,13 @@
 hide_directive-->
 
 The Suspicious Activity Detection (SAD) application is a store-wide loss prevention reference
-workload that demonstrates how Intel® SceneScape, OpenVINO™, and a Vision Language Model
+workload that demonstrates how Scenescape, OpenVINO™, and a Vision Language Model
 (VLM) can be combined on a single Intel® platform to detect suspicious in-store
 behavior in real time.
 
 It combines several services:
 
-- **swlp-service:** MQTT-driven core that subscribes to SceneScape, manages
+- **swlp-service:** MQTT-driven core that subscribes to Scenescape, manages
   per-person session state, evaluates declarative rules, and emits alerts.
 - **Behavioral Analysis Service:** Runs pose detection plus a VLM
   (Qwen2.5-VL) to confirm whether a person is concealing merchandise in a
@@ -39,7 +39,7 @@ visualized for a retail loss-prevention scenario.
   run the application using `make` and Docker.
 - [How It Works](./how-it-works.md) – High-level architecture, service
   responsibilities, and data/control flows.
-- [How-to Guides](./how-to-guides.md) – Guides on key topics like SceneScape
+- [How-to Guides](./how-to-guides.md) – Guides on key topics like Scenescape
   setup, pattern authoring, and benchmarking.
 - [Release Notes](./release-notes.md) – Version history and known issues.
 -

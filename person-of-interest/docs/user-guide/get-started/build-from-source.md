@@ -71,7 +71,7 @@ This builds the images and tags them as:
 
 The `make build` target performs the following:
 
-1. **Pulls SceneScape images** (if available) from the local Docker cache
+1. **Pulls Scenescape images** (if available) from the local Docker cache
 2. **Builds POI backend** — multi-stage Docker build with OpenVINO™ runtime, FAISS, and
    Python dependencies
 3. **Builds POI UI** — multi-stage Node.js build producing a static nginx container
@@ -102,9 +102,9 @@ make status
 | `make init`                  | Generate .env and pipeline configs from zone_config.json |
 | `make init-env`              | Create `.env` from `.env.example`                |
 | `make demo`                  | All-in-one: init + models + build + start        |
-| `make run-scenescape`        | Start SceneScape only                            |
-| `make down-scenescape`       | Stop SceneScape only                             |
-| `make export-scene`          | Export scene config from running SceneScape       |
+| `make run-scenescape`        | Start Scenescape only                            |
+| `make down-scenescape`       | Stop Scenescape only                             |
+| `make export-scene`          | Export scene config from running Scenescape       |
 | `make download-models`       | Download OpenVINO AI models                      |
 | `make benchmark`             | Single-scene latency benchmark                   |
 | `make benchmark-stream-density` | Iterative stream density benchmark            |

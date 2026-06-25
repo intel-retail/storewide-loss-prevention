@@ -17,7 +17,7 @@ After deployment, access the system at:
 
 - **Initialization**: Wait a few seconds after startup for Redis, MQTT connection, and FAISS
   index to initialize.
-- **SceneScape Required**: Ensure Intel® SceneScape and DL Streamer pipelines are running
+- **Scenescape Required**: Ensure Scenescape and DL Streamer pipelines are running
   before starting the POI system.
 - **Recommended Browser**: Use Google Chrome for an optimal WebSocket experience.
 
@@ -89,11 +89,11 @@ Upload a suspect's image and find all appearances across cameras within a time r
 
 #### 4. **Camera Management**
 
-View and manage camera feeds integrated via Intel® SceneScape.
+View and manage camera feeds integrated via Scenescape.
 
-- **Camera List**: Displays all cameras configured in SceneScape
+- **Camera List**: Displays all cameras configured in Scenescape
 - **Live Status**: Shows which cameras are actively publishing detections
-- **SceneScape Proxy**: Camera list is fetched from the SceneScape API transparently
+- **Scenescape Proxy**: Camera list is fetched from the Scenescape API transparently
 
 ## Verifying the Deployment
 

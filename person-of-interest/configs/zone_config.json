@@ -41,7 +41,7 @@
     "verify_ssl": false
   },
   "zones": {
-    "_comment": "Map zone names (as created in SceneScape UI) to zone types",
+    "_comment": "Map zone names (as created in Scenescape UI) to zone types",
     "entry": "ENTRY",
     "exit": "EXIT",
     "high_value": "HIGH_VALUE",

@@ -162,7 +162,7 @@ class EventService:
                           exit_frame_key=None, dwell_override=None):
         """Record region exit — calculate dwell time and store."""
         entry_data = self._repo.get_region_presence(object_id, scene_id, region_id)
-        dwell_sec = dwell_override  # prefer SceneScape's server-computed dwell if provided
+        dwell_sec = dwell_override  # prefer Scenescape's server-computed dwell if provided
         entry_time = None
         if entry_data:
             # Prefer the region_name from entry (human-readable) over the exit fallback

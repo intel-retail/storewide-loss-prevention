@@ -122,7 +122,7 @@ def is_npu_device(app_dir: str) -> bool:
 # ---------------------------------------------------------------------------
 
 def compose_cmd(app_dir: str) -> str:
-    """Build a full compose invocation spanning SceneScape + POI."""
+    """Build a full compose invocation spanning Scenescape + POI."""
     scenescape_dir = str(Path(app_dir) / ".." / "scenescape")
     scenescape_compose = os.path.join(scenescape_dir, "docker-compose.yaml")
     overrides = os.path.join(app_dir, "docker-compose.scenescape-overrides.yml")
@@ -148,7 +148,7 @@ def compose_cmd(app_dir: str) -> str:
 
 
 def docker_compose(app_dir: str, action: str) -> int:
-    """Run a combined compose action (SceneScape + POI)."""
+    """Run a combined compose action (Scenescape + POI)."""
     if "up" in action:
         subprocess.run("docker network create storewide-lp", shell=True, capture_output=True)
     cmd = f"{compose_cmd(app_dir)} {action}"
@@ -370,11 +370,11 @@ def get_new_camera_name(app_dir: str, num_scenes: int) -> Optional[str]:
 
 
 # ---------------------------------------------------------------------------
-# SceneScape REST API helpers
+# Scenescape REST API helpers
 # ---------------------------------------------------------------------------
 
 def _scenescape_get_client(app_dir: str):
-    """Authenticate with SceneScape. Returns (base_url, ssl_ctx, token) or (None,None,None)."""
+    """Authenticate with Scenescape. Returns (base_url, ssl_ctx, token) or (None,None,None)."""
     import ssl
     import urllib.request
 
@@ -386,7 +386,7 @@ def _scenescape_get_client(app_dir: str):
                 supass = line.strip().split("=", 1)[1]
                 break
     if not supass:
-        logger.warning("Could not read SUPASS from docker/.env — SceneScape API unavailable")
+        logger.warning("Could not read SUPASS from docker/.env — Scenescape API unavailable")
         return None, None, None
 
     try:
@@ -409,18 +409,18 @@ def _scenescape_get_client(app_dir: str):
         with urllib.request.urlopen(req, context=ctx, timeout=15) as resp:
             token = _json.loads(resp.read()).get("token", "")
     except Exception as e:
-        logger.warning("SceneScape authentication failed: %s", e)
+        logger.warning("Scenescape authentication failed: %s", e)
         return None, None, None
 
     if not token:
-        logger.warning("SceneScape auth returned empty token")
+        logger.warning("Scenescape auth returned empty token")
         return None, None, None
 
     return base_url, ctx, token
 
 
 def _clone_scene_zip(base_zip_path: str, scene_name: str, camera_name: str) -> bytes:
-    """Clone a SceneScape scene ZIP with a new scene/camera name."""
+    """Clone a Scenescape scene ZIP with a new scene/camera name."""
     import io
     import uuid
     import zipfile
@@ -465,7 +465,7 @@ def _clone_scene_zip(base_zip_path: str, scene_name: str, camera_name: str) -> b
 
 
 def _scenescape_import_scene(app_dir: str, scene_name: str, camera_name: str) -> tuple:
-    """Import scene+camera via SceneScape REST API. Returns (scene_uid, camera_name) or (None,None)."""
+    """Import scene+camera via Scenescape REST API. Returns (scene_uid, camera_name) or (None,None)."""
     import urllib.error
     import urllib.request
 
@@ -512,7 +512,7 @@ def _scenescape_import_scene(app_dir: str, scene_name: str, camera_name: str) ->
             resp_data = json.loads(resp.read())
             scene_errors = resp_data.get("scene")
             if scene_errors is not None:
-                logger.warning("SceneScape import-scene scene error: %s", scene_errors)
+                logger.warning("Scenescape import-scene scene error: %s", scene_errors)
                 return None, None
 
             scene_uid = ""
@@ -538,19 +538,19 @@ def _scenescape_import_scene(app_dir: str, scene_name: str, camera_name: str) ->
                 except Exception:
                     pass
 
-            logger.info("SceneScape scene+camera imported: %s / %s (uid=%s)",
+            logger.info("Scenescape scene+camera imported: %s / %s (uid=%s)",
                         scene_name, camera_name, scene_uid)
             return scene_uid or scene_name, camera_name
     except urllib.error.HTTPError as e:
-        logger.warning("SceneScape import-scene → HTTP %s: %s", e.code, e.read().decode()[:200])
+        logger.warning("Scenescape import-scene → HTTP %s: %s", e.code, e.read().decode()[:200])
         return None, None
     except Exception as e:
-        logger.warning("SceneScape import-scene → %s", e)
+        logger.warning("Scenescape import-scene → %s", e)
         return None, None
 
 
 def _delete_cloned_scenes(app_dir: str) -> None:
-    """Delete cloned scenes/cameras (those with -N suffix) via SceneScape REST API."""
+    """Delete cloned scenes/cameras (those with -N suffix) via Scenescape REST API."""
     import urllib.error
     import urllib.request
 
@@ -742,7 +742,7 @@ def scale_pipeline_services(app_dir: str, num_scenes: int,
       5. Generate per-camera DLStreamer pipeline configs
       6. Bring up new camera services
       7. Wait for web container healthy
-      8. Clean stale scenes, register new scene via SceneScape API
+      8. Clean stale scenes, register new scene via Scenescape API
       9. Recreate lp-video (DLStreamer)
      10. Wait for first detection (warm-up)
     """
@@ -800,11 +800,11 @@ def scale_pipeline_services(app_dir: str, num_scenes: int,
         base_scene_name = zone_cfg.get("scene_name", "conference room")
         new_scene_name = f"{base_scene_name}-{num_scenes}"
         if new_cam:
-            logger.info("Registering scene=%s camera=%s via SceneScape REST API …",
+            logger.info("Registering scene=%s camera=%s via Scenescape REST API …",
                         new_scene_name, new_cam)
             scene_uid, cam_uid = _scenescape_import_scene(app_dir, new_scene_name, new_cam)
             if not scene_uid:
-                logger.warning("SceneScape API import failed — falling back to scene-import sidecar")
+                logger.warning("Scenescape API import failed — falling back to scene-import sidecar")
                 docker_compose(app_dir, "rm -f -s scene-import")
                 docker_compose(app_dir, "up -d scene-import")
                 _wait_for_scene_import_completion(timeout=180)

@@ -101,7 +101,7 @@ class MatchingService:
 
     @staticmethod
     def _is_stable_id(object_id: str) -> bool:
-        """Return True if the object_id is a globally unique SceneScape UUID.
+        """Return True if the object_id is a globally unique Scenescape UUID.
 
         Camera-local fallback IDs like ``cam:Camera_01:1`` are recycled across
         different physical people and must NOT be treated as stable identifiers

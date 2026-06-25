@@ -11,7 +11,7 @@ services:
     devices:
       - /dev/accel:/dev/accel
     device_cgroup_rules:
-      - "c 261:* rmw"    
+      - "c 261:* rmw"
     volumes:
       - ${MODEL_PATH:-./models}/detect_models:/home/pipeline-server/models/detect:ro
       - ${MODEL_PATH:-./models}/reid_models:/home/pipeline-server/models/reid:ro
@@ -116,7 +116,7 @@ services:
       # MQTT
       MQTT_HOST: ${MQTT_HOST:-broker.scenescape.intel.com}
       MQTT_PORT: ${MQTT_PORT:-1883}
-      # SceneScape API (for zone auto-discovery)
+      # Scenescape API (for zone auto-discovery)
       SCENESCAPE_API_USER: ${SCENESCAPE_API_USER:-}
       SCENESCAPE_API_PASSWORD: ${SCENESCAPE_API_PASSWORD:-}
       # External services

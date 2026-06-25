@@ -3,9 +3,9 @@
 
 # Storewide Loss Prevention - Makefile
 #
-# Full-stack deployment using pre-built SceneScape Docker images.
-# No SceneScape source checkout required.
-# SceneScape-specific targets are in scenescape/Makefile.
+# Full-stack deployment using pre-built Scenescape Docker images.
+# No Scenescape source checkout required.
+# Scenescape-specific targets are in scenescape/Makefile.
 
 TAG ?= 2026.1.0
 REGISTRY ?= true
@@ -81,7 +81,7 @@ download-sample-data:
 init:
 	@$(MAKE) -C $(SCENESCAPE_DIR) APP_DIR=$(CURDIR) RESOURCE_CONFIG=$(RESOURCE_CONFIG) init
 
-# ---- Full Stack (SceneScape + LP) ----
+# ---- Full Stack (Scenescape + LP) ----
 
 .PHONY: up
 
@@ -104,10 +104,10 @@ up: validate-device
 	@echo "=== Starting all services ==="
 	$(COMPOSE_ALL) up -d
 	@echo ""
-	
+
 	@echo ""
 	@echo "Services running:"
-	@echo "  SceneScape UI:   https://localhost"
+	@echo "  Scenescape UI:   https://localhost"
 	@echo "  Login:           admin / $$(grep SUPASS docker/.env | cut -d= -f2-)"
 	@if [ "$(ENABLE_UI_LOWER)" = "true" ]; then \
 		echo "  Gradio UI:       http://localhost:7860"; \
@@ -133,7 +133,7 @@ down:
 	-docker volume rm storewide-lp_seaweedfs-data 2>/dev/null || true
 
 
-# SceneScape only (without LP services)
+# Scenescape only (without LP services)
 .PHONY: run-scenescape
 run-scenescape:
 	@$(MAKE) -C $(SCENESCAPE_DIR) APP_DIR=$(CURDIR) run
@@ -154,7 +154,7 @@ logs:
 status:
 	$(COMPOSE_ALL) ps
 
-# ---- LP-Only (SceneScape must be running separately) ----
+# ---- LP-Only (Scenescape must be running separately) ----
 
 .PHONY: run-lp
 run-lp:
@@ -165,7 +165,7 @@ else
 	@echo "Building LP images..."
 	$(COMPOSE_ALL) build swlp-service behavioral-analysis swlp-suscpicious-ui
 endif
-	@echo "Starting LP services only (SceneScape must be running)..."
+	@echo "Starting LP services only (Scenescape must be running)..."
 	$(COMPOSE_ALL) up -d swlp-service behavioral-analysis swlp-suscpicious-ui
 
 .PHONY: down-lp
@@ -362,17 +362,17 @@ clean-all: clean clean-secrets
 help:
 	@echo "Storewide Loss Prevention - Available targets:"
 	@echo ""
-	@echo "  Full Stack (SceneScape + LP, using pre-built images):"
+	@echo "  Full Stack (Scenescape + LP, using pre-built images):"
 	@echo "    make run-scenescape  - Single command: init + models + start"
 	@echo "    make demo            - Initialize and start everything"
 	@echo "    make download-models - Download OpenVINO AI models"
 	@echo "    make download-sample-data - Download sample video from CAMERA_URL"
 	@echo "    make down            - Stop all services"
-	@echo "    make down-scenescape - Stop SceneScape only"
+	@echo "    make down-scenescape - Stop Scenescape only"
 	@echo "    make logs            - Follow logs"
 	@echo "    make status          - Show service status"
 	@echo ""
-	@echo "  LP-Only (SceneScape must be running separately):"
+	@echo "  LP-Only (Scenescape must be running separately):"
 	@echo "    make demo-lp         - Start LP services only"
 	@echo "    make down-lp         - Stop LP services"
 	@echo ""

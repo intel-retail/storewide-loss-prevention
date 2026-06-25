@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Simple MQTT dump tool for SceneScape.
+Simple MQTT dump tool for Scenescape.
 
 - Subscribes to camera + scene topics
 - Saves each message as JSON

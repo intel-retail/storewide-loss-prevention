@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Capture and crop person frames from SceneScape camera feeds.
+"""Capture and crop person frames from Scenescape camera feeds.
 
-Subscribes to SceneScape per-camera MQTT data, detects persons via bounding
+Subscribes to Scenescape per-camera MQTT data, detects persons via bounding
 boxes, grabs frames, crops each person, and saves both full frames and
 cropped person images to disk.
 
@@ -58,7 +58,7 @@ FRAME_BUFFER_MAX = 30  # keep last N frames
 
 
 def parse_args():
-    p = argparse.ArgumentParser(description="Capture person frames from SceneScape")
+    p = argparse.ArgumentParser(description="Capture person frames from Scenescape")
     p.add_argument("--mqtt-broker", default=os.getenv("MQTT_BROKER", "localhost"))
     p.add_argument("--mqtt-port", type=int, default=int(os.getenv("MQTT_PORT", "1883")))
     p.add_argument("--camera-id", default=os.getenv("CAMERA_ID", "lp-camera1"))

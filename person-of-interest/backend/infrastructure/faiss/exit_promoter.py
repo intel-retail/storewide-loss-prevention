@@ -1,6 +1,6 @@
 """Background thread that promotes exit embeddings to FAISS after persons leave.
 
-When a person leaves the camera view, the SceneScape tracker stops emitting their
+When a person leaves the camera view, the Scenescape tracker stops emitting their
 track ID and the Redis gate key (detection:track:seen:{track_id}) expires.
 The exit vector (detection:exit_vec:{track_id}) has a longer TTL so it survives
 the gate expiry.  This promoter scans periodically, detects gate-expired tracks,

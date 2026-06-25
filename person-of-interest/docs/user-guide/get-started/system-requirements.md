@@ -32,9 +32,9 @@ The POI system has been validated on:
 - Intel® Core™ Ultra Processors
 - Ubuntu 22.04 LTS and 24.04 LTS
 
-## Intel® SceneScape Requirements
+## Scenescape Requirements
 
-The POI system requires Intel® SceneScape with the following DL Streamer models:
+The POI system requires Scenescape with the following DL Streamer models:
 
 | Model                                  | Purpose                | Output               |
 | -------------------------------------- | ---------------------  | -------------------- |
@@ -45,7 +45,7 @@ The POI system requires Intel® SceneScape with the following DL Streamer models
 
 > **Note:** The POI system uses only face embeddings (`face-reidentification-retail-0095`) for
 > FAISS matching. Body re-identification embeddings (`person-reidentification-retail-0277`)
-> are from a different embedding space and are used only for SceneScape cross-camera tracking.
+> are from a different embedding space and are used only for Scenescape cross-camera tracking.
 
 ## Compatibility Notes
 

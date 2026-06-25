@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Debug face embeddings: capture face crops from RTSP that match MQTT detections.
 
-Subscribes to SceneScape MQTT data topic, extracts face bounding boxes
+Subscribes to Scenescape MQTT data topic, extracts face bounding boxes
 (nested as sub_objects under person), grabs the corresponding RTSP frame,
 crops the exact face region, and saves it alongside the embedding metadata.
 
@@ -49,7 +49,7 @@ last_capture_times: dict[int, float] = {}
 
 
 def parse_args():
-    p = argparse.ArgumentParser(description="Debug face embeddings from SceneScape")
+    p = argparse.ArgumentParser(description="Debug face embeddings from Scenescape")
     p.add_argument("--mqtt-broker", default=os.getenv("MQTT_BROKER", "localhost"))
     p.add_argument("--mqtt-port", type=int, default=int(os.getenv("MQTT_PORT", "1883")))
     p.add_argument("--camera-id", default=os.getenv("CAMERA_ID", "Camera_01"))
