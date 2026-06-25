@@ -1,4 +1,4 @@
-# SceneScape Setup
+# Setup Intel® SceneScape
 
 SceneScape is the spatial intelligence layer that provides person detection,
 tracking, and re-identification for the Suspicious Activity Detection
@@ -26,7 +26,7 @@ SceneScape provides the following services:
 | Service | Description |
 |---------|-------------|
 | **Controller** | Manages scene state, zone definitions, and object tracking across cameras. |
-| **DLStreamer Pipeline Server** | Runs person detection and re-identification inference on RTSP camera streams using OpenVINO. Publishes tracking data via MQTT. |
+| **DLStreamer Pipeline Server** | Runs person detection and re-identification inference on RTSP camera streams using OpenVINO™. Publishes tracking data via MQTT. |
 | **MQTT Broker (Mosquitto)** | Secure message bus for inter-service communication. Uses TLS client certificates for authentication (no username/password). |
 | **PostgreSQL** | Stores scene definitions, zone metadata, and controller state. |
 | **VDMS** | Vector database for person re-identification descriptor storage. |
@@ -125,7 +125,7 @@ The DLStreamer pipeline server supports multiple inference device
 configurations. Select a profile via the `DEVICE` parameter:
 
 ```bash
- DEVICE=all-gpu-cpu.env    # GPU detect + CPU re-id 
+ DEVICE=all-gpu-cpu.env    # GPU detect + CPU re-id
  DEVICE=all-gpu.env        # All GPU
  DEVICE=all-cpu.env        # All CPU
  DEVICE=all-npu-cpu.env    # NPU detect + CPU re-id
@@ -159,7 +159,7 @@ This downloads the video from the `video_url` and saves it as `video_file`
 
 ### 2. Download AI Models
 
-Download the OpenVINO detection and re-identification models:
+Download the OpenVINO™ detection and re-identification models:
 
 ```bash
 make download-models
@@ -188,7 +188,7 @@ sample data and models, creates Docker volumes, and starts all services
 including SceneScape infrastructure and the LP detection pipeline.
 
 The app-level Docker Compose overlay
-([docker/docker-compose.yaml](../../docker/docker-compose.yaml)) mounts
+([docker/docker-compose.yaml](https://github.com/intel-retail/storewide-loss-prevention/blob/main/suspicious-activity-detection/docker/docker-compose.yaml)) mounts
 the detection and re-identification models into the DLStreamer container:
 
 ```yaml
@@ -208,7 +208,6 @@ make down
 SceneScape tracks persons across frames and camera views using a
 re-identification model. The ReID descriptor store uses VDMS (Vector Data
 Management System).
-
 
 ## MQTT Authentication
 
@@ -316,12 +315,15 @@ make up
 ### DLStreamer pipeline not detecting persons
 
 - Verify the video file exists in the sample data volume:
+
   ```bash
   docker volume inspect storewide-lp_vol-sample-data
   ```
+
 - Check that `configs/zone_config.json` has the correct `video_file` name
   matching the camera name.
 - Check DLStreamer logs:
+
   ```bash
   docker logs storewide-lp-lp-cams-1
   ```

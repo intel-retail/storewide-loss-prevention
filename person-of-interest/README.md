@@ -1,6 +1,6 @@
 # POI Re-identification: Real-Time Retail Loss Prevention
 
-The POI Re-identification system is a real-time retail loss-prevention application that detects enrolled Persons of Interest (POIs) across multiple cameras using Intel® OpenVINO™ face re-identification and FAISS vector search. Integrated with Intel® SceneScape spatial computing, it delivers instant security alerts and supports offline historical investigation to trace suspect movements across all cameras and time ranges.
+The POI Re-identification system is a real-time retail loss-prevention application that detects enrolled Persons of Interest (POIs) across multiple cameras using OpenVINO™ face re-identification and FAISS vector search. Integrated with Intel® SceneScape spatial computing, it delivers instant security alerts and supports offline historical investigation to trace suspect movements across all cameras and time ranges.
 
 ## Quick Start
 

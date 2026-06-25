@@ -4,8 +4,8 @@ This guide provides detailed instructions for building the POI Re-identification
 container images from source code. Whether you are customizing the application or
 troubleshooting deployment issues, this guide walks you through the complete build process.
 
-> **Note:** Pre-built images are available on Docker Hub (`intel/poi-backend:2026.1.0-rc1`
-> and `intel/poi-ui:2026.1.0-rc1`). The `docker-compose.yml` references them directly —
+> **Note:** Pre-built images are available on Docker Hub (`intel/poi-backend:2026.1.0`
+> and `intel/poi-ui:2026.1.0`). The `docker-compose.yml` references them directly —
 > `make up` will pull them automatically. Building from source is only needed if you are
 > customizing the application.
 >
@@ -36,7 +36,7 @@ make init
 
 Use `make init` to generate `.env` and pipeline configs from `zone_config.json`. If you
 only need to create `.env` from `.env.example`, run `make init-env` instead. See
-[Get Started](../get-started.md#step-2-initialize-environment) for required variables.
+[Get Started](../get-started.md#4-initialize-environment) for the required variables.
 
 ## Step 3: Build the Docker Images
 

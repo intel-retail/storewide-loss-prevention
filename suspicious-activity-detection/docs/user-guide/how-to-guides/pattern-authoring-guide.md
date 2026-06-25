@@ -1,6 +1,4 @@
-# Pattern Authoring Guide
-
-## How to Define Pose-Based Activity Patterns
+# Define Pose-Based Activity Patterns
 
 This guide walks you through defining new behavioral patterns in
 `patterns.yaml`.  No code changes are required — the generic phase engine
@@ -71,6 +69,7 @@ The pose model provides **17 COCO keypoints**:
 | `head_center` | Midpoint of `left_ear` and `right_ear` |
 
 For each phase, decide:
+
 - **Subject:** Which keypoint are you testing? (e.g., `wrist`, `nose`)
 - **Reference:** What are you comparing it to? (e.g., `waist_midpoint`, `right_shoulder`)
 
@@ -94,10 +93,12 @@ Ten relations are available:
 | `straight` | Angle at subject > 150° (default) | Optional |
 
 **Negation:** Prefix any relation with `not_` to invert it:
+
 - `not_near` — distance ≥ threshold × torso_length
 - `not_above` — subject is NOT above reference
 
 **Understanding image coordinates:**
+
 - Y-axis: **0 = top** of image, **1 = bottom**.  So `above` means
   smaller y-value.
 - Torso length = distance from `chest_midpoint` to `waist_midpoint`.
@@ -122,11 +123,13 @@ Ten relations are available:
 ## Step 4 — Decide per_side Behavior
 
 Set `per_side: true` when:
-- The pattern involves one hand/leg but you don't know which one.
+
+- The pattern involves one hand/leg but you do not know which one.
 - You write `wrist` (short name) and the engine will automatically try
   `left_wrist` then `right_wrist`.
 
 Set `per_side: false` when:
+
 - You need both sides simultaneously (e.g., two-hand shield).
 - You use explicit full names like `left_wrist`, `right_wrist`.
 
@@ -265,7 +268,7 @@ For detecting movement speed:
 
 ## Step 9 — Window Mode (Stationary Patterns)
 
-For patterns that don't have temporal phases (e.g., loitering), add
+For patterns that do not have temporal phases (e.g., loitering), add
 `window_size` to evaluate conditions over a sliding window:
 
 ```yaml
@@ -342,11 +345,13 @@ python3 -m pytest behavioral-analysis/tests/test_pose_analyzer.py -v
 
 1. Set `enabled: true` in `patterns.yaml`.
 2. If using Docker, ensure `patterns.yaml` is volume-mounted so changes
-   don't require a rebuild:
+   do not require a rebuild:
+
    ```yaml
    volumes:
      - ./config/patterns.yaml:/app/config/patterns.yaml:ro
    ```
+
 3. Restart the `behavioral-analysis` container.
 
 ---

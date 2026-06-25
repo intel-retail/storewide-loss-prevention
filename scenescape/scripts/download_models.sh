@@ -62,6 +62,11 @@ DOWNLOAD_CMDS="${DOWNLOAD_CMDS% && }"
 
 echo "[1/2] Downloading models into Docker volume '${VOLUME_NAME}'..."
 docker run --rm \
+    -e http_proxy="${http_proxy}" \
+    -e https_proxy="${https_proxy}" \
+    -e HTTP_PROXY="${HTTP_PROXY}" \
+    -e HTTPS_PROXY="${HTTPS_PROXY}" \
+    -e NO_PROXY="${NO_PROXY}" \
     -v "${VOLUME_NAME}":/models \
     debian:bookworm-slim \
     sh -c "apt-get update -qq && apt-get install -y -qq curl >/dev/null 2>&1 && ${DOWNLOAD_CMDS}"
@@ -70,6 +75,11 @@ docker run --rm \
 echo "[2/2] Copying model-proc files..."
 if [ -d "${MODEL_PROC_DIR}" ] && [ -n "$(ls -A "${MODEL_PROC_DIR}"/*.json 2>/dev/null)" ]; then
     docker run --rm \
+        -e http_proxy="${http_proxy}" \
+        -e https_proxy="${https_proxy}" \
+        -e HTTP_PROXY="${HTTP_PROXY}" \
+        -e HTTPS_PROXY="${HTTPS_PROXY}" \
+        -e NO_PROXY="${NO_PROXY}" \
         -v "${MODEL_PROC_DIR}":/src:ro \
         -v "${VOLUME_NAME}":/models \
         debian:bookworm-slim \

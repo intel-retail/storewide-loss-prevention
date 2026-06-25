@@ -1,7 +1,7 @@
 services:
   # ── POI Backend ────────────────────────────────────────
   poi-backend:
-    image: ${POI_BACKEND_IMAGE:-intel/poi-backend:2026.1.0-rc1}
+    image: ${POI_BACKEND_IMAGE:-intel/poi-backend:2026.1.0}
     build:
       context: .
       dockerfile: backend/Dockerfile
@@ -51,7 +51,7 @@ services:
 
   # ── UI ─────────────────────────────────────────────────
   ui:
-    image: ${POI_UI_IMAGE:-intel/poi-ui:2026.1.0-rc1}
+    image: ${POI_UI_IMAGE:-intel/poi-ui:2026.1.0}
     build:
       context: .
       dockerfile: ui/Dockerfile
@@ -83,7 +83,7 @@ services:
 
   # ── Alert Service ──────────────────────────────────────
   poi-alert-service:
-    image: intel/alert-service:0.0.1
+    image: intel/alert-service:2026.1.0
     container_name: poi-alert-service
     restart: unless-stopped
     ports:
@@ -105,7 +105,7 @@ services:
 
   # ── Metrics Collector (benchmark profile only) ──────────
   metrics-collector:
-    image: ${REGISTRY_BENCHMARK:-intel/retail-benchmark:2026.0.0}
+    image: ${REGISTRY_BENCHMARK:-intel/retail-benchmark:2026.1.0}
     container_name: poi-metrics-collector
     profiles:
       - benchmark

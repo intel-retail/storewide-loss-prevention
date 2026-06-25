@@ -200,7 +200,7 @@ Docker
 We need to build different image for ui which is in ui folder and has react based ui component
 We need to build different image for poi backend which exist in backend folder 
 Docker Compose 
-Alert service: image -> intel/alert-service:0.0.1
+Alert service: image -> intel/alert-service:2026.1.0
 Reids: image- > redis:8.6.2 or latest image as per application reuqireement
 UI : poi application ui image
 poi: poi application backend image

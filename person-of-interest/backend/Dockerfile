@@ -7,6 +7,7 @@ FROM python:3.12-slim AS builder
 WORKDIR /build
 
 COPY backend/requirements.txt .
+COPY backend/third_party_programs_poi-service.txt ./
 RUN pip install --no-cache-dir --prefix=/install -r requirements.txt
 
 # ── Stage 2: Runtime ─────────────────────────────────────

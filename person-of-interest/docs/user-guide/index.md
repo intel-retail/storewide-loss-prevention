@@ -1,24 +1,24 @@
-# Person of Interest (POI) Re-identification Overview
+# Person of Interest Re-identification
 
 <!--hide_directive
 <div class="component_card_widget">
-  <a class="icon_github" href="https://github.com/sainijit/storewide-loss-prevention-retail/tree/main/person-of-interest">
+  <a class="icon_github" href="https://github.com/intel-retail/storewide-loss-prevention/tree/main/person-of-interest">
      GitHub project
   </a>
-  <a class="icon_document" href="https://github.com/sainijit/storewide-loss-prevention-retail/blob/main/person-of-interest/README.md">
+  <a class="icon_document" href="https://github.com/intel-retail/storewide-loss-prevention/blob/main/person-of-interest/README.md">
      Readme
   </a>
 </div>
 hide_directive-->
 
-The POI Re-identification system is a real-time retail loss-prevention application that
-detects enrolled Persons of Interest (POIs) across multiple cameras and generates instant
-security alerts. It also supports offline historical investigation to trace where a queried
-person appeared across all cameras and time ranges.
+The Person of Interest (POI) Re-identification system is a real-time retail loss-prevention
+application that detects enrolled Persons of Interest (POIs) across multiple cameras and
+generates instant security alerts. It also supports offline historical investigation to trace
+where a queried person appeared across all cameras and time ranges.
 
 ## Overview
 
-The **POI Re-identification** system leverages Intel® OpenVINO™ face detection and
+The **POI Re-identification** system leverages OpenVINO™ face detection and
 re-identification models integrated with Intel® SceneScape spatial computing to deliver
 real-time biometric person matching in multi-camera retail environments. By processing
 256-dimensional face embeddings at the edge using FAISS vector search, the system enables
@@ -39,7 +39,7 @@ processing stays local.
 ### Key Benefits
 
 - **Edge-Optimized Inference:** All face detection and re-identification runs locally using
-  Intel® OpenVINO™, ensuring data privacy and low latency.
+  OpenVINO™, ensuring data privacy and low latency.
 - **Real-Time Alerting:** Sub-second alert pipeline from camera detection to security
   notification via WebSocket, MQTT, and webhook strategies.
 - **Scalable Architecture:** Clean Architecture with microservices enables independent
@@ -52,7 +52,7 @@ processing stays local.
 ## How it Works
 
 This section provides a high-level architecture view of the POI Re-identification system
-and how it integrates with Intel® SceneScape and DLStreamer pipelines.
+and how it integrates with Intel® SceneScape and DL Streamer pipelines.
 
 ### System Architecture
 
@@ -61,7 +61,7 @@ and how it integrates with Intel® SceneScape and DLStreamer pipelines.
 │                        Intel® SceneScape Platform                            │
 │                                                                              │
 │  ┌─────────────┐    ┌──────────────────────────────────────────┐             │
-│  │  IP Cameras  │───▶│ DLStreamer Pipeline Server                │             │
+│  │  IP Cameras  │───▶│ DL Streamer Pipeline Server                │             │
 │  │  (RTSP)      │    │  ├─ person-detection-retail-0013         │             │
 │  └─────────────┘    │  ├─ face-detection-retail-0004           │             │
 │                     │  ├─ face-reidentification-retail-0095    │             │
@@ -115,13 +115,13 @@ and how it integrates with Intel® SceneScape and DLStreamer pipelines.
 ### Data Flow: Online (Real-Time POI Detection)
 
 ```
-Camera → DLStreamer → MQTT → MQTTConsumer → FAISS POI Search → AlertService → UI
+Camera → DL Streamer → MQTT → MQTTConsumer → FAISS POI Search → AlertService → UI
                                   │
                                   ├─ Store detection embedding + full-body frame in DetectionIndex
                                   └─ ExitPromoterThread promotes exit embeddings to FAISS (30s cycle)
 ```
 
-1. DLStreamer processes camera frames, generating face embeddings (256-d) and person bounding
+1. DL Streamer processes camera frames, generating face embeddings (256-d) and person bounding
    boxes, published via MQTT.
 2. The **MQTTConsumer** extracts face embeddings and stores each detection in the Detection
    FAISS index with metadata and a full-body person frame (not just face crop).
@@ -142,7 +142,7 @@ User uploads image → OpenVINO → Detection FAISS (search_k=2000) → Filter +
 ```
 
 1. User uploads a face image via the **Search API**.
-2. OpenVINO generates a 256-d query embedding (same model as DLStreamer).
+2. OpenVINO generates a 256-d query embedding (same model as DL Streamer).
 3. The Detection FAISS index (all faces seen in the last 7 days) is searched with a wide
    `search_k` to ensure cross-camera recall (the same person may score very differently
    across cameras due to viewing angle).
@@ -182,9 +182,9 @@ User uploads image → OpenVINO → Detection FAISS (search_k=2000) → Filter +
   Dedicated microservice for alert fan-out — dispatches POI match alerts via logging,
   WebSocket (to UI), and MQTT channels. Runs on port `8001`.
 
-- **Intel® SceneScape + DLStreamer**:
+- **Intel® SceneScape + DL Streamer**:
   Upstream inference pipeline providing person detection, face detection, and face
-  re-identification via MQTT. DLStreamer runs the OpenVINO models; SceneScape provides
+  re-identification via MQTT. DL Streamer runs the OpenVINO models; SceneScape provides
   spatial scene management, region tracking, and multi-camera UUID coordination.
 
 ### Key Features
@@ -194,7 +194,7 @@ User uploads image → OpenVINO → Detection FAISS (search_k=2000) → Filter +
 - **Feature 2**: Historical search API — upload an image and get a timeline of where that
   person appeared across all cameras, with region dwell times and thumbnails.
 - **Feature 3**: Multi-strategy alert delivery — WebSocket push to UI, MQTT publish, and
-  webhook POST, with configurable dedup and suppression.
+  webhook POST, with configurable deduplication and suppression.
 - **Feature 4**: Region entry/exit tracking with dwell time computation via SceneScape
   regulated scene events.
 
@@ -213,13 +213,13 @@ User uploads image → OpenVINO → Detection FAISS (search_k=2000) → Filter +
 :::{toctree}
 :hidden:
 
-get-started
-how-to-use-application
-benchmarking
-mqtt-pipeline-design
-api-reference
-troubleshooting
-release-notes
+./get-started.md
+How To Use POI Re-Identification <./how-to-use-application.md>
+./benchmarking.md
+./mqtt-pipeline-design.md
+./api-reference.md
+./troubleshooting.md
+./release-notes.md
 
 :::
 hide_directive-->

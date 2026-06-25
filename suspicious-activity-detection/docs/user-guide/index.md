@@ -1,7 +1,15 @@
-# Store-wide Loss Prevention: Suspicious Activity Detection
+# Suspicious Activity Detection
 
-The Store-wide Loss Prevention (LP) application is a reference workload that
-demonstrates how Intel® SceneScape, OpenVINO™, and a Vision Language Model
+<!--hide_directive
+<div class="component_card_widget">
+  <a class="icon_github" href="https://github.com/intel-retail/storewide-loss-prevention/tree/main/suspicious-activity-detection">
+    GitHub project
+  </a>
+</div>
+hide_directive-->
+
+The Suspicious Activity Detection (SAD) application is a store-wide loss prevention reference
+workload that demonstrates how Intel® SceneScape, OpenVINO™, and a Vision Language Model
 (VLM) can be combined on a single Intel® platform to detect suspicious in-store
 behavior in real time.
 
@@ -12,7 +20,7 @@ It combines several services:
 - **Behavioral Analysis Service:** Runs pose detection plus a VLM
   (Qwen2.5-VL) to confirm whether a person is concealing merchandise in a
   HIGH_VALUE zone.
-- **Alert Service:** Time-window-based dedup and downstream delivery of
+- **Alert Service:** Time-window-based deduplication and downstream delivery of
   alerts to MQTT topics, REST consumers, and the dashboard.
 - **Frame storage (SeaweedFS / MinIO):** Cropped person frames stored per
   visit; a per-alert evidence prefix is created when an alert fires.
@@ -27,17 +35,14 @@ visualized for a retail loss-prevention scenario.
 - [System Requirements](./get-started/system-requirements.md) – Hardware,
   software, and network requirements, plus an overview of the AI models used
   by each workload.
-- [SceneScape Setup](./scenescape-setup.md) – How SceneScape is configured,
-  initialized, and managed within the application stack.
 - [Get Started](./get-started.md) – Step-by-step instructions to build and
   run the application using `make` and Docker.
 - [How It Works](./how-it-works.md) – High-level architecture, service
   responsibilities, and data/control flows.
-- [Pattern Authoring Guide](./pattern-authoring-guide.md) – How to define
-  custom pose-based activity patterns in `patterns.yaml` without code changes.
-- [Benchmarking and Stream Density](./benchmarking.md) – How to measure
-  end-to-end latency and determine maximum stream density for your hardware.
+- [How-to Guides](./how-to-guides.md) – Guides on key topics like SceneScape
+  setup, pattern authoring, and benchmarking.
 - [Release Notes](./release-notes.md) – Version history and known issues.
+-
 
 > **Disclaimer:** This application is provided for development and evaluation
 > purposes only and is _not_ intended for production loss-prevention or
@@ -45,23 +50,12 @@ visualized for a retail loss-prevention scenario.
 > compliance review.
 
 <!--hide_directive
-<div class="component_card_widget">
-  <a class="icon_github" href="https://github.com/intel-retail/storewide-loss-prevention">
-    GitHub project
-  </a>
-  <a class="icon_document" href="https://github.com/intel-retail/storewide-loss-prevention/blob/main/suspicious-activity-detection/README.md">
-    Readme
-  </a>
-</div>
-hide_directive-->
-
-<!--hide_directive
 :::{toctree}
 :hidden:
 
 Get Started <get-started.md>
 How It Works <how-it-works.md>
-Benchmarking <benchmarking.md>
+How-to Guides <how-to-guides.md>
 Release Notes <release-notes.md>
 
 :::

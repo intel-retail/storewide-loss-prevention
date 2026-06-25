@@ -8,13 +8,12 @@
 | 2 | `scenescape/regulated/scene/+` | `ScenescapeRegionConsumer` | Scene tracking + region entry/exit |
 | 3 | `scenescape/external/+/person` | `EventConsumer` | Global UUID observability + movement event storage (monitoring only — NOT used for FAISS) |
 
----
+### Topic 1: `scenescape/data/camera/{camera_id}`
 
-## Topic 1: `scenescape/data/camera/{camera_id}`
-
-**Published by:** DLStreamer pipeline server (runs person + face detection + reid models)
+**Published by:** DL Streamer Pipeline Server (runs person + face detection + reid models)
 
 **Raw payload structure:**
+
 ```json
 {
   "timestamp": "2026-04-27T07:42:17.916Z",
@@ -50,6 +49,7 @@
 ```
 
 **What we extract:**
+
 1. `camera_id` — from the MQTT topic itself
 2. `person[].id` — SceneScape tracking ID
 3. `person[].sub_objects.face[].metadata.reid.embedding_vector` ← **face embedding (only source used for FAISS)**
@@ -61,6 +61,7 @@
 > `face-reidentification-retail-0095` are sent to FAISS.
 
 **What we do with it:**
+
 ```
 embedding vector → DetectionIndex.claim_track(track_id, vector, frame)
                    ├── if first time (SETNX gate)
@@ -73,11 +74,12 @@ embedding vector → DetectionIndex.claim_track(track_id, vector, frame)
 
 ---
 
-## Topic 2: `scenescape/regulated/scene/{scene_id}`
+### Topic 2: `scenescape/regulated/scene/{scene_id}`
 
 **Published by:** SceneScape scene controller (regulated/smoothed tracking)
 
 **Raw payload structure:**
+
 ```json
 {
   "timestamp": "2026-04-27T07:42:20.100Z",
@@ -101,6 +103,7 @@ embedding vector → DetectionIndex.claim_track(track_id, vector, frame)
 ```
 
 **What we extract (stateful diff per person):**
+
 - `current_regions = set(person["regions"].keys())`
 - `previous_regions` = in-memory state from last message for same `person.id`
 - `current - previous` → **region ENTERED** → `store_region_entry()`
@@ -283,7 +286,7 @@ KEY:  track:frame:{track_id}:last_seen  → JPEG binary (most recent frame)
 Camera Feed
     │
     ▼
-DLStreamer Pipeline Server
+DL Streamer Pipeline Server
   (person-detection-retail-0013 +
    face-detection-retail-0004 +
    face-reidentification-retail-0095 +

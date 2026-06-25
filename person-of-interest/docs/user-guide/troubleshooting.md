@@ -36,7 +36,7 @@ If you encounter any problems not addressed here, check the
 - **Issue**: POIs are enrolled but no alerts appear in the UI.
 - **Solution**:
   - Verify MQTT connectivity: check `MQTT_HOST` and `MQTT_PORT` in `.env`
-  - Verify SceneScape DLStreamer is publishing to `scenescape/data/camera/+`
+  - Verify SceneScape DL Streamer is publishing to `scenescape/data/camera/+`
   - Check the similarity threshold: lower `SIMILARITY_THRESHOLD` if matches are too strict
   - Verify face embeddings are present in MQTT messages (face sub_objects required)
   - Check backend logs: `make logs | grep "poi.consumer"`
@@ -83,7 +83,7 @@ If you encounter any problems not addressed here, check the
 
 - **Issue**: Historical search returns appearances of a different person mixed with the correct one.
 - **Solution**:
-  - This is caused by DLStreamer reusing integer track IDs across different physical persons
+  - This is caused by DL Streamer reusing integer track IDs across different physical persons
   - The track purity filter (enabled by default) should catch this — it filters tracks where
     < 40% of events belong to the queried POI
   - If false positives persist, check that the `detection_embeddings_per_track` config is
@@ -97,7 +97,7 @@ If you encounter any problems not addressed here, check the
 - **Solution**:
   - Ensure the detection index is populated — check `GET /api/v1/status` for detection
     vector count
-  - The detection index stores embeddings from DLStreamer runtime, which uses different
+  - The detection index stores embeddings from DL Streamer runtime, which uses different
     preprocessing than enrollment. Similarity scores may be lower (0.3-0.5 range)
   - Lower `SIMILARITY_THRESHOLD` if needed (default is 0.6)
   - The system uses a two-stage search: Stage 1 (POI index) uses the same model as
@@ -170,7 +170,7 @@ make up
 - **Issue**: Backend logs show no incoming MQTT events.
 - **Solution**:
   - Verify MQTT broker is accessible: `mosquitto_sub -h <MQTT_HOST> -t "scenescape/data/camera/#"`
-  - Check DLStreamer pipeline is running in SceneScape
+  - Check DL Streamer pipeline is running in SceneScape
   - Ensure camera feeds are active and producing detections
   - Verify `MQTT_CA_CERT` is set if the broker requires TLS
 
@@ -179,7 +179,7 @@ make up
 - **Issue**: FAISS search returns unexpected results or errors.
 - **Solution**:
   - Verify `FAISS_DIMENSION=256` matches the re-identification model output
-  - Ensure both enrollment (OpenVINO™) and runtime (DLStreamer) use
+  - Ensure both enrollment (OpenVINO™) and runtime (DL Streamer) use
     `face-reidentification-retail-0095` — they must be the same model to share the
     embedding space
 
