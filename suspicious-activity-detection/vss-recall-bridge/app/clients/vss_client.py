@@ -89,8 +89,10 @@ class VssClient:
         timeout: float,
         poll_seconds: float,
         poll_timeout: float,
+        dataprep_base_url: str = "http://vdms-dataprep:8000",
     ) -> None:
         self._base_url = base_url.rstrip("/")
+        self._dataprep_base_url = dataprep_base_url.rstrip("/")
         self._poll_seconds = poll_seconds
         self._poll_timeout = poll_timeout
         self._client = httpx.AsyncClient(timeout=timeout)
@@ -183,20 +185,46 @@ class VssClient:
 
     # --- clip playback (proxy) --------------------------------------------------
 
-    async def iter_clip(self, video_id: str) -> AsyncIterator[bytes]:
-        """Stream a clip's bytes for authenticated playback proxying (build-spec §8).
+    async def _resolve_clip_url(self, video_id: str) -> str:
+        """Resolve the streamable download URL for a clip.
 
-        VSS returns clip metadata (with a MinIO ``video_url``) from
-        ``GET {base_url}/videos/{videoId}``; the bytes are fetched from that URL.
+        VSS returns clip metadata from ``GET {base_url}/videos/{videoId}``. The
+        pipeline-manager response wraps the entity under a ``video`` key and does
+        not carry a direct ``video_url``; the bytes are served by the dataprep
+        download endpoint, keyed by ``video_id`` + storage ``bucket``.
         """
 
         meta_resp = await self._client.get(f"{self._base_url}/videos/{video_id}")
         meta_resp.raise_for_status()
-        meta = meta_resp.json()
+        body = meta_resp.json()
+        meta = body.get("video", body) if isinstance(body, dict) else {}
+
         video_url = meta.get("video_url") or meta.get("videoUrl")
         if not video_url:
+            data_store = meta.get("dataStore") or {}
+            bucket = data_store.get("bucket")
+            if bucket:
+                video_url = (
+                    f"{self._dataprep_base_url}/v1/dataprep/videos/download"
+                    f"?video_id={video_id}&bucket_name={bucket}"
+                )
+        if not video_url:
             raise RuntimeError(f"no video_url for {video_id}: {meta!r}")
+        return video_url
 
+    async def fetch_clip(self, video_id: str) -> bytes:
+        """Return the full clip bytes (upstream lacks HTTP Range support, so the
+        whole small clip is buffered to enable seekable, range-capable serving)."""
+
+        video_url = await self._resolve_clip_url(video_id)
+        resp = await self._client.get(video_url)
+        resp.raise_for_status()
+        return resp.content
+
+    async def iter_clip(self, video_id: str) -> AsyncIterator[bytes]:
+        """Stream a clip's bytes for authenticated playback proxying (build-spec §8)."""
+
+        video_url = await self._resolve_clip_url(video_id)
         async with self._client.stream("GET", video_url) as resp:
             resp.raise_for_status()
             async for chunk in resp.aiter_bytes():

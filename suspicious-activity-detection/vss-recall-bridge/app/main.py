@@ -31,6 +31,7 @@ async def lifespan(app: FastAPI):
         settings.http_timeout_seconds,
         settings.search_poll_seconds,
         settings.search_poll_timeout_seconds,
+        settings.dataprep_base_url,
     )
     app.state.camera_ids = {c.camera_id for c in cameras}
 

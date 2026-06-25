@@ -174,10 +174,9 @@ down-lp:
 
 
 
-# ---- Search Stack (VSS search services + recall bridge + investigator UI) ----
-# run-search also starts Scenescape so the recall bridge has live RTSP feeds
-# (rtsp://localhost:8554/Camera_01, Camera_02). The search compose itself is
-# self-contained and does not depend on the suspicious-activity stack.
+# ---- Search Stack (VSS search services + RTSP source + recall bridge + investigator UI) ----
+# Fully self-contained: includes its own mediamtx RTSP server + ffmpeg file
+# streamer, so it does NOT need Scenescape or the suspicious-activity stack.
 SEARCH_REGISTRY ?= intel/
 SEARCH_TAG ?= latest
 EMBEDDING_MODEL_NAME ?= CLIP/clip-vit-b-32
@@ -186,10 +185,7 @@ COMPOSE_SEARCH := docker compose --project-directory . -f docker/docker-compose.
 
 .PHONY: run-search
 run-search:
-	@echo "=== Starting Scenescape (RTSP camera feeds) ==="
-	@$(MAKE) -C $(SCENESCAPE_DIR) APP_DIR=$(CURDIR) run
-	@echo ""
-	@echo "=== Starting search stack (VSS search + recall bridge + investigator UI) ==="
+	@echo "=== Starting search stack (VSS search + RTSP source + recall bridge + investigator UI) ==="
 	$(SEARCH_ENV) $(COMPOSE_SEARCH) up -d --build
 	@echo ""
 	@echo "Search services running:"
@@ -197,10 +193,9 @@ run-search:
 	@echo "  Recall bridge:    http://localhost:$${RECALL_BRIDGE_PORT:-8090}/health"
 	@echo "  Pipeline Manager: http://localhost:$${PM_HOST_PORT:-3001}"
 	@echo "  Video Search MS:  http://localhost:$${VS_HOST_PORT:-7890}"
-	@echo "  Scenescape UI:    https://localhost"
-	@echo "  RTSP streams:     rtsp://localhost:8554/Camera_01 , Camera_02"
+	@echo "  RTSP source:      rtsp://mediaserver:8554/lp-camera1 (internal)"
 	@echo ""
-	@echo "To stop: make down-search (search only) / make down-scenescape (cameras)"
+	@echo "To stop: make down-search"
 
 .PHONY: down-search
 down-search:

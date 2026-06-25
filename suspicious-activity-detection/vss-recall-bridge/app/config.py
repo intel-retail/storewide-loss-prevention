@@ -21,6 +21,7 @@ class Settings(BaseSettings):
     )
 
     vss_base_url: str = "http://pipeline-manager:3000"
+    dataprep_base_url: str = "http://vdms-dataprep:8000"
     cameras_config: str = "configs/cameras.yaml"
     clips_dir: str = "./clips"
     bridge_api_key: str = ""

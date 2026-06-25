@@ -9,7 +9,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta
 
 from fastapi import APIRouter, HTTPException, Request
-from fastapi.responses import StreamingResponse
+from fastapi.responses import Response
 
 from ..config import get_settings
 from ..models import RecallHit, RecallSearchRequest, RecallSearchResponse
@@ -90,9 +90,41 @@ async def search(req: RecallSearchRequest, request: Request) -> RecallSearchResp
 
 
 @router.get("/clips/{clip_id}")
-async def get_clip(clip_id: str, request: Request) -> StreamingResponse:
+async def get_clip(clip_id: str, request: Request) -> Response:
     """Proxy clip bytes through the authenticated bridge instead of exposing the
-    raw MinIO URL to the browser (build-spec §7.3, §8)."""
+    raw MinIO URL to the browser (build-spec §7.3, §8).
+
+    The upstream download endpoint does not support HTTP Range, so the (small)
+    clip is buffered and served with Range support to make the player seekable.
+    """
 
     vss = request.app.state.vss
-    return StreamingResponse(vss.iter_clip(clip_id), media_type="video/mp4")
+    data = await vss.fetch_clip(clip_id)
+    total = len(data)
+    headers = {"Accept-Ranges": "bytes", "Content-Type": "video/mp4"}
+
+    range_header = request.headers.get("range") or request.headers.get("Range")
+    if range_header and range_header.startswith("bytes="):
+        spec = range_header.split("=", 1)[1].split(",", 1)[0].strip()
+        start_s, _, end_s = spec.partition("-")
+        try:
+            start = int(start_s) if start_s else 0
+            end = int(end_s) if end_s else total - 1
+        except ValueError:
+            start, end = 0, total - 1
+        start = max(0, start)
+        end = min(end, total - 1)
+        if start > end:
+            start = 0
+        chunk = data[start : end + 1]
+        headers.update(
+            {
+                "Content-Range": f"bytes {start}-{end}/{total}",
+                "Content-Length": str(len(chunk)),
+            }
+        )
+        return Response(content=chunk, status_code=206, headers=headers)
+
+    headers["Content-Length"] = str(total)
+    return Response(content=data, status_code=200, headers=headers)
+

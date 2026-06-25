@@ -95,6 +95,9 @@ services:
       no_proxy: ${no_proxy:-},minio-service,vdms-dataprep,localhost
       http_proxy: ${http_proxy:-}
       https_proxy: ${https_proxy:-}
+      NO_PROXY: ${no_proxy:-},minio-service,vdms-dataprep,localhost
+      HTTP_PROXY: ${http_proxy:-}
+      HTTPS_PROXY: ${https_proxy:-}
       EMBEDDING_MODEL_NAME: ${EMBEDDING_MODEL_NAME:?set EMBEDDING_MODEL_NAME, e.g. openai/clip-vit-base-patch32}
       EMBEDDING_DEVICE: ${EMBEDDING_DEVICE:-CPU}
       EMBEDDING_USE_OV: ${EMBEDDING_USE_OV:-true}
@@ -130,6 +133,9 @@ services:
       no_proxy: ${no_proxy:-},vdms-vector-db,multimodal-embedding-serving,minio-service,localhost
       http_proxy: ${http_proxy:-}
       https_proxy: ${https_proxy:-}
+      NO_PROXY: ${no_proxy:-},vdms-vector-db,multimodal-embedding-serving,minio-service,localhost
+      HTTP_PROXY: ${http_proxy:-}
+      HTTPS_PROXY: ${https_proxy:-}
       APP_HOST: vdms-dataprep
       VDMS_VDB_HOST: vdms-vector-db
       VDMS_VDB_PORT: 55555
@@ -205,6 +211,12 @@ services:
       no_proxy: ${no_proxy:-},multimodal-embedding-serving,vdms-dataprep,minio-service,vdms-vector-db,pipeline-manager,localhost
       http_proxy: ${http_proxy:-}
       https_proxy: ${https_proxy:-}
+      NO_PROXY: ${no_proxy:-},multimodal-embedding-serving,vdms-dataprep,minio-service,vdms-vector-db,pipeline-manager,localhost
+      HTTP_PROXY: ${http_proxy:-}
+      HTTPS_PROXY: ${https_proxy:-}
+      # video-search reads a custom `no_proxy_env` setting (src/utils/common.py)
+      # to decide whether to bypass the proxy for the embedding service call.
+      no_proxy_env: ${no_proxy:-},multimodal-embedding-serving,vdms-dataprep,minio-service,vdms-vector-db,pipeline-manager,localhost
       VDMS_VDB_HOST: vdms-vector-db
       VDMS_VDB_PORT: 55555
       EMBEDDINGS_ENDPOINT: http://multimodal-embedding-serving:8000/embeddings
@@ -259,6 +271,9 @@ services:
       no_proxy: ${no_proxy:-},minio-service,postgres-service,vdms-dataprep,video-search,localhost
       http_proxy: ${http_proxy:-}
       https_proxy: ${https_proxy:-}
+      NO_PROXY: ${no_proxy:-},minio-service,postgres-service,vdms-dataprep,video-search,localhost
+      HTTP_PROXY: ${http_proxy:-}
+      HTTPS_PROXY: ${https_proxy:-}
       MINIO_PROTOCOL: "http:"
       MINIO_HOST: minio-service
       MINIO_PORT: 80
@@ -291,6 +306,32 @@ services:
       - vs_network
 
   # ---------- VLM-Recall Bridge (RTSP/file ingest + thin search proxy) ----------
+  # ---------- RTSP source (self-contained; replaces the Scenescape stack) ----------
+  # mediamtx RTSP server + an ffmpeg loop that streams a sample video file.
+  # The bridge ingests rtsp://mediaserver:8554/${STREAM_NAME} over vs_network,
+  # so no host port or external Scenescape stack is required.
+  mediaserver:
+    image: bluenviron/mediamtx:1.14.0
+    networks:
+      vs_network:
+        aliases:
+          - mediaserver
+    restart: unless-stopped
+
+  camera-stream:
+    image: linuxserver/ffmpeg:version-8.0-cli
+    command: >
+      -nostdin -re -stream_loop -1 -i /media/${STREAM_VIDEO_FILE:-lp-camera1.mp4}
+      -c:v copy -an
+      -f rtsp -rtsp_transport tcp rtsp://mediaserver:8554/${STREAM_NAME:-lp-camera1}
+    volumes:
+      - ${STREAM_VIDEO_DIR:-../scenescape/sample_data}:/media:ro
+    networks:
+      - vs_network
+    depends_on:
+      - mediaserver
+    restart: unless-stopped
+
   vss-recall-bridge:
     build:
       context: vss-recall-bridge
@@ -305,6 +346,8 @@ services:
         condition: service_healthy
       video-search:
         condition: service_started
+      camera-stream:
+        condition: service_started
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8080/health')"]
       interval: 10s
@@ -313,6 +356,7 @@ services:
       start_period: 20s
     environment:
       VSS_BASE_URL: ${VSS_BASE_URL:-http://pipeline-manager:3000}
+      DATAPREP_BASE_URL: ${DATAPREP_BASE_URL:-http://vdms-dataprep:8000}
       BRIDGE_API_KEY: ${BRIDGE_API_KEY:-change-me}
       CAMERAS_CONFIG: configs/cameras.yaml
       CLIPS_DIR: /clips
@@ -321,9 +365,13 @@ services:
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
       http_proxy: ${http_proxy:-}
       https_proxy: ${https_proxy:-}
-      no_proxy: ${no_proxy:-localhost,127.0.0.1},pipeline-manager,video-search,minio-service
+      no_proxy: ${no_proxy:-localhost,127.0.0.1},pipeline-manager,video-search,vdms-dataprep,minio-service
+      HTTP_PROXY: ${http_proxy:-}
+      HTTPS_PROXY: ${https_proxy:-}
+      NO_PROXY: ${no_proxy:-localhost,127.0.0.1},pipeline-manager,video-search,vdms-dataprep,minio-service
     volumes:
       - ./vss-recall-bridge/configs/cameras.yaml:/app/configs/cameras.yaml:ro
+      - ${STREAM_VIDEO_DIR:-../scenescape/sample_data}:/media:ro
       - vss-recall-clips:/clips
     restart: unless-stopped
 

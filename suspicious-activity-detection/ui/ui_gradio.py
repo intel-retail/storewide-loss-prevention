@@ -12,7 +12,7 @@ from datetime import datetime, timezone
 
 import paho.mqtt.client as mqtt
 from PIL import Image, ImageDraw, ImageFont
-from fastapi import FastAPI, Response
+from fastapi import FastAPI, Request, Response
 from fastapi.responses import StreamingResponse, HTMLResponse, JSONResponse
 import uvicorn
 
@@ -797,20 +797,36 @@ def recall_search(payload: dict):
 
 
 @app.get("/api/recall/clips/{video_id}")
-def recall_clip(video_id: str):
-    """Stream a proxied clip from the bridge (key injected server-side)."""
+def recall_clip(video_id: str, request: Request):
+    """Stream a proxied clip from the bridge (key injected server-side).
+
+    Forwards the browser's Range header and propagates the upstream 206 +
+    Content-Range/Accept-Ranges/Content-Length so the player can seek.
+    """
+    fwd_headers = {"X-API-Key": RECALL_API_KEY}
+    range_header = request.headers.get("range")
+    if range_header:
+        fwd_headers["Range"] = range_header
     try:
         r = requests.get(
             f"{RECALL_CLIPS_API}/{video_id}",
-            headers={"X-API-Key": RECALL_API_KEY},
-            stream=True,
+            headers=fwd_headers,
             timeout=120,
         )
     except Exception as exc:
         return JSONResponse({"error": str(exc)}, status_code=502)
-    if r.status_code != 200:
+    if r.status_code not in (200, 206):
         return Response(content=r.content, status_code=r.status_code, media_type="application/json")
-    return StreamingResponse(r.iter_content(chunk_size=65536), media_type="video/mp4")
+    passthrough = {}
+    for key in ("Content-Range", "Accept-Ranges", "Content-Length", "Content-Type"):
+        if key in r.headers:
+            passthrough[key] = r.headers[key]
+    return Response(
+        content=r.content,
+        status_code=r.status_code,
+        media_type=r.headers.get("Content-Type", "video/mp4"),
+        headers=passthrough,
+    )
 
 
 if __name__ == "__main__":
