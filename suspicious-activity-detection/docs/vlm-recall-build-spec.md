@@ -8,11 +8,10 @@ this file alone. The design doc explains *why*; this file is the exact *what* an
 > Read order: skim [vlm-recall.md](vlm-recall.md) §4–§9 once for context, then implement strictly
 > from this spec. Where they ever disagree, **this spec wins** for implementation details.
 >
-> This spec assumes VSS ships **R1** (absolute `timeFilter:{start,end}` applied on search) — see
-> [vlm-recall.md](vlm-recall.md) §3.1. Capture time is handled by **near-real-time ingest + query
-> window padding** (§4, §7), so **no new ingest field (R2) is required** for live recall; R2 is
-> only needed for bulk backfill of old footage. Until R1 lands, fall back to relative-time only;
-> the build below does not change.
+> VSS now ships **R1** (absolute `timeFilter:{start,end}` applied on search — verified A/B) and
+> **subset/OR tag matching** (see [vlm-recall.md](vlm-recall.md) §3.1, §3.3). Capture time is
+> handled by **near-real-time ingest + query window padding** (§4, §7), so **no new ingest field
+> (R2) is required** for live recall; R2 is only needed for bulk backfill of old footage.
 
 ---
 
@@ -176,9 +175,10 @@ class VssClient:
 - Send `timeFilter` as an **absolute** `{start, end}` (R1). VSS matches it against `created_at`
   (upload time); near-real-time ingest + the query-side chunk padding (§7) keep that aligned with
   capture time. Omit `timeFilter` when the caller gives no window.
-- `tags` is an **exact tag-set match** (AND): a clip tagged `aisle1,aisle3` is only returned when
-  the query tag string contains that same set (see [vlm-recall.md](vlm-recall.md) §3.3). Build the
-  tag string from the requested cameras accordingly.
+- `tags` is a **subset/OR match**: a clip is returned when it shares **any** requested tag, so a
+  clip tagged `aisle1,aisle3` matches a query of just `aisle1` (see
+  [vlm-recall.md](vlm-recall.md) §3.3). Send the requested camera/area tags; no need to reproduce a
+  clip's full set.
 - Parse the polled response defensively for the hit list and each item's metadata.
 
 ---
@@ -291,7 +291,7 @@ Algorithm (matches [vlm-recall.md](vlm-recall.md) §9). The proxy is a pure mapp
 stateful search — no candidate set, no post-filter, no DB:
 
 ```python
-tags = build_tag_query(req.cameras)          # exact tag-set string, or None
+tags = build_tag_query(req.cameras)          # comma-separated tag string (subset/OR), or None
 start, end = pad_window(req.time_start, req.time_end, WINDOW_PAD_SECONDS)
 raw = await vss.search(query=req.query, tags=tags,
                        time_start=start, time_end=end)   # absolute timeFilter (R1)
@@ -317,8 +317,8 @@ rather than exposing the raw MinIO URL VSS reports — see §8.
 ### 7.4 No enrichment module
 
 There is **no `enrich.py`** and no mapping lookup: every field in `RecallHit` is copied directly
-from the VSS hit metadata. `build_tag_query` (cameras -> exact tag-set string) and `pad_window`
-(apply `WINDOW_PAD_SECONDS`) are small pure helpers in `routes.py`.
+from the VSS hit metadata. `build_tag_query` (cameras -> comma-separated tag string, subset/OR
+matched by VSS) and `pad_window` (apply `WINDOW_PAD_SECONDS`) are small pure helpers in `routes.py`.
 
 ---
 
@@ -417,13 +417,13 @@ stateless.
 - [ ] Query with `time_start/time_end` (padded by one chunk) outside the clip's window → empty
       results (absolute `timeFilter` applied server-side, R1).
 - [ ] Query with no time and no camera → VSS ranking returned as-is (no crash).
-- [ ] Multi-tag query matches only on the **exact tag set** (a single tag of a multi-tagged clip
-      returns nothing).
+- [ ] Multi-tag query uses **subset/OR** matching (a single tag of a multi-tagged clip returns
+      that clip).
 - [ ] Request without `X-API-Key` → 401.
 - [ ] Unknown camera id in `cameras` → 400.
 - [ ] Clip playback is proxied/signed, not a raw MinIO link.
 - [ ] RTSP camera uploads clips whose capture time matches the segment filename timestamp.
-- [ ] Unit tests: `build_tag_query` (exact tag-set string), `pad_window`, in-video position
+- [ ] Unit tests: `build_tag_query` (comma-separated tag string), `pad_window`, in-video position
       filter.
 
 ---
@@ -437,4 +437,4 @@ stateless.
 | Unauthenticated footage access | §8 API key + proxied/signed clip access. |
 | Capture-time accuracy | Near-real-time upload makes `created_at` ≈ capture time (within one chunk); query padding (§7) absorbs it. Backfill of old footage needs R2 (§4). Host needs NTP. |
 | Embedding lag / eventual consistency | Recall is over historical footage; a just-uploaded clip becomes searchable once VSS finishes embedding. |
-| Absolute time filter ignored / exact tag-set | Depends on VSS **R1** (absolute `timeFilter`) and the exact tag-set semantics; §5 + [vlm-recall.md](vlm-recall.md) §3.1/§3.3. Until R1 lands, fall back to relative-time only. |
+| Absolute time filter / multi-tag matching | **Resolved** — R1 (absolute `timeFilter`) and subset/OR tag matching are live and verified; §5 + [vlm-recall.md](vlm-recall.md) §3.1/§3.3. |

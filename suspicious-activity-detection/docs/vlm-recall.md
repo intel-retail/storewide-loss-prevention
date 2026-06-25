@@ -1,6 +1,6 @@
 # VLM-Recall Search With VSS
 
-Status: Draft / Proposal
+Status: Approved — ready for development
 Component: `storewide-loss-prevention/suspicious-activity-detection`
 
 ## 1. Use Case
@@ -33,7 +33,7 @@ VSS.
 > This design assumes one VSS fix lands: absolute time filtering (R1; see §3.1). Capture time is
 > handled by near-real-time ingest + window padding (§3.2), so no new ingest field is required.
 
-## 3. Why VSS Is Enough (with one fix)
+## 3. Why VSS Is Enough
 
 The full VSS search stack is up and running (confirmed):
 `nginx`, `pipeline-manager`, `video-search` (search-ms), `vdms-dataprep`, `vdms-vector-db`,
@@ -44,30 +44,30 @@ VSS answers all three parts of the query:
 | Query part | How VSS answers it | Status |
 |------------|--------------------|--------|
 | `blue shirt` | multimodal frame-embedding similarity (VDMS) | Works |
-| location (`entrance`, `aisle-7-cam`, `cam-12`) | upload **`tags`** filter on the stateful search | Works (see §3.3 tag semantics) |
-| `2:00-3:00 PM` | absolute `timeFilter:{start,end}` on **upload time** (+ chunk padding) | **Needs fix R1** (see §3.1) |
+| location (`entrance`, `aisle-7-cam`, `cam-12`) | upload **`tags`** filter (subset/OR match) | Works (verified, see §3.3) |
+| `2:00-3:00 PM` | absolute `timeFilter:{start,end}` on **upload time** (+ chunk padding) | Works (R1 verified, see §3.1) |
 
 Search hits already return everything the dashboard needs per segment: `video_id`, `video_url`,
 `tags`, `created_at`, `segment_start/segment_end`, `relevance_score`. Clip retrieval by `video_id`
 already works. So there is **nothing to enrich and nothing to store** on the SWLP side.
 
-### 3.1 The one required VSS fix (R1)
+### 3.1 Absolute time filtering (R1 — fixed & verified)
 
 Verified against the running stack on the stateful `POST /manager/search` (submit) +
-`GET /manager/search/{queryId}` (poll) flow:
+`GET /manager/search/{queryId}` (poll) flow **and** the direct search-ms `POST /query`:
 
-1. **Absolute time filtering is ignored.** A `timeFilter` with absolute `{start,end}` has no
-   effect — a window that excludes all footage returns the same results as no filter. Only the
-   **relative** form (`{value, unit}`, "last N minutes") is applied. Root cause is the gateway's
-   `normalizeTimeFilter` (it only builds a relative window; absolute `start/end` is dropped before
-   reaching search-ms, which itself supports explicit start/end).
-   - **Fix R1:** apply absolute `timeFilter:{start,end}` on search, combinable with tags.
+1. **Absolute time filtering now works.** A `timeFilter` with absolute `{start,end}` is applied
+   end-to-end. A/B confirmed: for a clip with `created_at: 2026-06-25T04:27:41+00:00`, a window of
+   `04:00–05:00` returns it (apple hit ranked #1, score 1.0) while `06:00–07:00` returns `[]` —
+   same query and tags, only the window changed. The **relative** form (`{value, unit}`, "last N
+   minutes") still works too. The earlier gateway gap in `normalizeTimeFilter` (absolute
+   `start/end` dropped before reaching search-ms) is resolved.
 
-That is the **only** blocker. VSS stores no capture time — every hit's only timestamp is
-`created_at` = **upload** time (`date_time` is always `""`). We do **not** need a new ingest field
-for this: because the bridge waits for each chunk and then uploads, `created_at` ≈ capture time +
-~one chunk, a fixed offset we absorb at query time (§3.2). With R1 in place VSS answers all three
-axes and the bridge needs no state.
+With R1 in place VSS answers all three axes server-side and the bridge needs no state. VSS stores no
+separate capture time — every hit's only timestamp is `created_at` = **upload** time (`date_time`
+is always `""`). We do **not** need a new ingest field for live recall: because the bridge waits for
+each chunk and then uploads, `created_at` ≈ capture time + ~one chunk, a fixed offset we absorb at
+query time (§3.2).
 
 > Optional future (R2): only if bulk **backfill/replay** of old footage is ever required does
 > upload time stop being a proxy for capture time. The clean fix then is to have VSS accept a
@@ -80,21 +80,23 @@ The bridge ingests in near-real-time (wait for a chunk, then upload) so `created
 tracks capture time within one chunk length. The query proxy **pads the requested window by one
 chunk** (segment size, e.g. ~5 min) so the absolute `timeFilter` (R1) reliably catches the right
 clips. This needs no per-clip capture field and no bridge state; it assumes live ingest, not bulk
-backfill (that is the R2 case in §3.1). Until R1 ships, fall back to relative-time only.
+backfill (that is the R2 case in §3.1). Absolute time filtering (R1) is now live, so the padded
+absolute window is the default path.
 
 ### 3.3 Tag-match semantics (verified)
 
-Tag filtering on the stateful search is an **exact tag-set (AND) match**, not "contains":
+Tag filtering is a **subset / OR match**: a clip is returned when it shares **any** of the requested
+tags (search-ms intersects the query tag set with each result's tags).
 
-- A clip tagged `[aisle1, aisle3]` is **not** returned by `tags: "aisle1"` or `tags: "aisle3"`
-  alone — only by `tags: "aisle1,aisle3"` (the full set).
-- A single-tagged clip (e.g. `retail`) is returned by `tags: "retail"` because its one tag is the
-  full set.
+- A clip tagged `[aisle1, aisle3]` **is** returned by `tags: "aisle1"` or by `tags: "aisle3"`
+  alone, and by `tags: "aisle1,aisle3"`.
+- A single-tagged clip (e.g. `retail`) is returned by `tags: "retail"`.
+- Verified live: `tags: "flying-machine-retail"` consistently filters to clips carrying that tag.
 
-Implication: keep each clip's tag set **minimal and stable**, and have the query send the **exact**
-tag set it expects (or ask the VSS team to add subset/OR matching). The one-shot
-`POST /manager/search/query` ignores tags and time entirely — use the stateful submit+poll flow
-for any filtered search.
+Implication: the query can send a **single camera/area tag** (e.g. just `cam-12`) and still match
+multi-tagged clips — no need to reproduce a clip's full tag set. The direct search-ms `POST /query`
+honors both tags and `timeFilter`; the stateful submit+poll flow is still used for the managed UI
+lifecycle.
 
 ## 4. Architecture
 
@@ -158,11 +160,11 @@ it** for filtered recall.
 
 ### 5.3 Time + tag behaviour (verified)
 
-- **Relative** `timeFilter:{value,unit}` is applied; **absolute** `timeFilter:{start,end}` is
-  currently dropped (R1).
+- Both **relative** `timeFilter:{value,unit}` and **absolute** `timeFilter:{start,end}` are applied
+  (R1, verified A/B — §3.1).
 - Time filtering is against `created_at` = **upload** time; near-real-time ingest + chunk padding
   (§3.2) make it track capture time.
-- Tags use **exact tag-set (AND)** matching — see §3.3.
+- Tags use **subset/OR** matching (match any requested tag) — see §3.3.
 
 ## 6. Ingestion (RTSP -> MP4)
 
@@ -221,8 +223,8 @@ joins nothing.
 > Removed by design: the earlier mapping table (`videoId -> camera, capture_start/end, tags,
 > clip_url`) and the dedicated `recall_bridge` Postgres database. With R1 (§3.1) VSS applies the
 > absolute time filter, and near-real-time ingest + window padding (§3.2) cover capture time, so
-> there is no state for the bridge to keep. If R1 is not delivered, fall back to relative-time
-> only, or reintroduce a mapping DB as a fallback.
+> there is no state for the bridge to keep. R1 is now live and verified (§3.1), so no relative-time
+> fallback or mapping DB is needed.
 
 ## 9. Search (direct or thin proxy)
 
@@ -249,8 +251,8 @@ The proxy maps this 1:1 to a VSS stateful search and polls for the result:
 POST /manager/search
 {
   "query": "person in a blue shirt",
-  "tags":  "entrance,cam-12",            # exact camera/area tag set (§3.3)
-  "timeFilter": { "start": "...T14:00:00Z", "end": "...T15:00:00Z" }   # absolute window (R1)
+  "tags":  "entrance,cam-12",            # any matching camera/area tag (subset/OR, §3.3)
+  "timeFilter": { "start": "...T14:00:00Z", "end": "...T15:00:00Z" }   # absolute window (R1, verified)
 }
 -> { "queryId": "..." }   then poll GET /manager/search/{queryId} until results
 ```
@@ -268,12 +270,10 @@ The whole real-world time axis is resolved **inside** VSS:
 - VSS matches it against `created_at` (upload time); near-real-time ingest keeps that within one
   chunk of capture time, and the padding absorbs the offset (§3.2).
 
-Verified today: VSS stores `created_at` = **upload** time (the demo clip returned
-`created_at: 2026-06-19T07:58:54Z`, matching its upload time), and an absolute `{start,end}` is
-dropped by `normalizeTimeFilter` while a relative `{value,unit}` is applied. R1 closes that gap so
-the bridge needs **no pre/post-filtering** and no candidate set. This covers live recall; bulk
-backfill of old footage would additionally need R2 (capture time at ingest, §3.1). Until R1 lands,
-fall back to relative-time only.
+Verified: VSS stores `created_at` = **upload** time, and an absolute `{start,end}` is now applied
+end-to-end (A/B test — §3.1), alongside the relative `{value,unit}` form. The bridge therefore needs
+**no pre/post-filtering** and no candidate set. This covers live recall; bulk backfill of old
+footage would additionally need R2 (capture time at ingest, §3.1).
 
 ### 9.2 In-video position vs. real-world time
 
@@ -337,7 +337,7 @@ time** (absolute window) — and VSS resolves all three in a single stateful sea
 POST /manager/search
 {
   "query": "person in a red jacket",
-  "tags":  "entrance-cam",                                  # exact tag set (§3.3)
+  "tags":  "entrance-cam",                                  # matching camera/area tag (subset/OR, §3.3)
   "timeFilter": { "start": "2026-06-18T14:00:00Z",
                   "end":   "2026-06-18T15:00:00Z" }         # absolute window, padded by one chunk (R1, §3.2)
 }
@@ -693,14 +693,14 @@ brute-force/flat scan.
 | Filter applied but VDMS index is flat/brute-force | Risky — full-index scoring every query |
 | No server-side time filter (R1 absent) | No guarantee — falls back to whole-index top-K |
 
-**Decision.** The stateless design meets the SLA **as long as R1 pushes the time filter into VSS
-and VDMS runs an ANN index**. If R1 is not delivered, the time axis cannot be enforced server-side
-and the §14 SWLP-owned ANN index (capture time + camera in the payload, HNSW) becomes the fallback
-that guarantees sub-second latency at 10M.
+**Decision.** R1 is confirmed in the VSS build (verified A/B), so the time filter is enforced
+server-side; the stateless design meets the SLA **provided VDMS runs an ANN index (HNSW/IVF)**. The
+§14 SWLP-owned ANN index (capture time + camera in the payload, HNSW) remains a fallback only if
+VDMS turns out to be flat/brute-force.
 
-**Action before committing:** verify the index type VDMS uses in the running stack (HNSW vs flat)
-and confirm R1 is in the VSS build. Those two checks decide whether stock VSS alone meets the
-10M / < 2 s bar or §14 is required.
+**Action before committing:** R1 is confirmed; the remaining check is the index type VDMS uses in
+the running stack (HNSW vs flat), which decides whether stock VSS alone meets the 10M / < 2 s bar
+or §14 is required.
 
 ## 15. Open Questions
 
@@ -708,9 +708,9 @@ and confirm R1 is in the VSS build. Those two checks decide whether stock VSS al
 
 - Clip length vs latency: shorter clips = fresher index and finer time granularity, but more
   uploads/embeddings. Start at 60 s?
-- Confirm R1 lands in the VSS build (absolute `timeFilter:{start,end}` applied on search). Capture
-  time is handled by near-real-time ingest + window padding (§3.2); R2 (capture time at ingest) is
-  only needed if bulk backfill of old footage is required.
+- R1 is confirmed in the VSS build (absolute `timeFilter:{start,end}` applied on search — verified
+  A/B). Capture time is handled by near-real-time ingest + window padding (§3.2); R2 (capture time
+  at ingest) is only needed if bulk backfill of old footage is required.
 - Does `-c copy` segmenting reliably produce VSS-streamable MP4 after faststart remux for our
   camera codecs, or do some cameras need re-encode?
 

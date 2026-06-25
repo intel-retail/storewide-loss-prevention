@@ -39,6 +39,27 @@ def kv(doc, key, val):
     return p
 
 
+def code_block(doc, text):
+    """Monospace, lightly shaded code block."""
+    from docx.oxml.ns import qn
+    from docx.oxml import OxmlElement
+    p = doc.add_paragraph()
+    p.paragraph_format.space_before = Pt(4)
+    p.paragraph_format.space_after = Pt(6)
+    p.paragraph_format.left_indent = Inches(0.15)
+    pPr = p._p.get_or_add_pPr()
+    shd = OxmlElement("w:shd")
+    shd.set(qn("w:val"), "clear")
+    shd.set(qn("w:color"), "auto")
+    shd.set(qn("w:fill"), "F4F4F4")
+    pPr.append(shd)
+    r = p.add_run(text)
+    r.font.name = "Consolas"
+    r.font.size = Pt(8.5)
+    r.font.color.rgb = RGBColor(0x1A, 0x1A, 0x1A)
+    return p
+
+
 doc = Document()
 style = doc.styles["Normal"]
 style.font.name = "Calibri"
@@ -150,6 +171,40 @@ doc.add_paragraph(
     "\u201cspill\u201d); it does not reason or count \u2014 that remains a VLM task outside "
     "the search path."
 ).runs[0].font.size = Pt(10)
+
+# Appendix A: cameras.yaml
+h(doc, "Appendix A \u2014 cameras.yaml (camera \u2192 tag mapping)")
+doc.add_paragraph(
+    "Single source of truth for the camera \u2192 tag mapping. The bridge reads it at "
+    "startup to drive both ingestion (which RTSP stream to segment) and tagging "
+    "(what tags each clip gets). Tag a camera once here; every clip from it is "
+    "tagged automatically."
+)
+code_block(
+    doc,
+    "# configs/cameras.yaml\n"
+    "cameras:\n"
+    "  cam1:\n"
+    "    rtsp_url: rtsp://localhost:8554/cam1   # live camera\n"
+    "    source_file: null\n"
+    "    area_label: lp-camera1                 # location label, also a search tag\n"
+    "    store_id: store-001\n"
+    "    enabled: true                          # false = skip this camera\n"
+    "    segment_seconds: 60                    # clip length for RTSP segmenting\n"
+    "    extra_tags: []                         # optional static tags on every clip\n"
+    "\n"
+    "  cam-2:\n"
+    "    rtsp_url: null                         # null = file-ingest only (no RTSP)\n"
+    "    source_file: /data/clips/entrance-backfill.mp4\n"
+    "    area_label: entrance\n"
+    "    store_id: store-001\n"
+    "    enabled: true\n"
+    "    extra_tags: [\"front-of-store\"]\n",
+)
+bullet(doc, "stable camera id; becomes the primary search tag on every clip.", bold_lead="map key (cam1): ")
+bullet(doc, "live RTSP URL \u2192 start a segmenter; null \u2192 file-ingest only (uses source_file).", bold_lead="rtsp_url: ")
+bullet(doc, "human location label (e.g. entrance, aisle-7) \u2014 the \u201cnear aisle 7\u201d search tag.", bold_lead="area_label: ")
+bullet(doc, "store scope tag; extra_tags appended verbatim to every clip.", bold_lead="store_id / extra_tags: ")
 
 # Footer note
 n = doc.add_paragraph()
