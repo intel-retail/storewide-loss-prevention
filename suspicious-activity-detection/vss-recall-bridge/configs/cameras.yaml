@@ -1,0 +1,27 @@
+# cameras.yaml — single source of truth for camera -> tag mapping (design doc §10.1).
+# The bridge reads this at startup to drive ingestion and tagging.
+#
+# Each clip is tagged: [<camera id>, area_label, store_id, *extra_tags].
+# VSS matches tags with subset/OR semantics, so a single tag still matches.
+
+cameras:
+  cam1:
+    # File-ingest example (no live RTSP). Set enabled: true and point source_file
+    # at a real MP4 to ingest it on startup. An enabled camera with a missing
+    # source_file fails fast.
+    rtsp_url: rtsp://10.223.22.84:8554/lp-camera1
+    source_file: null
+    area_label: lp-camera1
+    store_id: store-001
+    enabled: true
+    segment_seconds: 60
+    extra_tags: [HIGH_VALUE, CHECKOUT]
+
+  cam-12:
+    # Live RTSP example. Set enabled: true to start a segmenter task.
+    rtsp_url: null
+    source_file: null
+    area_label: entrance
+    store_id: store-001
+    enabled: false    
+    extra_tags: ["front-of-store"]

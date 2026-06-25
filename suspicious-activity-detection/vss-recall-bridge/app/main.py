@@ -1,0 +1,68 @@
+"""FastAPI app: ingest workers (lifespan) + optional thin query proxy (build-spec §9)."""
+
+from __future__ import annotations
+
+import asyncio
+import logging
+from contextlib import asynccontextmanager
+
+from fastapi import Depends, FastAPI
+
+from .clients.vss_client import VssClient
+from .config import get_settings, load_cameras
+from .ingest.file_ingest import ingest_file
+from .ingest.segmenter import run_segmenter
+from .query.routes import router as query_router
+from .security import require_api_key
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    settings = get_settings()
+    if not settings.bridge_api_key:
+        logger.warning("BRIDGE_API_KEY is empty; all /api/v1/lp/recall/* requests will be rejected")
+
+    cameras = load_cameras(settings.cameras_config, settings.default_segment_seconds)
+    app.state.vss = VssClient(
+        settings.vss_base_url,
+        settings.http_timeout_seconds,
+        settings.search_poll_seconds,
+        settings.search_poll_timeout_seconds,
+    )
+    app.state.camera_ids = {c.camera_id for c in cameras}
+
+    tasks: list[asyncio.Task] = []
+    for cam in cameras:
+        if not cam.enabled:
+            continue
+        if cam.rtsp_url:
+            tasks.append(asyncio.create_task(run_segmenter(cam, settings, app.state.vss)))
+        elif cam.source_file:
+            tasks.append(
+                asyncio.create_task(ingest_file(cam, cam.source_file, app.state.vss, settings))
+            )
+    app.state.ingest_tasks = tasks
+    logger.info("started %d ingest task(s)", len(tasks))
+
+    try:
+        yield
+    finally:
+        for task in tasks:
+            task.cancel()
+        await app.state.vss.aclose()
+
+
+app = FastAPI(title="vss-recall-bridge", version="0.1.0", lifespan=lifespan)
+app.include_router(
+    query_router,
+    prefix="/api/v1/lp/recall",
+    dependencies=[Depends(require_api_key)],
+)
+
+
+@app.get("/health")
+async def health() -> dict[str, str]:
+    return {"status": "ok"}

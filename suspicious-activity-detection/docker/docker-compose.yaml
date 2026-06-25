@@ -155,12 +155,14 @@ services:
       start_period: 10s
     environment:
       - LP_BASE_URL=http://swlp-service:8082
+      - RECALL_BASE_URL=${RECALL_BASE_URL:-http://vss-recall-bridge:8080}
+      - RECALL_API_KEY=${BRIDGE_API_KEY:-change-me}
       - MQTT_HOST=${MQTT_HOST:-broker.scenescape.intel.com}
       - MQTT_PORT=${MQTT_PORT:-1883}
       - MQTT_ALERT_TOPIC=alerts/#
       - TZ=${TZ:-}
-      - no_proxy=swlp-service,broker.scenescape.intel.com,localhost,127.0.0.1,10.0.0.0/8,172.16.0.0/12
-      - NO_PROXY=swlp-service,broker.scenescape.intel.com,localhost,127.0.0.1,10.0.0.0/8,172.16.0.0/12
+      - no_proxy=swlp-service,vss-recall-bridge,broker.scenescape.intel.com,localhost,127.0.0.1,10.0.0.0/8,172.16.0.0/12
+      - NO_PROXY=swlp-service,vss-recall-bridge,broker.scenescape.intel.com,localhost,127.0.0.1,10.0.0.0/8,172.16.0.0/12
       - http_proxy=
       - https_proxy=
       - HTTP_PROXY=

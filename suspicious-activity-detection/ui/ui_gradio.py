@@ -12,8 +12,8 @@ from datetime import datetime, timezone
 
 import paho.mqtt.client as mqtt
 from PIL import Image, ImageDraw, ImageFont
-from fastapi import FastAPI
-from fastapi.responses import StreamingResponse, HTMLResponse
+from fastapi import FastAPI, Response
+from fastapi.responses import StreamingResponse, HTMLResponse, JSONResponse
 import uvicorn
 
 
@@ -23,6 +23,13 @@ ZONES_API = f"{LP_BASE_URL}/api/v1/lp/zones"
 SESSIONS_API = f"{LP_BASE_URL}/api/v1/lp/sessions?include_pending=true"
 ALERTS_API = f"{LP_BASE_URL}/api/v1/lp/alerts"
 ZONE_CONFIG = os.environ.get("ZONE_CONFIG", "/app/zone_config.json")
+
+# VLM-Recall bridge (investigator search). The API key is held server-side and
+# injected by the proxy endpoints below so the browser never sees it.
+RECALL_BASE_URL = os.environ.get("RECALL_BASE_URL", "http://vss-recall-bridge:8080")
+RECALL_API_KEY = os.environ.get("RECALL_API_KEY", os.environ.get("BRIDGE_API_KEY", ""))
+RECALL_SEARCH_API = f"{RECALL_BASE_URL}/api/v1/lp/recall/search"
+RECALL_CLIPS_API = f"{RECALL_BASE_URL}/api/v1/lp/recall/clips"
 
 # MQTT config for real-time alerts
 MQTT_HOST = os.environ.get("MQTT_HOST", "broker.scenescape.intel.com")
@@ -485,7 +492,10 @@ table.dt tr:hover td{background:#f0f6ff;}
   <svg width="64" height="28" viewBox="0 0 200 80"><text x="10" y="55" font-family="Arial,sans-serif" font-size="48" font-weight="bold" fill="white">Intel</text></svg>
   <span>Suspicious Activity Detection</span>
  </div>
- <span class="scene">""" + SCENE_NAME + """</span>
+ <div style="display:flex;align-items:center;gap:1rem;">
+  <a href="/recall" style="font-size:13px;font-weight:600;color:#fff;text-decoration:none;background:#ffffff22;padding:5px 12px;border-radius:4px;border:1px solid #ffffff44;">&#128270; Investigator Recall</a>
+  <span class="scene">""" + SCENE_NAME + """</span>
+ </div>
 </header>
 
 <main>
@@ -603,6 +613,204 @@ def api_data():
         "alerts": _df_to_records(_cached_alerts),
         "alert_summary": _df_to_records(_cached_alert_summary),
     }
+
+
+# ─── Investigator Recall page + server-side proxy to the VLM-recall bridge ───
+RECALL_HTML = """<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Investigator Recall &mdash; Storewide Loss Prevention</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box;}
+body{font-family:'Segoe UI',system-ui,sans-serif;background:#f0f2f5;color:#222;}
+header{position:fixed;top:0;left:0;right:0;z-index:100;height:52px;
+ background:linear-gradient(135deg,#0071c5,#004a8f);display:flex;
+ align-items:center;justify-content:space-between;padding:0 1.5rem;
+ border-bottom:2px solid #005a9e;box-shadow:0 2px 8px rgba(0,0,0,.15);}
+header .brand{display:flex;align-items:center;gap:.8rem;}
+header .brand span{font-size:16px;font-weight:600;color:#fff;letter-spacing:.3px;}
+header a.back{font-size:13px;font-weight:600;color:#fff;text-decoration:none;
+ background:#ffffff22;padding:5px 12px;border-radius:4px;border:1px solid #ffffff44;}
+header #status{font-size:12px;color:#ffffffcc;}
+main{padding:64px 1rem 24px;display:grid;grid-template-columns:340px 1fr;gap:1rem;
+ max-width:1600px;margin:0 auto;}
+.card{background:#fff;border-radius:8px;padding:1rem 1.1rem;
+ border:1px solid #e0e3e8;box-shadow:0 1px 3px rgba(0,0,0,.06);}
+label{display:block;font-size:11px;color:#666;margin:12px 0 5px;
+ text-transform:uppercase;letter-spacing:.04em;font-weight:600;}
+input,textarea{width:100%;padding:8px 10px;border:1px solid #ccd2da;border-radius:5px;
+ font-size:14px;font-family:inherit;background:#fff;color:#222;}
+textarea{resize:vertical;min-height:60px;}
+input:focus,textarea:focus{outline:none;border-color:#0071c5;}
+.row{display:flex;gap:8px;}.row>div{flex:1;}
+button{cursor:pointer;border:none;border-radius:5px;font-size:14px;font-weight:600;
+ padding:11px;background:#0071c5;color:#fff;width:100%;margin-top:16px;}
+button:hover{background:#005a9e;}button:disabled{opacity:.5;cursor:not-allowed;}
+.hint{font-size:11px;color:#888;margin-top:4px;}
+.title{font-size:14px;font-weight:700;color:#0071c5;text-transform:uppercase;
+ letter-spacing:.5px;padding-bottom:.3rem;margin-bottom:.2rem;border-bottom:2px solid #0071c5;}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:14px;margin-top:14px;}
+.hit{background:#fff;border:1px solid #e0e3e8;border-radius:8px;overflow:hidden;
+ display:flex;flex-direction:column;box-shadow:0 1px 3px rgba(0,0,0,.06);}
+.hit video{width:100%;background:#000;aspect-ratio:16/9;display:block;}
+.hit .ph{width:100%;aspect-ratio:16/9;background:#11151c;color:#9fb0c3;display:flex;
+ align-items:center;justify-content:center;font-size:13px;cursor:pointer;}
+.hit .ph:hover{color:#fff;}
+.hit .b{padding:10px 12px;font-size:12px;}
+.hit .b .meta{color:#666;margin:2px 0;word-break:break-all;}
+.score{float:right;font-weight:700;color:#1a9e4b;}
+.tags{display:flex;flex-wrap:wrap;gap:5px;margin-top:7px;}
+.tag{background:#eef3fb;border:1px solid #d4e0f2;color:#21527d;font-size:11px;padding:2px 8px;border-radius:12px;}
+.empty{color:#999;font-size:14px;padding:40px 0;text-align:center;font-style:italic;}
+.banner{background:#fdecea;border:1px solid #f5c2c0;color:#a32a26;padding:10px 14px;
+ border-radius:6px;font-size:13px;margin-bottom:14px;display:none;}
+.banner.show{display:block;}
+footer{text-align:center;color:#999;font-size:12px;padding:8px;}
+</style>
+</head>
+<body>
+<header>
+ <div class="brand">
+  <svg width="64" height="28" viewBox="0 0 200 80"><text x="10" y="55" font-family="Arial,sans-serif" font-size="48" font-weight="bold" fill="white">Intel</text></svg>
+  <span>&#128270; Investigator Recall</span>
+ </div>
+ <div style="display:flex;align-items:center;gap:1rem;">
+  <span id="status">checking&hellip;</span>
+  <a class="back" href="/">&#8592; Dashboard</a>
+ </div>
+</header>
+<main>
+ <div class="card" style="align-self:start;">
+  <div class="title">Search</div>
+  <label for="query">Appearance query *</label>
+  <textarea id="query" placeholder="e.g. man in red hoodie carrying a black backpack"></textarea>
+  <label for="cameras">Cameras (optional)</label>
+  <input id="cameras" placeholder="cam1, cam-12" />
+  <div class="hint">Comma-separated. Blank = all cameras.</div>
+  <div class="row">
+   <div><label for="time_start">From</label><input id="time_start" type="datetime-local" /></div>
+   <div><label for="time_end">To</label><input id="time_end" type="datetime-local" /></div>
+  </div>
+  <div class="row">
+   <div><label for="pos_start">In-clip &ge; (s)</label><input id="pos_start" type="number" min="0" step="1" placeholder="optional" /></div>
+   <div><label for="pos_end">In-clip &le; (s)</label><input id="pos_end" type="number" min="0" step="1" placeholder="optional" /></div>
+  </div>
+  <label for="limit">Max results</label>
+  <input id="limit" type="number" min="1" max="100" value="20" />
+  <button id="searchBtn">Search</button>
+ </div>
+ <div>
+  <div id="banner" class="banner"></div>
+  <div class="title" id="resultsTitle" style="border:none;">Results</div>
+  <div id="grid" class="grid"></div>
+  <div id="empty" class="empty">Enter a query and press Search.</div>
+ </div>
+</main>
+<footer>&copy; 2026 Intel Corporation</footer>
+<script>
+var $=function(id){return document.getElementById(id);};
+function showBanner(m){var b=$('banner');b.textContent=m;b.classList.add('show');}
+function clearBanner(){$('banner').classList.remove('show');}
+function checkHealth(){fetch('/api/recall/health').then(function(r){return r.json();}).then(function(d){
+ var s=$('status');if(d.status==='ok'){s.textContent='\\u25CF bridge online';s.style.color='#9affc0';}
+ else{s.textContent='\\u25CF bridge error';s.style.color='#ffd27f';}}).catch(function(){
+ $('status').textContent='\\u25CF bridge unreachable';$('status').style.color='#ffb3b3';});}
+function toIso(v){if(!v)return null;return v.length===16?v+':00':v;}
+function parseCameras(v){var l=(v||'').split(',').map(function(s){return s.trim();}).filter(Boolean);return l.length?l:null;}
+function buildBody(){var q=$('query').value.trim();if(!q)throw new Error('Query is required.');
+ var b={query:q,limit:parseInt($('limit').value,10)||20};
+ var c=parseCameras($('cameras').value);if(c)b.cameras=c;
+ var ts=toIso($('time_start').value),te=toIso($('time_end').value);
+ if(ts)b.time_start=ts;if(te)b.time_end=te;
+ var ps=$('pos_start').value,pe=$('pos_end').value;
+ if(ps!=='')b.video_pos_start=parseFloat(ps);if(pe!=='')b.video_pos_end=parseFloat(pe);return b;}
+function fmtTime(t){if(!t)return '\\u2014';var d=new Date(t);return isNaN(d)?t:d.toLocaleString();}
+function doSearch(){clearBanner();var btn=$('searchBtn'),grid=$('grid'),empty=$('empty');var body;
+ try{body=buildBody();}catch(e){showBanner(e.message);return;}
+ btn.disabled=true;btn.textContent='Searching\\u2026';grid.innerHTML='';empty.textContent='Searching\\u2026';empty.style.display='block';
+ fetch('/api/recall/search',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})
+ .then(function(r){if(r.status===401){showBanner('Bridge rejected the API key (server config).');empty.style.display='none';return null;}
+  return r.text().then(function(t){if(!r.ok){showBanner('Search failed ('+r.status+'): '+t);empty.style.display='none';return null;}
+  return JSON.parse(t);});})
+ .then(function(d){if(d)renderResults(d.results||[]);})
+ .catch(function(e){showBanner('Network error: '+e.message);empty.style.display='none';})
+ .finally(function(){btn.disabled=false;btn.textContent='Search';});}
+function renderResults(results){var grid=$('grid'),empty=$('empty');
+ $('resultsTitle').textContent='Results ('+results.length+')';grid.innerHTML='';
+ if(!results.length){empty.textContent='No matches found.';empty.style.display='block';return;}
+ empty.style.display='none';
+ results.forEach(function(h){var card=document.createElement('div');card.className='hit';
+  var ph=document.createElement('div');ph.className='ph';ph.textContent='\\u25B6 Load clip';
+  ph.onclick=function(){loadClip(h.video_id,card,ph,h.segment_start);};
+  var tags=(h.tags||[]).map(function(t){return '<span class="tag">'+t+'</span>';}).join('');
+  var b=document.createElement('div');b.className='b';
+  b.innerHTML='<div><span class="score">'+(h.score||0).toFixed(3)+'</span><strong>'+fmtTime(h.capture_time)+'</strong></div>'+
+   '<div class="meta">video: '+h.video_id+'</div>'+
+   '<div class="meta">segment: '+(h.segment_start||0).toFixed(1)+'s \\u2013 '+(h.segment_end||0).toFixed(1)+'s</div>'+
+   '<div class="tags">'+tags+'</div>';
+  card.appendChild(ph);card.appendChild(b);grid.appendChild(card);});}
+function loadClip(videoId,card,ph,seekTo){ph.textContent='Loading clip\\u2026';ph.onclick=null;
+ var video=document.createElement('video');video.controls=true;video.preload='metadata';
+ video.src='/api/recall/clips/'+encodeURIComponent(videoId);
+ video.onloadedmetadata=function(){if(seekTo){try{video.currentTime=seekTo;}catch(e){}}};
+ video.onerror=function(){ph.textContent='Clip load failed';};
+ card.replaceChild(video,ph);video.play().catch(function(){});}
+$('searchBtn').addEventListener('click',doSearch);
+$('query').addEventListener('keydown',function(e){if(e.key==='Enter'&&(e.ctrlKey||e.metaKey))doSearch();});
+checkHealth();
+</script>
+</body>
+</html>
+"""
+
+
+@app.get("/recall", response_class=HTMLResponse)
+def recall_page():
+    return RECALL_HTML
+
+
+@app.get("/api/recall/health")
+def recall_health():
+    """Report whether the recall bridge is reachable (no key exposed)."""
+    try:
+        r = requests.get(f"{RECALL_BASE_URL}/health", timeout=5)
+        return JSONResponse(r.json(), status_code=r.status_code)
+    except Exception as exc:
+        return JSONResponse({"status": "unreachable", "detail": str(exc)}, status_code=502)
+
+
+@app.post("/api/recall/search")
+def recall_search(payload: dict):
+    """Proxy investigator queries to the bridge, injecting the API key server-side."""
+    try:
+        r = requests.post(
+            RECALL_SEARCH_API,
+            json=payload,
+            headers={"X-API-Key": RECALL_API_KEY},
+            timeout=120,
+        )
+    except Exception as exc:
+        return JSONResponse({"error": str(exc)}, status_code=502)
+    return Response(content=r.content, status_code=r.status_code, media_type="application/json")
+
+
+@app.get("/api/recall/clips/{video_id}")
+def recall_clip(video_id: str):
+    """Stream a proxied clip from the bridge (key injected server-side)."""
+    try:
+        r = requests.get(
+            f"{RECALL_CLIPS_API}/{video_id}",
+            headers={"X-API-Key": RECALL_API_KEY},
+            stream=True,
+            timeout=120,
+        )
+    except Exception as exc:
+        return JSONResponse({"error": str(exc)}, status_code=502)
+    if r.status_code != 200:
+        return Response(content=r.content, status_code=r.status_code, media_type="application/json")
+    return StreamingResponse(r.iter_content(chunk_size=65536), media_type="video/mp4")
 
 
 if __name__ == "__main__":

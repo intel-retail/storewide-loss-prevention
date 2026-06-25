@@ -1,0 +1,375 @@
+# Copyright (C) 2026 Intel Corporation
+# SPDX-License-Identifier: Apache-2.0
+#
+# Self-contained SEARCH stack: the VSS search services + the VLM-recall bridge.
+# This is SEPARATE from the suspicious-activity stack (docker/docker-compose.yaml)
+# and does NOT depend on the edge-ai-libraries repo or its setup.sh: the service
+# definitions and their environment defaults are inlined here.
+#
+# Images are referenced (not built). They must be available locally or pullable:
+#   - pipeline-manager, video-search, vdms-dataprep, multimodal-embedding-serving
+#     -> set REGISTRY (e.g. REGISTRY=intel/ or your registry) and TAG to pull,
+#        or have them built locally as <name>:<TAG>.
+#   - postgres / minio / vdms-vector-db are public images.
+#
+# Run from suspicious-activity-detection/:
+#   # the only value with no default is the embedding model:
+#   export EMBEDDING_MODEL_NAME=openai/clip-vit-base-patch32
+#   docker compose --project-directory . -f docker/docker-compose.search.yaml up -d
+#   # or: make run-search   /   make down-search
+# ---------------------------------------------------------------------------
+
+services:
+  # ------------------------------- Storage -------------------------------
+  postgres-service:
+    image: postgres:17.4
+    ports:
+      - "${POSTGRES_HOST_PORT:-5432}:5432"
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-video_summary_db}
+      PGDATA: /var/lib/postgresql/data/pgdata
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-video_summary_db}"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+    networks:
+      - vs_network
+
+  minio-service:
+    image: chainguard/minio@sha256:cb84dfa704c648c4b14858aa288576bb1cf756a9b326112a0934db00e87d0bb8
+    ports:
+      - "${MINIO_API_HOST_PORT:-4001}:80"
+      - "${MINIO_CONSOLE_HOST_PORT:-4002}:81"
+    environment:
+      no_proxy: ${no_proxy:-},localhost
+      http_proxy: ${http_proxy:-}
+      https_proxy: ${https_proxy:-}
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
+    command: |
+      server /data 
+      --address ":80"
+      --console-address ":81"
+    healthcheck:
+      test: ["CMD-SHELL", "echo > /dev/tcp/127.0.0.1/80 && exit 0 || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    restart: unless-stopped
+    volumes:
+      - minio_data:/data
+    networks:
+      - vs_network
+
+  # ---------------------------- Vector DB / Embeddings ----------------------------
+  vdms-vector-db:
+    image: intellabs/vdms:v2.12.0
+    ipc: host
+    environment:
+      - OVERRIDE_db_root_path=/db
+      - OVERRIDE_images_path=/db/images
+      - OVERRIDE_descriptors_path=/db/descriptors
+      - OVERRIDE_blobs_path=/db/blobs
+      - OVERRIDE_pmgd_path=/db/graph
+    ports:
+      - "${VDMS_VDB_HOST_PORT:-55555}:55555"
+    volumes:
+      - vdms-db:/db
+    networks:
+      - vs_network
+
+  multimodal-embedding-serving:
+    image: ${REGISTRY:-}multimodal-embedding-serving:${TAG:-latest}
+    container_name: multimodal-embedding-serving
+    ports:
+      - "${EMBEDDING_SERVER_PORT:-9777}:8000"
+    ipc: host
+    environment:
+      no_proxy: ${no_proxy:-},minio-service,vdms-dataprep,localhost
+      http_proxy: ${http_proxy:-}
+      https_proxy: ${https_proxy:-}
+      EMBEDDING_MODEL_NAME: ${EMBEDDING_MODEL_NAME:?set EMBEDDING_MODEL_NAME, e.g. openai/clip-vit-base-patch32}
+      EMBEDDING_DEVICE: ${EMBEDDING_DEVICE:-CPU}
+      EMBEDDING_USE_OV: ${EMBEDDING_USE_OV:-true}
+      EMBEDDING_OV_MODELS_DIR: ${EMBEDDING_OV_MODELS_DIR:-/app/ov_models}
+      DEFAULT_START_OFFSET_SEC: ${DEFAULT_START_OFFSET_SEC:-0}
+      DEFAULT_CLIP_DURATION: ${DEFAULT_CLIP_DURATION:--1}
+      DEFAULT_NUM_FRAMES: ${DEFAULT_NUM_FRAMES:-64}
+      OV_PERFORMANCE_MODE: ${OV_PERFORMANCE_MODE:-THROUGHPUT}
+    devices:
+      - ${DRI_MOUNT_PATH:-/dev/null}:/dev/dri
+    group_add:
+      - ${USER_GROUP_ID:-1000}
+      - ${VIDEO_GROUP_ID:-44}
+      - ${RENDER_GROUP_ID:-1002}
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8000/health || exit 1"]
+      interval: 10s
+      timeout: 10s
+      retries: 40
+      start_period: 5s
+    networks:
+      - vs_network
+    volumes:
+      - ov-models:/home/appuser/.cache/huggingface
+      - data-prep:/tmp/dataprep
+      - ov-models:${EMBEDDING_OV_MODELS_DIR:-/app/ov_models}
+
+  vdms-dataprep:
+    image: ${REGISTRY:-}vdms-dataprep:${TAG:-latest}
+    hostname: vdms-dataprep
+    environment:
+      no_proxy: ${no_proxy:-},vdms-vector-db,multimodal-embedding-serving,minio-service,localhost
+      http_proxy: ${http_proxy:-}
+      https_proxy: ${https_proxy:-}
+      APP_HOST: vdms-dataprep
+      VDMS_VDB_HOST: vdms-vector-db
+      VDMS_VDB_PORT: 55555
+      MINIO_ENDPOINT: minio-service:80
+      MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-minioadmin}
+      MINIO_SECURE: "false"
+      DEFAULT_BUCKET_NAME: ${DEFAULT_BUCKET_NAME:-vdms-bucket}
+      DB_COLLECTION: ${VS_INDEX_NAME:-video_frame_embeddings}
+      MULTIMODAL_EMBEDDING_ENDPOINT: http://multimodal-embedding-serving:8000/embeddings
+      MULTIMODAL_EMBEDDING_MODEL_NAME: ${EMBEDDING_MODEL_NAME}
+      EMBEDDING_PROCESSING_MODE: ${EMBEDDING_PROCESSING_MODE:-sdk}
+      SDK_USE_OPENVINO: ${SDK_USE_OPENVINO:-true}
+      VDMS_DATAPREP_DEVICE: ${VDMS_DATAPREP_DEVICE:-CPU}
+      OV_MODELS_DIR: ${OV_MODELS_DIR:-/app/ov_models}
+      EMBEDDING_BATCH_SIZE: ${EMBEDDING_BATCH_SIZE:-32}
+      MAX_PARALLEL_WORKERS: ${MAX_PARALLEL_WORKERS:-}
+      OV_PERFORMANCE_MODE: ${OV_PERFORMANCE_MODE:-THROUGHPUT}
+      FRAME_INTERVAL: ${FRAME_INTERVAL:-15}
+      ENABLE_OBJECT_DETECTION: ${ENABLE_OBJECT_DETECTION:-true}
+      DETECTION_CONFIDENCE: ${DETECTION_CONFIDENCE:-0.85}
+      FRAMES_TEMP_DIR: ${FRAMES_TEMP_DIR:-/tmp/dataprep}
+      DETECTION_MODEL_DIR: ${YOLOX_MODELS_MOUNT_PATH:-/app/models/yolox}
+      ROI_CONSOLIDATION_ENABLED: ${ROI_CONSOLIDATION_ENABLED:-false}
+      ROI_CONSOLIDATION_IOU_THRESHOLD: ${ROI_CONSOLIDATION_IOU_THRESHOLD:-0.2}
+      ROI_CONSOLIDATION_CLASS_AWARE: ${ROI_CONSOLIDATION_CLASS_AWARE:-false}
+      ROI_CONSOLIDATION_CONTEXT_SCALE: ${ROI_CONSOLIDATION_CONTEXT_SCALE:-0.2}
+      LOG_LEVEL: ${VDMS_DATAPREP_LOG_LEVEL:-INFO}
+      ALLOW_ORIGINS: ${ALLOW_ORIGINS:-*}
+      ALLOW_METHODS: ${ALLOW_METHODS:-*}
+      ALLOW_HEADERS: ${ALLOW_HEADERS:-*}
+    ulimits:
+      nofile:
+        soft: 32768
+        hard: 65535
+    ipc: host
+    ports:
+      - "${VDMS_DATAPREP_HOST_PORT:-6016}:8000"
+    depends_on:
+      vdms-vector-db:
+        condition: service_started
+      multimodal-embedding-serving:
+        condition: service_healthy
+      minio-service:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8000/v1/dataprep/health || exit 1"]
+      interval: 10s
+      timeout: 10s
+      retries: 40
+      start_period: 5s
+    volumes:
+      - vdms-yolox-models:${YOLOX_MODELS_MOUNT_PATH:-/app/models/yolox}
+      - data-prep:/tmp/dataprep
+      - ov-models:/home/appuser/.cache/huggingface
+      - ov-models:${OV_MODELS_DIR:-/app/ov_models}
+    devices:
+      - ${DRI_MOUNT_PATH:-/dev/null}:/dev/dri
+    group_add:
+      - ${USER_GROUP_ID:-1000}
+      - ${VIDEO_GROUP_ID:-44}
+      - ${RENDER_GROUP_ID:-1002}
+    networks:
+      - vs_network
+
+  # ------------------------------- Search MS -------------------------------
+  video-search:
+    image: ${REGISTRY:-}video-search:${TAG:-latest}
+    ipc: host
+    ports:
+      - "${VS_HOST_PORT:-7890}:8000"
+    environment:
+      no_proxy: ${no_proxy:-},multimodal-embedding-serving,vdms-dataprep,minio-service,vdms-vector-db,pipeline-manager,localhost
+      http_proxy: ${http_proxy:-}
+      https_proxy: ${https_proxy:-}
+      VDMS_VDB_HOST: vdms-vector-db
+      VDMS_VDB_PORT: 55555
+      EMBEDDINGS_ENDPOINT: http://multimodal-embedding-serving:8000/embeddings
+      EMBEDDINGS_MODEL_NAME: ${EMBEDDING_MODEL_NAME}
+      INDEX_NAME: ${VS_INDEX_NAME:-video_frame_embeddings}
+      WATCH_DIRECTORY: /tmp/watcher-dir
+      DEBOUNCE_TIME: ${VS_DEBOUNCE_TIME:-10}
+      DELETE_PROCESSED_FILES: ${VS_DELETE_PROCESSED_FILES:-false}
+      VS_INITIAL_DUMP: ${VS_INITIAL_DUMP:-false}
+      VIDEO_UPLOAD_ENDPOINT: http://pipeline-manager:3000
+      WATCH_DIRECTORY_RECURSIVE: ${VS_WATCH_DIRECTORY_RECURSIVE:-false}
+      AGGREGATION_ENABLED: ${AGGREGATION_ENABLED:-true}
+      AGGREGATION_SEGMENT_DURATION: ${AGGREGATION_SEGMENT_DURATION:-8}
+      AGGREGATION_MIN_GAP: ${AGGREGATION_MIN_GAP:-0}
+      AGGREGATION_MAX_RESULTS: ${AGGREGATION_MAX_RESULTS:-20}
+      AGGREGATION_INITIAL_K: ${AGGREGATION_INITIAL_K:-1000}
+      AGGREGATION_CONTEXT_SEEK_OFFSET_SECONDS: ${AGGREGATION_CONTEXT_SEEK_OFFSET_SECONDS:-0}
+    depends_on:
+      vdms-vector-db:
+        condition: service_started
+      minio-service:
+        condition: service_healthy
+      vdms-dataprep:
+        condition: service_started
+      multimodal-embedding-serving:
+        condition: service_healthy
+    restart: unless-stopped
+    volumes:
+      - vss-watcher-dir:/tmp/watcher-dir
+    networks:
+      - vs_network
+
+  # ---------------------------- Pipeline Manager ----------------------------
+  pipeline-manager:
+    image: ${REGISTRY:-}pipeline-manager:${TAG:-latest}
+    ports:
+      - "${PM_HOST_PORT:-3001}:3000"
+    ipc: host
+    user: "0:0"
+    depends_on:
+      minio-service:
+        condition: service_started
+      vdms-vector-db:
+        condition: service_started
+      vdms-dataprep:
+        condition: service_healthy
+      multimodal-embedding-serving:
+        condition: service_healthy
+      video-search:
+        condition: service_started
+    environment:
+      no_proxy: ${no_proxy:-},minio-service,postgres-service,vdms-dataprep,video-search,localhost
+      http_proxy: ${http_proxy:-}
+      https_proxy: ${https_proxy:-}
+      MINIO_PROTOCOL: "http:"
+      MINIO_HOST: minio-service
+      MINIO_PORT: 80
+      MINIO_BUCKET: ${PM_MINIO_BUCKET:-video-summary}
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
+      DB_HOST: postgres-service
+      DB_PORT: 5432
+      DB_USER: ${POSTGRES_USER:-postgres}
+      DB_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      DB_NAME: ${POSTGRES_DB:-video_summary_db}
+      SUMMARY_FEATURE: "FEATURE_OFF"
+      SEARCH_FEATURE: "FEATURE_ON"
+      SEARCH_ENDPOINT: http://video-search:8000
+      SEARCH_DATAPREP_ENDPOINT: http://vdms-dataprep:8000
+      TICK_INTERVAL_MS: ${TICK_INTERVAL_MS:-5000}
+      FAST_TICK_INTERVAL_MS: ${FAST_TICK_INTERVAL_MS:-2000}
+      DATAPREP_TELEMETRY_URL: ${DATAPREP_TELEMETRY_URL:-http://vdms-dataprep:8000/v1/dataprep/telemetry?limit=1}
+      TELEMETRY_SIGNAL_DIR: ${TELEMETRY_SIGNAL_DIR:-/app/.collector-signals}
+      SEARCH_DATAPREP_TIMEOUT_MS: ${SEARCH_DATAPREP_TIMEOUT_MS:-600000}
+    volumes:
+      - collector_signals:/app/.collector-signals
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - vs_network
+
+  # ---------- VLM-Recall Bridge (RTSP/file ingest + thin search proxy) ----------
+  vss-recall-bridge:
+    build:
+      context: vss-recall-bridge
+      dockerfile: Dockerfile
+    image: intel/swlp-vss-recall-bridge:${TAG:-latest}
+    ports:
+      - "${RECALL_BRIDGE_PORT:-8090}:8080"
+    networks:
+      - vs_network
+    depends_on:
+      pipeline-manager:
+        condition: service_healthy
+      video-search:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8080/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    environment:
+      VSS_BASE_URL: ${VSS_BASE_URL:-http://pipeline-manager:3000}
+      BRIDGE_API_KEY: ${BRIDGE_API_KEY:-change-me}
+      CAMERAS_CONFIG: configs/cameras.yaml
+      CLIPS_DIR: /clips
+      WINDOW_PAD_SECONDS: ${RECALL_WINDOW_PAD_SECONDS:-60}
+      SEARCH_TIMEZONE: ${TZ:-UTC}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      http_proxy: ${http_proxy:-}
+      https_proxy: ${https_proxy:-}
+      no_proxy: ${no_proxy:-localhost,127.0.0.1},pipeline-manager,video-search,minio-service
+    volumes:
+      - ./vss-recall-bridge/configs/cameras.yaml:/app/configs/cameras.yaml:ro
+      - vss-recall-clips:/clips
+    restart: unless-stopped
+
+  # ---------- Investigator UI (recall search console) ----------
+  swlp-recall-ui:
+    build:
+      context: ui
+      dockerfile: Dockerfile
+    image: intel/swlp-suscpicious-ui:${TAG:-latest}
+    ports:
+      - "${RECALL_UI_PORT:-7860}:7860"
+    networks:
+      - vs_network
+    depends_on:
+      vss-recall-bridge:
+        condition: service_started
+    environment:
+      RECALL_BASE_URL: http://vss-recall-bridge:8080
+      RECALL_API_KEY: ${BRIDGE_API_KEY:-change-me}
+      TZ: ${TZ:-UTC}
+      no_proxy: ${no_proxy:-localhost,127.0.0.1},vss-recall-bridge
+      NO_PROXY: ${no_proxy:-localhost,127.0.0.1},vss-recall-bridge
+      http_proxy: ${http_proxy:-}
+      https_proxy: ${https_proxy:-}
+    restart: unless-stopped
+
+volumes:
+  pg_data:
+    driver: local
+  minio_data:
+    driver: local
+  collector_signals:
+    driver: local
+  vdms-db:
+    driver: local
+  ov-models:
+    driver: local
+  data-prep:
+    driver: local
+  vdms-yolox-models:
+    driver: local
+  vss-watcher-dir:
+    driver: local
+  vss-recall-clips:
+    driver: local
+
+networks:
+  vs_network:
+    driver: bridge

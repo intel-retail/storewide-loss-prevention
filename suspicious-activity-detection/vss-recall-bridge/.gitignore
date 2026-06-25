@@ -1,0 +1,5 @@
+# Local scratch for segment/remux; never committed.
+clips/
+*.pyc
+__pycache__/
+.env
