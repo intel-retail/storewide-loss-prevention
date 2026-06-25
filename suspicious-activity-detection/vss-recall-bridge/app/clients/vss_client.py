@@ -102,13 +102,13 @@ class VssClient:
 
     @_retry
     async def upload(self, *, file_path: str, name: str, tags: str) -> str:
-        """POST /manager/videos (multipart) -> videoId."""
+        """POST {base_url}/videos (multipart) -> videoId."""
 
         with open(file_path, "rb") as fh:
             files = {"video": (os.path.basename(file_path), fh, "video/mp4")}
             data = {"name": name, "tags": tags}
             resp = await self._client.post(
-                f"{self._base_url}/manager/videos", files=files, data=data
+                f"{self._base_url}/videos", files=files, data=data
             )
         resp.raise_for_status()
         body = resp.json()
@@ -116,10 +116,10 @@ class VssClient:
 
     @_retry
     async def trigger_embedding(self, video_id: str) -> None:
-        """POST /manager/videos/search-embeddings/{videoId}."""
+        """POST {base_url}/videos/search-embeddings/{videoId}."""
 
         resp = await self._client.post(
-            f"{self._base_url}/manager/videos/search-embeddings/{video_id}"
+            f"{self._base_url}/videos/search-embeddings/{video_id}"
         )
         resp.raise_for_status()
 
@@ -149,7 +149,7 @@ class VssClient:
 
     @_retry
     async def _submit_search(self, body: dict) -> str:
-        resp = await self._client.post(f"{self._base_url}/manager/search", json=body)
+        resp = await self._client.post(f"{self._base_url}/search", json=body)
         resp.raise_for_status()
         data = resp.json()
         query_id = data.get("queryId") or data.get("query_id")
@@ -177,7 +177,7 @@ class VssClient:
 
     @_retry
     async def _get_search(self, query_id: str) -> Any:
-        resp = await self._client.get(f"{self._base_url}/manager/search/{query_id}")
+        resp = await self._client.get(f"{self._base_url}/search/{query_id}")
         resp.raise_for_status()
         return resp.json()
 
@@ -187,10 +187,10 @@ class VssClient:
         """Stream a clip's bytes for authenticated playback proxying (build-spec §8).
 
         VSS returns clip metadata (with a MinIO ``video_url``) from
-        ``GET /manager/videos/{videoId}``; the bytes are fetched from that URL.
+        ``GET {base_url}/videos/{videoId}``; the bytes are fetched from that URL.
         """
 
-        meta_resp = await self._client.get(f"{self._base_url}/manager/videos/{video_id}")
+        meta_resp = await self._client.get(f"{self._base_url}/videos/{video_id}")
         meta_resp.raise_for_status()
         meta = meta_resp.json()
         video_url = meta.get("video_url") or meta.get("videoUrl")
