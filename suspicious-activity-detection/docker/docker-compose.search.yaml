@@ -86,7 +86,7 @@ services:
       - vs_network
 
   multimodal-embedding-serving:
-    image: ${REGISTRY:-}multimodal-embedding-serving:${TAG:-latest}
+    image: ${REGISTRY:-}multimodal-embedding-serving:${SEARCH_TAG:-latest}
     container_name: multimodal-embedding-serving
     ports:
       - "${EMBEDDING_SERVER_PORT:-9777}:8000"
@@ -127,7 +127,7 @@ services:
       - ov-models:${EMBEDDING_OV_MODELS_DIR:-/app/ov_models}
 
   vdms-dataprep:
-    image: ${REGISTRY:-}vdms-dataprep:${TAG:-latest}
+    image: ${REGISTRY:-}vdms-dataprep:${SEARCH_TAG:-latest}
     hostname: vdms-dataprep
     environment:
       no_proxy: ${no_proxy:-},vdms-vector-db,multimodal-embedding-serving,minio-service,localhost
@@ -203,7 +203,7 @@ services:
 
   # ------------------------------- Search MS -------------------------------
   video-search:
-    image: ${REGISTRY:-}video-search:${TAG:-latest}
+    image: ${REGISTRY:-}video-search:${SEARCH_TAG:-latest}
     ipc: host
     ports:
       - "${VS_HOST_PORT:-7890}:8000"
@@ -251,7 +251,7 @@ services:
 
   # ---------------------------- Pipeline Manager ----------------------------
   pipeline-manager:
-    image: ${REGISTRY:-}pipeline-manager:${TAG:-latest}
+    image: ${REGISTRY:-}pipeline-manager:${SEARCH_TAG:-latest}
     ports:
       - "${PM_HOST_PORT:-3001}:3000"
     ipc: host
@@ -336,7 +336,7 @@ services:
     build:
       context: vss-recall-bridge
       dockerfile: Dockerfile
-    image: intel/swlp-vss-recall-bridge:${TAG:-latest}
+    image: intel/swlp-vss-recall-bridge:${SEARCH_TAG:-latest}
     ports:
       - "${RECALL_BRIDGE_PORT:-8090}:8080"
     networks:
@@ -376,13 +376,18 @@ services:
     restart: unless-stopped
 
   # ---------- Investigator UI (recall search console) ----------
+  # Behind the `recall-ui` profile: only started for standalone `make run-search`.
+  # In `make up` the unified dashboard UI (swlp-suscpicious-ui) serves /recall, so
+  # this duplicate is skipped.
   swlp-recall-ui:
+    profiles:
+      - recall-ui
     build:
       context: ui
       dockerfile: Dockerfile
-    image: intel/swlp-suscpicious-ui:${TAG:-latest}
+    image: intel/swlp-suscpicious-ui:${SEARCH_TAG:-latest}
     ports:
-      - "${RECALL_UI_PORT:-7860}:7860"
+      - "${RECALL_UI_PORT:-7861}:7860"
     networks:
       - vs_network
     depends_on:

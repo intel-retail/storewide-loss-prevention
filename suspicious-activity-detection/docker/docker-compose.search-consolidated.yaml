@@ -1,0 +1,43 @@
+# Consolidated-Postgres override — loaded ONLY by `make up` (combined stack).
+#
+# In the combined stack the SceneScape `pgserver` is the single Postgres instance.
+# The search stack's own `postgres-service` is disabled (profile-gated) and the
+# VSS pipeline-manager is repointed at `pgserver` (which already lives on the
+# `storewide-lp` network). Standalone `make run-search` does NOT load this file,
+# so it keeps its self-contained `postgres-service`.
+
+services:
+  # Disable the duplicate search Postgres in the combined stack by hiding it
+  # behind a profile that `make up` never activates.
+  postgres-service:
+    profiles:
+      - standalone-db
+
+  # Point the VSS pipeline-manager at the shared SceneScape Postgres. The
+  # `video_summary_db` database is created in pgserver by `make up`.
+  pipeline-manager:
+    networks:
+      - vs_network
+      - storewide-lp
+    environment:
+      DB_HOST: pgserver
+      DB_PORT: 5432
+      DB_USER: scenescape
+      DB_PASSWORD: ${DATABASE_PASSWORD:-}
+      DB_NAME: video_summary_db
+
+  # In the combined stack SceneScape already publishes `lp-camera1` to the
+  # shared mediaserver (via its `lp-cams` service). The search stack's
+  # `camera-stream` is only needed for standalone `make run-search`, where it
+  # replaces SceneScape. Running both makes two ffmpeg publishers fight over the
+  # same RTSP path (`lp-camera1`), each evicting the other ("closing existing
+  # publisher") and crash-looping with a Broken pipe — which breaks the
+  # SceneScape video. The bridge ingests its clips from the source file
+  # directly (file ingest), so it does not consume this RTSP stream here.
+  # Redirect this publisher to an unused path so it stays "started" (satisfying
+  # the bridge's depends_on) without colliding with SceneScape's `lp-camera1`.
+  camera-stream:
+    command: >
+      -nostdin -re -stream_loop -1 -i /media/${STREAM_VIDEO_FILE:-lp-camera1.mp4}
+      -c:v copy -an
+      -f rtsp -rtsp_transport tcp rtsp://mediaserver:8554/vss-standalone-unused

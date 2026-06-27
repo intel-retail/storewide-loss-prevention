@@ -27,6 +27,10 @@ ifeq ($(ENABLE_UI_LOWER),true)
   COMPOSE_ALL := $(COMPOSE_ALL) --profile ui
 endif
 
+# Also bring up the self-contained search stack as part of `make up` (set false to skip)
+ENABLE_SEARCH ?= true
+ENABLE_SEARCH_LOWER := $(shell echo $(ENABLE_SEARCH) | tr A-Z a-z)
+
 RESULTS_PATH ?= ./results
 
 export TAG
@@ -100,10 +104,39 @@ up: validate-device
 		fi; \
 		$(COMPOSE_ALL) build $$BUILD_SERVICES; \
 	fi
+	@if [ "$(ENABLE_SEARCH_LOWER)" = "true" ]; then \
+		echo "Building recall bridge image..."; \
+		$(SEARCH_ENV) $(COMPOSE_FULL) build vss-recall-bridge; \
+	fi
 	@echo ""
-	@echo "=== Starting all services ==="
-	$(COMPOSE_ALL) up -d
-	@echo ""
+	@echo "=== Starting all services (single docker compose) ==="
+	@if [ "$(ENABLE_SEARCH_LOWER)" = "true" ]; then \
+		$(SEARCH_ENV) $(COMPOSE_FULL) up -d; \
+		echo "Ensuring shared Postgres database 'video_summary_db' exists on pgserver..."; \
+		PG=$$(docker ps --filter name=pgserver --format '{{.Names}}' | head -n1); \
+		if [ -n "$$PG" ]; then \
+			for i in $$(seq 1 30); do \
+				docker exec "$$PG" pg_isready -U scenescape -d scenescape >/dev/null 2>&1 && break; \
+				sleep 2; \
+			done; \
+			docker exec "$$PG" psql -U scenescape -tc "SELECT 1 FROM pg_database WHERE datname='video_summary_db'" 2>/dev/null | grep -q 1 \
+				|| docker exec "$$PG" createdb -U scenescape video_summary_db 2>/dev/null \
+				&& echo "  ✓ database video_summary_db ready on $$PG" \
+				|| echo "  ✓ database video_summary_db already present"; \
+			docker restart $$(docker ps --filter name=pipeline-manager --format '{{.Names}}' | head -n1) >/dev/null 2>&1 || true; \
+		else \
+			echo "  ! pgserver container not found"; \
+		fi; \
+		echo "Connecting recall bridge to the LP network for the unified UI..."; \
+		BRIDGE=$$(docker ps --filter name=vss-recall-bridge --format '{{.Names}}' | head -n1); \
+		if [ -n "$$BRIDGE" ]; then \
+			docker network connect --alias vss-recall-bridge $(LP_NETWORK) "$$BRIDGE" 2>/dev/null \
+				&& echo "  ✓ $$BRIDGE attached to $(LP_NETWORK)" \
+				|| echo "  ✓ $$BRIDGE already on $(LP_NETWORK)"; \
+		fi; \
+	else \
+		$(COMPOSE_ALL) up -d; \
+	fi
 
 	@echo ""
 	@echo "Services running:"
@@ -111,6 +144,7 @@ up: validate-device
 	@echo "  Login:           admin / $$(grep SUPASS docker/.env | cut -d= -f2-)"
 	@if [ "$(ENABLE_UI_LOWER)" = "true" ]; then \
 		echo "  Gradio UI:       http://localhost:7860"; \
+		echo "  Investigator UI: http://localhost:7860/recall"; \
 	else \
 		echo "  Gradio UI:       DISABLED (ENABLE_UI=false)"; \
 	fi
@@ -129,7 +163,15 @@ up: validate-device
 
 .PHONY: down
 down:
-	-$(COMPOSE_ALL) --profile ui down  --remove-orphans
+	@BRIDGE=$$(docker ps -a --filter name=vss-recall-bridge --format '{{.Names}}' | head -n1); \
+	if [ -n "$$BRIDGE" ]; then \
+		docker network disconnect $(LP_NETWORK) "$$BRIDGE" 2>/dev/null || true; \
+	fi
+	@if [ "$(ENABLE_SEARCH_LOWER)" = "true" ]; then \
+		$(SEARCH_ENV) $(COMPOSE_FULL) --profile ui --profile recall-ui down --remove-orphans; \
+	else \
+		$(COMPOSE_ALL) --profile ui down --remove-orphans; \
+	fi
 	-docker volume rm storewide-lp_seaweedfs-data 2>/dev/null || true
 
 
@@ -180,22 +222,34 @@ down-lp:
 SEARCH_REGISTRY ?= intel/
 SEARCH_TAG ?= latest
 EMBEDDING_MODEL_NAME ?= CLIP/clip-vit-b-32
-SEARCH_ENV := REGISTRY=$(SEARCH_REGISTRY) TAG=$(SEARCH_TAG) EMBEDDING_MODEL_NAME=$(EMBEDDING_MODEL_NAME)
+SEARCH_ENV := REGISTRY=$(SEARCH_REGISTRY) SEARCH_TAG=$(SEARCH_TAG) EMBEDDING_MODEL_NAME=$(EMBEDDING_MODEL_NAME)
 COMPOSE_SEARCH := docker compose --project-directory . -f docker/docker-compose.search.yaml
+
+# Single combined invocation: scenescape + LP (+ cameras override + ui profile) + search.
+# Lets `make up`/`make down` manage everything in ONE docker compose command/project.
+# The consolidated override disables the search stack's postgres-service and points
+# the VSS pipeline-manager at the shared SceneScape `pgserver`.
+COMPOSE_FULL := $(COMPOSE_ALL) -f docker/docker-compose.search.yaml -f docker/docker-compose.search-consolidated.yaml
 
 .PHONY: run-search
 run-search:
 	@echo "=== Starting search stack (VSS search + RTSP source + recall bridge + investigator UI) ==="
-	$(SEARCH_ENV) $(COMPOSE_SEARCH) up -d --build
+	$(SEARCH_ENV) $(COMPOSE_SEARCH) --profile recall-ui up -d --build
 	@echo ""
 	@echo "Search services running:"
-	@echo "  Investigator UI:  http://localhost:$${RECALL_UI_PORT:-7860}/recall"
+	@echo "  Investigator UI:  http://localhost:$${RECALL_UI_PORT:-7861}/recall"
 	@echo "  Recall bridge:    http://localhost:$${RECALL_BRIDGE_PORT:-8090}/health"
 	@echo "  Pipeline Manager: http://localhost:$${PM_HOST_PORT:-3001}"
 	@echo "  Video Search MS:  http://localhost:$${VS_HOST_PORT:-7890}"
 	@echo "  RTSP source:      rtsp://mediaserver:8554/lp-camera1 (internal)"
 	@echo ""
 	@echo "To stop: make down-search"
+
+# Backend-only search stack (no swlp-recall-ui). Used by `make up`, where the
+# unified dashboard UI (swlp-suscpicious-ui) serves /recall. The recall bridge is
+# attached to the LP network (with its service alias) so the dashboard UI can
+# reach it by name within the combined stack.
+LP_NETWORK ?= storewide-lp_storewide-lp
 
 .PHONY: down-search
 down-search:

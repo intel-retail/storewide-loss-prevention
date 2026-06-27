@@ -295,6 +295,8 @@ def _mjpeg_generator():
 
 
 def get_scene_name():
+    if not os.path.exists(ZONE_CONFIG):
+        return "Suspicious Activity Detection"
     try:
         with open(ZONE_CONFIG, "r") as f:
             config = json.load(f)
