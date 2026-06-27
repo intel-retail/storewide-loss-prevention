@@ -10,7 +10,7 @@ import asyncio
 import logging
 import os
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, AsyncIterator
 
 import httpx
@@ -47,6 +47,13 @@ _retry = retry(
 
 
 def _iso(dt: datetime) -> str:
+    """Emit a naive UTC ISO string for VSS (which treats timeFilter as UTC).
+
+    Timezone-aware inputs are converted to UTC; naive inputs are assumed UTC.
+    """
+
+    if dt.tzinfo is not None:
+        dt = dt.astimezone(timezone.utc).replace(tzinfo=None)
     return dt.isoformat()
 
 

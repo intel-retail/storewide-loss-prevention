@@ -691,14 +691,10 @@ footer{text-align:center;color:#999;font-size:12px;padding:8px;}
   <div class="hint">Comma-separated. Blank = all cameras.</div>
   <div class="row">
    <div><label for="time_start">From</label><input id="time_start" type="datetime-local" /></div>
-   <div><label for="time_end">To</label><input id="time_end" type="datetime-local" /></div>
   </div>
   <div class="row">
-   <div><label for="pos_start">In-clip &ge; (s)</label><input id="pos_start" type="number" min="0" step="1" placeholder="optional" /></div>
-   <div><label for="pos_end">In-clip &le; (s)</label><input id="pos_end" type="number" min="0" step="1" placeholder="optional" /></div>
+   <div><label for="time_end">To</label><input id="time_end" type="datetime-local" /></div>
   </div>
-  <label for="limit">Max results</label>
-  <input id="limit" type="number" min="1" max="100" value="20" />
   <button id="searchBtn">Search</button>
  </div>
  <div>
@@ -717,15 +713,13 @@ function checkHealth(){fetch('/api/recall/health').then(function(r){return r.jso
  var s=$('status');if(d.status==='ok'){s.textContent='\\u25CF bridge online';s.style.color='#9affc0';}
  else{s.textContent='\\u25CF bridge error';s.style.color='#ffd27f';}}).catch(function(){
  $('status').textContent='\\u25CF bridge unreachable';$('status').style.color='#ffb3b3';});}
-function toIso(v){if(!v)return null;return v.length===16?v+':00':v;}
+function toIso(v){if(!v)return null;var d=new Date(v);return isNaN(d)?null:d.toISOString();}
 function parseCameras(v){var l=(v||'').split(',').map(function(s){return s.trim();}).filter(Boolean);return l.length?l:null;}
 function buildBody(){var q=$('query').value.trim();if(!q)throw new Error('Query is required.');
- var b={query:q,limit:parseInt($('limit').value,10)||20};
+ var b={query:q,limit:20};
  var c=parseCameras($('cameras').value);if(c)b.cameras=c;
  var ts=toIso($('time_start').value),te=toIso($('time_end').value);
- if(ts)b.time_start=ts;if(te)b.time_end=te;
- var ps=$('pos_start').value,pe=$('pos_end').value;
- if(ps!=='')b.video_pos_start=parseFloat(ps);if(pe!=='')b.video_pos_end=parseFloat(pe);return b;}
+ if(ts)b.time_start=ts;if(te)b.time_end=te;return b;}
 function fmtTime(t){if(!t)return '\\u2014';var d=new Date(t);return isNaN(d)?t:d.toLocaleString();}
 function doSearch(){clearBanner();var btn=$('searchBtn'),grid=$('grid'),empty=$('empty');var body;
  try{body=buildBody();}catch(e){showBanner(e.message);return;}
@@ -738,6 +732,7 @@ function doSearch(){clearBanner();var btn=$('searchBtn'),grid=$('grid'),empty=$(
  .catch(function(e){showBanner('Network error: '+e.message);empty.style.display='none';})
  .finally(function(){btn.disabled=false;btn.textContent='Search';});}
 function renderResults(results){var grid=$('grid'),empty=$('empty');
+ results=(results||[]).filter(function(h){return (h.score||0).toFixed(3)==='1.000';});
  $('resultsTitle').textContent='Results ('+results.length+')';grid.innerHTML='';
  if(!results.length){empty.textContent='No matches found.';empty.style.display='block';return;}
  empty.style.display='none';
@@ -750,13 +745,14 @@ function renderResults(results){var grid=$('grid'),empty=$('empty');
    '<div class="meta">video: '+h.video_id+'</div>'+
    '<div class="meta">segment: '+(h.segment_start||0).toFixed(1)+'s \\u2013 '+(h.segment_end||0).toFixed(1)+'s</div>'+
    '<div class="tags">'+tags+'</div>';
-  card.appendChild(ph);card.appendChild(b);grid.appendChild(card);});}
-function loadClip(videoId,card,ph,seekTo){ph.textContent='Loading clip\\u2026';ph.onclick=null;
+  card.appendChild(ph);card.appendChild(b);grid.appendChild(card);
+  loadClip(h.video_id,card,ph,h.segment_start,false);});}
+function loadClip(videoId,card,ph,seekTo,autoplay){ph.textContent='Loading clip\\u2026';ph.onclick=null;
  var video=document.createElement('video');video.controls=true;video.preload='metadata';
  video.src='/api/recall/clips/'+encodeURIComponent(videoId);
  video.onloadedmetadata=function(){if(seekTo){try{video.currentTime=seekTo;}catch(e){}}};
  video.onerror=function(){ph.textContent='Clip load failed';};
- card.replaceChild(video,ph);video.play().catch(function(){});}
+ card.replaceChild(video,ph);if(autoplay)video.play().catch(function(){});}
 $('searchBtn').addEventListener('click',doSearch);
 $('query').addEventListener('keydown',function(e){if(e.key==='Enter'&&(e.ctrlKey||e.metaKey))doSearch();});
 checkHealth();
