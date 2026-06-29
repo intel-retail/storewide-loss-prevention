@@ -74,9 +74,27 @@ To run the search stack on its own (separate from the LP UI):
 make run-search   # Investigator UI on http://localhost:7861/recall
 ```
 
-No environment variables need to be exported — `EMBEDDING_MODEL_NAME` and the registry
-tags are set by the `Makefile`, and database credentials come from `docker/.env`. To
-use a different embedding model: `make up EMBEDDING_MODEL_NAME=<model>`.
+The `Makefile` already sets sensible defaults, so nothing is mandatory. To override the
+defaults, either pass them on the `make` command line or export them before running
+`make up`:
+
+```bash
+export SEARCH_REGISTRY=intel/                       # search image registry
+export SEARCH_TAG=latest                            # search image tag
+export EMBEDDING_MODEL_NAME=CLIP/clip-vit-b-32       # multimodal embedding model
+make up
+```
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `SEARCH_REGISTRY` | `intel/` | Registry for the VSS search images. |
+| `SEARCH_TAG` | `latest` | Tag for the VSS search images. |
+| `EMBEDDING_MODEL_NAME` | `CLIP/clip-vit-b-32` | Multimodal model used for text+frame embeddings. |
+| `ENABLE_SEARCH` | `true` | Set `false` to skip the recall stack entirely. |
+
+Postgres/MinIO credentials are optional (they default in the compose files and the
+shared `pgserver` is used), so they don't need exporting. Equivalent one-liner:
+`make up EMBEDDING_MODEL_NAME=<model> SEARCH_TAG=<tag>`.
 
 ## Configure Cameras
 

@@ -551,14 +551,7 @@ export MINIO_ROOT_USER=minio
 export MINIO_ROOT_PASSWORD=minio_pswd
 export POSTGRES_USER=postgres
 export POSTGRES_PASSWORD=postgres
-export RABBITMQ_USER=rabbitmq
-export RABBITMQ_PASSWORD=rabbitmq
 export MULTIMODAL_EMBEDDING_MODEL="CLIP/clip-vit-b-32"
-export TEXT_EMBEDDING_MODEL="QwenText/qwen3-embedding-0.6b"
-export VLM_TARGET_DEVICE="GPU"
-export VLM_MODEL_NAME="OpenVINO/Phi-3.5-vision-instruct-int8-ov"
-export ENABLED_WHISPER_MODELS="tiny.en,small.en,medium.en"
-export OD_MODEL_NAME="yolov8l-worldv2"
 ```
 
 Notes for our integration:
@@ -570,8 +563,7 @@ Notes for our integration:
   pipeline-manager-metadata containers we rely on.
 - `TEXT_EMBEDDING_MODEL`, `VLM_*`, `ENABLED_WHISPER_MODELS`, `OD_MODEL_NAME`, and `RABBITMQ_*`
   belong to the summary / unified pipelines and are not exercised by clip upload -> embedding ->
-  search. Keep them exported (they are harmless) if you run a combined stack; they can be omitted
-  for a pure `--search` bring-up.
+  search, so they are omitted here.
 - These same credentials must match what the `vss-recall-bridge` uses when it talks to the stack.
 
 When the VSS search stack starts, nine containers come up. Not all are needed for our

@@ -111,8 +111,8 @@ up: validate-device
 	@echo ""
 	@echo "=== Starting all services (single docker compose) ==="
 	@if [ "$(ENABLE_SEARCH_LOWER)" = "true" ]; then \
-		$(SEARCH_ENV) $(COMPOSE_FULL) up -d; \
-		echo "Ensuring shared Postgres database 'video_summary_db' exists on pgserver..."; \
+		echo "Starting pgserver first and ensuring 'video_summary_db' exists (before pipeline-manager)..."; \
+		$(SEARCH_ENV) $(COMPOSE_FULL) up -d pgserver; \
 		PG=$$(docker ps --filter name=pgserver --format '{{.Names}}' | head -n1); \
 		if [ -n "$$PG" ]; then \
 			for i in $$(seq 1 30); do \
@@ -123,10 +123,12 @@ up: validate-device
 				|| docker exec "$$PG" createdb -U scenescape video_summary_db 2>/dev/null \
 				&& echo "  ✓ database video_summary_db ready on $$PG" \
 				|| echo "  ✓ database video_summary_db already present"; \
-			docker restart $$(docker ps --filter name=pipeline-manager --format '{{.Names}}' | head -n1) >/dev/null 2>&1 || true; \
 		else \
-			echo "  ! pgserver container not found"; \
+			echo "  ! pgserver container not found — pipeline-manager may need a manual createdb"; \
 		fi; \
+		$(SEARCH_ENV) $(COMPOSE_FULL) up -d; \
+		echo "Ensuring recall bridge is running..."; \
+		$(SEARCH_ENV) $(COMPOSE_FULL) up -d vss-recall-bridge 2>/dev/null || true; \
 		echo "Connecting recall bridge to the LP network for the unified UI..."; \
 		BRIDGE=$$(docker ps --filter name=vss-recall-bridge --format '{{.Names}}' | head -n1); \
 		if [ -n "$$BRIDGE" ]; then \
@@ -143,10 +145,11 @@ up: validate-device
 	@echo "  Scenescape UI:   https://localhost"
 	@echo "  Login:           admin / $$(grep SUPASS docker/.env | cut -d= -f2-)"
 	@if [ "$(ENABLE_UI_LOWER)" = "true" ]; then \
-		echo "  Gradio UI:       http://localhost:7860"; \
+		echo "  SAD-DASHBOARD UI:       http://localhost:7860"; \
 		echo "  Investigator UI: http://localhost:7860/recall"; \
 	else \
-		echo "  Gradio UI:       DISABLED (ENABLE_UI=false)"; \
+		echo "  SAD-DASHBOARD UI:       DISABLED (ENABLE_UI=false)"; \
+		echo "  Investigator UI: DISABLED (ENABLE_UI=false)"; \
 	fi
 	@echo ""
 	@echo "To stop: make down"
