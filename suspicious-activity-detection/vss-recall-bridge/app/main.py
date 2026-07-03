@@ -25,7 +25,12 @@ async def lifespan(app: FastAPI):
     if not settings.bridge_api_key:
         logger.warning("BRIDGE_API_KEY is empty; all /api/v1/lp/recall/* requests will be rejected")
 
-    cameras = load_cameras(settings.cameras_config, settings.default_segment_seconds)
+    cameras = load_cameras(
+        settings.scene_config,
+        settings.rtsp_base_url,
+        settings.store_id,
+        settings.default_segment_seconds,
+    )
     app.state.vss = VssClient(
         settings.vss_base_url,
         settings.http_timeout_seconds,

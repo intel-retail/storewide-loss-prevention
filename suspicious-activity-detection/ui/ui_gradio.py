@@ -495,7 +495,7 @@ table.dt tr:hover td{background:#f0f6ff;}
   <span>Suspicious Activity Detection</span>
  </div>
  <div style="display:flex;align-items:center;gap:1rem;">
-  <a href="/recall" style="font-size:13px;font-weight:600;color:#fff;text-decoration:none;background:#ffffff22;padding:5px 12px;border-radius:4px;border:1px solid #ffffff44;">&#128270; Investigator Recall</a>
+  <a href="/recall" style="font-size:13px;font-weight:600;color:#fff;text-decoration:none;background:#ffffff22;padding:5px 12px;border-radius:4px;border:1px solid #ffffff44;">&#128270; Recall</a>
   <span class="scene">""" + SCENE_NAME + """</span>
  </div>
 </header>
@@ -623,7 +623,7 @@ RECALL_HTML = """<!DOCTYPE html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Investigator Recall &mdash; Storewide Loss Prevention</title>
+<title>Recall &mdash; Storewide Loss Prevention</title>
 <style>
 *{margin:0;padding:0;box-sizing:border-box;}
 body{font-family:'Segoe UI',system-ui,sans-serif;background:#f0f2f5;color:#222;}
@@ -676,7 +676,7 @@ footer{text-align:center;color:#999;font-size:12px;padding:8px;}
 <header>
  <div class="brand">
   <svg width="64" height="28" viewBox="0 0 200 80"><text x="10" y="55" font-family="Arial,sans-serif" font-size="48" font-weight="bold" fill="white">Intel</text></svg>
-  <span>&#128270; Investigator Recall</span>
+  <span>&#128270; Recall</span>
  </div>
  <div style="display:flex;align-items:center;gap:1rem;">
   <span id="status">checking&hellip;</span>
@@ -692,10 +692,10 @@ footer{text-align:center;color:#999;font-size:12px;padding:8px;}
   <input id="cameras" placeholder="cam1, cam-12" />
   <div class="hint">Comma-separated. Blank = all cameras.</div>
   <div class="row">
-   <div><label for="time_start">From</label><input id="time_start" type="datetime-local" /></div>
+   <div><label for="time_start">From (optional)</label><input id="time_start" type="datetime-local" /></div>
   </div>
   <div class="row">
-   <div><label for="time_end">To</label><input id="time_end" type="datetime-local" /></div>
+   <div><label for="time_end">To (optional)</label><input id="time_end" type="datetime-local" /></div>
   </div>
   <button id="searchBtn">Search</button>
  </div>
@@ -734,7 +734,7 @@ function doSearch(){clearBanner();var btn=$('searchBtn'),grid=$('grid'),empty=$(
  .catch(function(e){showBanner('Network error: '+e.message);empty.style.display='none';})
  .finally(function(){btn.disabled=false;btn.textContent='Search';});}
 function renderResults(results){var grid=$('grid'),empty=$('empty');
- results=(results||[]).filter(function(h){return (h.score||0).toFixed(3)==='1.000';});
+ results=results||[];
  $('resultsTitle').textContent='Results ('+results.length+')';grid.innerHTML='';
  if(!results.length){empty.textContent='No matches found.';empty.style.display='block';return;}
  empty.style.display='none';

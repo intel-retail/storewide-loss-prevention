@@ -1,6 +1,8 @@
-"""Settings (env) and cameras.yaml loader.
+"""Settings (env) and scene-config.yaml -> camera loader.
 
-The bridge is stateless; this module only loads configuration. See build-spec §3.
+The bridge is stateless; this module only loads configuration. Cameras and their
+region tags are derived entirely from SceneScape's scene-config.yaml, so an operator
+adds a camera in one place (SceneScape) and the bridge picks it up automatically.
 """
 
 from __future__ import annotations
@@ -9,7 +11,7 @@ from functools import lru_cache
 from pathlib import Path
 
 import yaml
-from pydantic import BaseModel, model_validator
+from pydantic import BaseModel
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -22,13 +24,14 @@ class Settings(BaseSettings):
 
     vss_base_url: str = "http://pipeline-manager:3000"
     dataprep_base_url: str = "http://vdms-dataprep:8000"
-    cameras_config: str = "configs/cameras.yaml"
+    scene_config: str = "configs/scene-config.yaml"
+    rtsp_base_url: str = "rtsp://mediaserver:8554"
+    store_id: str = ""
     clips_dir: str = "./clips"
     bridge_api_key: str = ""
     search_poll_seconds: float = 1.0
     search_poll_timeout_seconds: float = 30.0
     default_segment_seconds: int = 60
-    window_pad_seconds: float = 0.0
     search_timezone: str = "UTC"
     http_timeout_seconds: float = 30.0
 
@@ -38,8 +41,26 @@ def get_settings() -> Settings:
     return Settings()
 
 
+def _zone_tags(zones: dict | None) -> list[str]:
+    """Flatten a scene's zone map into tags: the zone names only.
+
+    e.g. ``{aisle1: HIGH_VALUE, aisle2: CHECKOUT}`` -> ``[aisle1, aisle2]``,
+    de-duplicated while preserving order. Zone types are intentionally ignored.
+    """
+
+    tags: list[str] = []
+    for name in (zones or {}).keys():
+        if name:
+            tags.append(str(name))
+    return list(dict.fromkeys(tags))
+
+
 class Camera(BaseModel):
-    """A single camera entry from cameras.yaml (design doc §10.1)."""
+    """A camera derived from SceneScape's scene-config.yaml.
+
+    ``camera_id``/``area_label`` are the SceneScape camera name, ``rtsp_url`` is built
+    from that name, and ``extra_tags`` are the scene's zone names and types.
+    """
 
     camera_id: str
     rtsp_url: str | None = None
@@ -50,37 +71,49 @@ class Camera(BaseModel):
     segment_seconds: int = 60
     extra_tags: list[str] = []
 
-    @model_validator(mode="after")
-    def _require_a_source(self) -> "Camera":
-        if self.enabled and not self.rtsp_url and not self.source_file:
-            raise ValueError(
-                f"camera '{self.camera_id}' has neither rtsp_url nor source_file"
-            )
-        return self
 
+def load_cameras(
+    scene_config: str,
+    rtsp_base_url: str = "rtsp://mediaserver:8554",
+    store_id: str | None = None,
+    default_segment_seconds: int = 60,
+) -> list[Camera]:
+    """Build the camera list from SceneScape's scene-config.yaml.
 
-def load_cameras(path: str, default_segment_seconds: int = 60) -> list[Camera]:
-    """Parse cameras.yaml and fail fast on misconfiguration (build-spec §3.2)."""
+    One camera per name under ``scenes[].cameras``. Its RTSP source is
+    ``{rtsp_base_url}/{camera_name}`` and its tags are the scene's zone names + types.
+    Adding a camera in SceneScape is therefore the only step needed to ingest it.
+    """
 
-    p = Path(path)
+    p = Path(scene_config)
     if not p.exists():
-        raise FileNotFoundError(f"cameras config not found: {path}")
+        raise FileNotFoundError(f"scene config not found: {scene_config}")
 
     data = yaml.safe_load(p.read_text()) or {}
-    raw = data.get("cameras") or {}
+    base = rtsp_base_url.rstrip("/")
 
     cameras: list[Camera] = []
-    for camera_id, fields in raw.items():
-        fields = dict(fields or {})
-        fields.setdefault("segment_seconds", default_segment_seconds)
-        cam = Camera(camera_id=camera_id, **fields)
-
-        # Fail fast: an enabled file-ingest camera must point at a real file.
-        if cam.enabled and not cam.rtsp_url and cam.source_file:
-            if not Path(cam.source_file).exists():
-                raise FileNotFoundError(
-                    f"camera '{camera_id}' source_file does not exist: {cam.source_file}"
+    seen: set[str] = set()
+    for scene in data.get("scenes") or []:
+        tags = _zone_tags(scene.get("zones"))
+        for raw_name in scene.get("cameras") or []:
+            name = str(raw_name)
+            if name in seen:
+                continue
+            seen.add(name)
+            cameras.append(
+                Camera(
+                    camera_id=name,
+                    area_label=name,
+                    rtsp_url=f"{base}/{name}",
+                    store_id=store_id or None,
+                    enabled=True,
+                    segment_seconds=default_segment_seconds,
+                    extra_tags=tags,
                 )
-        cameras.append(cam)
+            )
+
+    if not cameras:
+        raise ValueError(f"no cameras found under 'scenes' in {scene_config}")
 
     return cameras

@@ -32,8 +32,10 @@ tests/
 ```bash
 python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
-cp .env.example .env            # set BRIDGE_API_KEY and VSS_BASE_URL
-uvicorn app.main:app --host 0.0.0.0 --port 8080
+# Bridge settings come from the top-level stack env; for a standalone run set at
+# least BRIDGE_API_KEY and VSS_BASE_URL (see ../configs/.env.example):
+BRIDGE_API_KEY=change-me VSS_BASE_URL=http://localhost:3000 \
+  uvicorn app.main:app --host 0.0.0.0 --port 8080
 curl localhost:8080/health      # {"status":"ok"}
 ```
 
@@ -61,9 +63,11 @@ by VSS), `video_pos_start`/`video_pos_end` (in-video seconds filter).
 
 ## Configuration
 
-All settings come from environment variables (see `.env.example`). Cameras are declared in
-`configs/cameras.yaml`; an enabled camera needs either an `rtsp_url` (live) or a
-`source_file` (file ingest). Startup fails fast on a misconfigured or missing source.
+All settings come from environment variables (documented in the top-level
+[../configs/.env.example](../configs/.env.example)). Cameras are derived from
+SceneScape's [../configs/scene-config.yaml](../configs/scene-config.yaml): every camera
+under `scenes[].cameras` is ingested from `RTSP_BASE_URL/<camera-name>` and tagged with
+its name plus the scene's zone names/types.
 
 ## Tests
 

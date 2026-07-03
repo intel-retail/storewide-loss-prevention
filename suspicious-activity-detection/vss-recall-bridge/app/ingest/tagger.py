@@ -8,7 +8,8 @@ from ..config import Camera
 def build_tags(camera: Camera) -> str:
     """Return a comma-separated tag string for a clip from this camera.
 
-    Order: camera_id, area_label, store_id, *extra_tags. Empty/None parts dropped.
+    Order: camera_id, area_label, store_id, *extra_tags. Empty/None and duplicate
+    parts dropped (camera_id and area_label are usually the same SceneScape name).
     VSS matches tags with subset/OR semantics (design doc §3.3).
     """
 
@@ -18,4 +19,4 @@ def build_tags(camera: Camera) -> str:
         camera.store_id,
         *camera.extra_tags,
     ]
-    return ",".join(p for p in parts if p)
+    return ",".join(dict.fromkeys(p for p in parts if p))

@@ -6,36 +6,29 @@ position), no DB. Every field comes straight off the VSS hit.
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta
-
+import httpx
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import Response
 
-from ..config import get_settings
 from ..models import RecallHit, RecallSearchRequest, RecallSearchResponse
 
 router = APIRouter()
 
 
 def build_tag_query(cameras: list[str] | None) -> str | None:
-    """Camera ids -> comma-separated tag string (subset/OR matched by VSS)."""
+    """Camera ids -> comma-separated tag string (subset/OR matched by VSS).
+
+    VSS/VDMS silently returns zero hits when the tag filter carries exactly
+    one equality constraint (a known langchain-vdms single-constraint quirk;
+    two or more tags match correctly with OR semantics). Duplicate a lone tag
+    so the filter always sends >=2 constraints and matches as expected.
+    """
 
     if not cameras:
         return None
+    if len(cameras) == 1:
+        return f"{cameras[0]},{cameras[0]}"
     return ",".join(cameras)
-
-
-def pad_window(
-    start: datetime | None, end: datetime | None, pad_seconds: float
-) -> tuple[datetime | None, datetime | None]:
-    """Widen the requested window by one chunk to absorb ingest drift (design §3.2)."""
-
-    if start is None and end is None:
-        return None, None
-    delta = timedelta(seconds=pad_seconds or 0)
-    padded_start = start - delta if start is not None else None
-    padded_end = end + delta if end is not None else None
-    return padded_start, padded_end
 
 
 def to_hit(meta: dict) -> RecallHit:
@@ -58,8 +51,6 @@ def to_hit(meta: dict) -> RecallHit:
 
 @router.post("/search", response_model=RecallSearchResponse)
 async def search(req: RecallSearchRequest, request: Request) -> RecallSearchResponse:
-    settings = get_settings()
-
     known: set[str] = request.app.state.camera_ids
     if req.cameras:
         unknown = [c for c in req.cameras if c not in known]
@@ -67,10 +58,9 @@ async def search(req: RecallSearchRequest, request: Request) -> RecallSearchResp
             raise HTTPException(status_code=400, detail=f"unknown cameras: {unknown}")
 
     tags = build_tag_query(req.cameras)
-    start, end = pad_window(req.time_start, req.time_end, settings.window_pad_seconds)
 
     raw = await request.app.state.vss.search(
-        query=req.query, tags=tags, time_start=start, time_end=end
+        query=req.query, tags=tags, time_start=req.time_start, time_end=req.time_end
     )
 
     hits = raw
@@ -86,7 +76,19 @@ async def search(req: RecallSearchRequest, request: Request) -> RecallSearchResp
 
     results = [to_hit(m) for m in hits]
     results.sort(key=lambda h: h.score, reverse=True)
-    return RecallSearchResponse(results=results[: req.limit])
+
+    # VSS returns one hit per matching segment, so a video can appear several
+    # times. Collapse to one entry per video (its best-scoring segment) so
+    # duplicates don't consume the result budget.
+    deduped: list[RecallHit] = []
+    seen: set[str] = set()
+    for hit in results:
+        if hit.video_id and hit.video_id in seen:
+            continue
+        seen.add(hit.video_id)
+        deduped.append(hit)
+
+    return RecallSearchResponse(results=deduped[: req.limit])
 
 
 @router.get("/clips/{clip_id}")
@@ -99,7 +101,15 @@ async def get_clip(clip_id: str, request: Request) -> Response:
     """
 
     vss = request.app.state.vss
-    data = await vss.fetch_clip(clip_id)
+    try:
+        data = await vss.fetch_clip(clip_id)
+    except httpx.HTTPStatusError as exc:
+        # Upstream no longer has this clip (e.g. stale id after a volume wipe).
+        if exc.response.status_code == 404:
+            raise HTTPException(status_code=404, detail=f"clip not found: {clip_id}") from exc
+        raise HTTPException(status_code=502, detail="upstream clip fetch failed") from exc
+    except httpx.HTTPError as exc:
+        raise HTTPException(status_code=502, detail="upstream clip fetch failed") from exc
     total = len(data)
     headers = {"Accept-Ranges": "bytes", "Content-Type": "video/mp4"}
 

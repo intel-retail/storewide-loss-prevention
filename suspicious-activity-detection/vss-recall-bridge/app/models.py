@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 class RecallSearchRequest(BaseModel):
@@ -15,6 +15,18 @@ class RecallSearchRequest(BaseModel):
     video_pos_start: float | None = None  # optional in-video seconds filter
     video_pos_end: float | None = None
     limit: int = Field(default=20, ge=1, le=100)
+
+    @field_validator("cameras", mode="before")
+    @classmethod
+    def _split_cameras(cls, value: object) -> object:
+        """Accept a comma-separated string (payload form) or a list, trimming
+        whitespace and dropping empty entries in both cases."""
+
+        if isinstance(value, str):
+            return [c.strip() for c in value.split(",") if c.strip()]
+        if isinstance(value, list):
+            return [c.strip() if isinstance(c, str) else c for c in value if not isinstance(c, str) or c.strip()]
+        return value
 
 
 class RecallHit(BaseModel):

@@ -5,6 +5,13 @@
 # VSS pipeline-manager is repointed at `pgserver` (which already lives on the
 # `storewide-lp` network). Standalone `make run-search` does NOT load this file,
 # so it keeps its self-contained `postgres-service`.
+#
+# NOTE on VDMS: the combined stack intentionally runs TWO VDMS containers, and
+# they are NOT consolidated. SceneScape's `vdms` (TLS, `intellabs/vdms`) is used
+# by the controller for person re-identification (ReID), while the search stack's
+# `vdms-vector-db` (plaintext) stores CLIP embeddings for video search. They use
+# the same image (no duplicate pull) but have incompatible transports and
+# separate data, so both must run.
 
 services:
   # Disable the duplicate search Postgres in the combined stack by hiding it
@@ -26,18 +33,52 @@ services:
       DB_PASSWORD: ${DATABASE_PASSWORD:-}
       DB_NAME: video_summary_db
 
-  # In the combined stack SceneScape already publishes `lp-camera1` to the
-  # shared mediaserver (via its `lp-cams` service). The search stack's
-  # `camera-stream` is only needed for standalone `make run-search`, where it
-  # replaces SceneScape. Running both makes two ffmpeg publishers fight over the
-  # same RTSP path (`lp-camera1`), each evicting the other ("closing existing
-  # publisher") and crash-looping with a Broken pipe — which breaks the
-  # SceneScape video. The bridge ingests its clips from the source file
-  # directly (file ingest), so it does not consume this RTSP stream here.
-  # Redirect this publisher to an unused path so it stays "started" (satisfying
-  # the bridge's depends_on) without colliding with SceneScape's `lp-camera1`.
-  camera-stream:
-    command: >
-      -nostdin -re -stream_loop -1 -i /media/${STREAM_VIDEO_FILE:-lp-camera1.mp4}
-      -c:v copy -an
-      -f rtsp -rtsp_transport tcp rtsp://mediaserver:8554/vss-standalone-unused
+  # NOTE: The search stack no longer defines `mediaserver` or `camera-stream`.
+  # In the combined stack the recall bridge ingests live RTSP: SceneScape's
+  # `lp-cams` publishes `lp-camera1` to SceneScape's own `mediaserver` on the
+  # `storewide-lp` network, and the bridge reads `rtsp://mediaserver:8554/...`.
+  #
+  # We intentionally do NOT gate `vss-recall-bridge` on `mediaserver`/`lp-cams`
+  # here: the segmenter waits for the RTSP source to become resolvable and
+  # listening before launching ffmpeg, so the startup DNS race is handled at
+  # runtime. A compose-level dependency would also create a cycle
+  # (lp-cams -> swlp-suscpicious-ui -> vss-recall-bridge -> lp-cams).
+
+  # Gate the whole search stack behind SceneScape + scene-understanding so it
+  # does not come up before them in the combined stack. These three services are
+  # the dependency roots of the search stack (everything else — vdms-dataprep,
+  # video-search, pipeline-manager, vss-recall-bridge — depends on them), so
+  # holding them until `scene-understanding-service` is healthy transitively
+  # delays the entire stack. `scene-understanding-service` itself only reports
+  # healthy after SceneScape `web`, `seaweedfs`, `behavioral-analysis`, and
+  # `scene-import` are ready, so this effectively orders search after SceneScape.
+  # Only `make up` loads this override; standalone `make run-search` (which has
+  # no `scene-understanding-service`) is unaffected. `depends_on` maps merge with
+  # the base definitions.
+  minio-service:
+    depends_on:
+      scene-understanding-service:
+        condition: service_healthy
+
+  vdms-vector-db:
+    depends_on:
+      scene-understanding-service:
+        condition: service_healthy
+
+  multimodal-embedding-serving:
+    depends_on:
+      scene-understanding-service:
+        condition: service_healthy
+
+  # Bring the unified dashboard UI up LAST. The base compose already gates it on
+  # `scene-understanding-service: service_healthy`; here we additionally gate it on
+  # the recall bridge being healthy. The bridge only reports healthy after its own
+  # deps (pipeline-manager healthy -> video-search) are up, so this transitively
+  # holds the UI until the entire search backend is ready. Only `make up` loads
+  # this override, so standalone runs (no search stack) are unaffected.
+  # `depends_on` maps merge with the base (scene-understanding-service).
+  swlp-suscpicious-ui:
+    depends_on:
+      vss-recall-bridge:
+        condition: service_healthy
+

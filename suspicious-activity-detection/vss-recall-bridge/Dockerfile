@@ -8,7 +8,7 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY app ./app
-COPY configs ./configs
+
 
 ENV CLIPS_DIR=/clips
 VOLUME ["/clips"]

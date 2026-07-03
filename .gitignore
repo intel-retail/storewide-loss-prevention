@@ -34,3 +34,7 @@ suspicious-activity-detection/results/
 scenescape.zip
 person-of-interest/backend/**/__pycache__/
 **/__pycache__/
+
+# Vendored edge-ai-libraries checkout (not tracked here)
+edge-ai-libraries/
+performance-tools/

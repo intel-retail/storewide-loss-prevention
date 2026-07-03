@@ -219,9 +219,9 @@ down-lp:
 
 
 
-# ---- Search Stack (VSS search services + RTSP source + recall bridge + investigator UI) ----
-# Fully self-contained: includes its own mediamtx RTSP server + ffmpeg file
-# streamer, so it does NOT need Scenescape or the suspicious-activity stack.
+# ---- Search Stack (VSS search services + recall bridge + investigator UI) ----
+# Self-contained: the recall bridge ingests clips from a mounted source file
+# (file ingest), so it does NOT need Scenescape or the suspicious-activity stack.
 SEARCH_REGISTRY ?= intel/
 SEARCH_TAG ?= latest
 EMBEDDING_MODEL_NAME ?= CLIP/clip-vit-b-32
@@ -236,7 +236,7 @@ COMPOSE_FULL := $(COMPOSE_ALL) -f docker/docker-compose.search.yaml -f docker/do
 
 .PHONY: run-search
 run-search:
-	@echo "=== Starting search stack (VSS search + RTSP source + recall bridge + investigator UI) ==="
+	@echo "=== Starting search stack (VSS search + recall bridge + investigator UI) ==="
 	$(SEARCH_ENV) $(COMPOSE_SEARCH) --profile recall-ui up -d --build
 	@echo ""
 	@echo "Search services running:"
@@ -244,7 +244,6 @@ run-search:
 	@echo "  Recall bridge:    http://localhost:$${RECALL_BRIDGE_PORT:-8090}/health"
 	@echo "  Pipeline Manager: http://localhost:$${PM_HOST_PORT:-3001}"
 	@echo "  Video Search MS:  http://localhost:$${VS_HOST_PORT:-7890}"
-	@echo "  RTSP source:      rtsp://mediaserver:8554/lp-camera1 (internal)"
 	@echo ""
 	@echo "To stop: make down-search"
 

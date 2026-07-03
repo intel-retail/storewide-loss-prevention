@@ -39,12 +39,17 @@ async def _run_cli(file_path: str, camera_id: str) -> str:
     settings = get_settings()
     cameras = {
         c.camera_id: c
-        for c in load_cameras(settings.cameras_config, settings.default_segment_seconds)
+        for c in load_cameras(
+            settings.scene_config,
+            settings.rtsp_base_url,
+            settings.store_id,
+            settings.default_segment_seconds,
+        )
     }
     camera = cameras.get(camera_id)
     if camera is None:
         raise SystemExit(
-            f"camera '{camera_id}' not found in {settings.cameras_config}"
+            f"camera '{camera_id}' not found in {settings.scene_config}"
         )
 
     vss = VssClient(
@@ -63,7 +68,7 @@ def main() -> None:
     logging.basicConfig(level=logging.INFO)
     parser = argparse.ArgumentParser(description="Ingest one MP4 into VSS for a camera.")
     parser.add_argument("--file", required=True, help="path to the MP4 to ingest")
-    parser.add_argument("--camera", required=True, help="camera id from cameras.yaml")
+    parser.add_argument("--camera", required=True, help="camera name from scene-config.yaml")
     args = parser.parse_args()
 
     video_id = asyncio.run(_run_cli(args.file, args.camera))

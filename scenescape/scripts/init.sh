@@ -228,6 +228,19 @@ if [ -f "${ENV_EXAMPLE}" ]; then
     echo "  Loaded AI-model settings from ${ENV_EXAMPLE}"
 fi
 
+# ---- Source VLM-recall / video-search settings from configs/.env.example ----
+RECALL_KEYS_REGEX='^(BRIDGE_API_KEY|RECALL_RTSP_BASE_URL|RECALL_BRIDGE_PORT|RECALL_UI_PORT|RECALL_SEGMENT_SECONDS|SEARCH_TAG)='
+if [ -f "${ENV_EXAMPLE}" ]; then
+    RECALL_ENV_TMP="$(mktemp)"
+    grep -E "${RECALL_KEYS_REGEX}" "${ENV_EXAMPLE}" > "${RECALL_ENV_TMP}" || true
+    set -a
+    # shellcheck disable=SC1090
+    . "${RECALL_ENV_TMP}"
+    set +a
+    rm -f "${RECALL_ENV_TMP}"
+    echo "  Loaded VLM-recall settings from ${ENV_EXAMPLE}"
+fi
+
 # Source device resource config (all-gpu-cpu.env, all-gpu.env, or all-cpu.env)
 RESOURCE_CONFIG="${RESOURCE_CONFIG:-configs/res/all-gpu-cpu.env}"
 RESOURCE_CONFIG_PATH="${APP_DIR}/${RESOURCE_CONFIG}"
@@ -492,6 +505,14 @@ INFERENCE_INTERVAL=${INFERENCE_INTERVAL}
 
 # ---- WebRTC / MediaMTX ----
 HOST_IP=${HOST_IP}
+
+# ---- VLM Recall Bridge / Video Search (from configs/.env.example) ----
+BRIDGE_API_KEY=${BRIDGE_API_KEY:-change-me}
+RECALL_RTSP_BASE_URL=${RECALL_RTSP_BASE_URL:-rtsp://mediaserver:8554}
+RECALL_BRIDGE_PORT=${RECALL_BRIDGE_PORT:-8090}
+RECALL_UI_PORT=${RECALL_UI_PORT:-7861}
+RECALL_SEGMENT_SECONDS=${RECALL_SEGMENT_SECONDS:-60}
+SEARCH_TAG=${SEARCH_TAG:-latest}
 
 # ---- Host user identity (for Docker bind-mount file ownership) ----
 HOST_UID=$(id -u)

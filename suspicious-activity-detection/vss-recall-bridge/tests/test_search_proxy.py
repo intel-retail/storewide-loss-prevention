@@ -1,6 +1,5 @@
-from datetime import datetime, timezone
-
-from app.query.routes import build_tag_query, pad_window, to_hit
+from app.query.routes import build_tag_query, to_hit
+from app.models import RecallSearchRequest
 
 
 def test_build_tag_query_none_when_empty():
@@ -12,16 +11,25 @@ def test_build_tag_query_comma_joined():
     assert build_tag_query(["entrance", "cam-12"]) == "entrance,cam-12"
 
 
-def test_pad_window_widens_both_ends():
-    start = datetime(2026, 6, 25, 14, 0, tzinfo=timezone.utc)
-    end = datetime(2026, 6, 25, 15, 0, tzinfo=timezone.utc)
-    padded_start, padded_end = pad_window(start, end, 60)
-    assert padded_start == datetime(2026, 6, 25, 13, 59, tzinfo=timezone.utc)
-    assert padded_end == datetime(2026, 6, 25, 15, 1, tzinfo=timezone.utc)
+def test_build_tag_query_duplicates_single_tag():
+    # VSS/VDMS returns nothing for a lone equality constraint; a single camera
+    # must be duplicated so the filter carries >=2 tags.
+    assert build_tag_query(["cam-12"]) == "cam-12,cam-12"
 
 
-def test_pad_window_none_passthrough():
-    assert pad_window(None, None, 60) == (None, None)
+def test_cameras_accepts_comma_separated_string():
+    req = RecallSearchRequest(query="x", cameras="lp-camera1, cam-2 ,cam-3")
+    assert req.cameras == ["lp-camera1", "cam-2", "cam-3"]
+
+
+def test_cameras_still_accepts_list():
+    req = RecallSearchRequest(query="x", cameras=["lp-camera1", "cam-2"])
+    assert req.cameras == ["lp-camera1", "cam-2"]
+
+
+def test_cameras_list_trims_whitespace_and_drops_empty():
+    req = RecallSearchRequest(query="x", cameras=[" lp-camera1 ", "  ", "cam-2"])
+    assert req.cameras == ["lp-camera1", "cam-2"]
 
 
 def test_to_hit_maps_vss_metadata():
@@ -53,3 +61,27 @@ def test_in_video_position_filter_overlap():
     lo, hi = 60.0, 180.0
     kept = [h for h in hits if h["segment_start"] < hi and h["segment_end"] > lo]
     assert kept == [{"segment_start": 120.0, "segment_end": 128.0}]
+
+
+def test_dedup_keeps_best_segment_per_video():
+    # mirrors routes.search() dedup: after sort-by-score, keep first per video_id
+    results = sorted(
+        [
+            to_hit({"video_id": "a", "segment_start": 0, "segment_end": 8, "relevance_score": 0.87}),
+            to_hit({"video_id": "b", "segment_start": 8, "segment_end": 16, "relevance_score": 1.0}),
+            to_hit({"video_id": "a", "segment_start": 24, "segment_end": 32, "relevance_score": 0.86}),
+        ],
+        key=lambda h: h.score,
+        reverse=True,
+    )
+    deduped = []
+    seen = set()
+    for hit in results:
+        if hit.video_id and hit.video_id in seen:
+            continue
+        seen.add(hit.video_id)
+        deduped.append(hit)
+    assert [h.video_id for h in deduped] == ["b", "a"]
+    # kept the higher-scoring segment (0-8, 0.87) for video "a", not 0.86
+    assert next(h for h in deduped if h.video_id == "a").segment_start == 0
+
