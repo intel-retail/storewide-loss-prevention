@@ -39,6 +39,15 @@ async def lifespan(app: FastAPI):
         settings.dataprep_base_url,
     )
     app.state.camera_ids = {c.camera_id for c in cameras}
+    # Any tag present in scene-config is a valid search filter: camera ids,
+    # the store id, and the scene's zone names.
+    known_tags: set[str] = set()
+    for c in cameras:
+        known_tags.add(c.camera_id)
+        if c.store_id:
+            known_tags.add(c.store_id)
+        known_tags.update(c.extra_tags)
+    app.state.known_tags = known_tags
 
     tasks: list[asyncio.Task] = []
     for cam in cameras:

@@ -51,11 +51,11 @@ def to_hit(meta: dict) -> RecallHit:
 
 @router.post("/search", response_model=RecallSearchResponse)
 async def search(req: RecallSearchRequest, request: Request) -> RecallSearchResponse:
-    known: set[str] = request.app.state.camera_ids
+    known: set[str] = request.app.state.known_tags
     if req.cameras:
         unknown = [c for c in req.cameras if c not in known]
         if unknown:
-            raise HTTPException(status_code=400, detail=f"unknown cameras: {unknown}")
+            raise HTTPException(status_code=400, detail=f"unknown tags: {unknown}")
 
     tags = build_tag_query(req.cameras)
 
