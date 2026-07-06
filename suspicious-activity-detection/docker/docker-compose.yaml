@@ -172,7 +172,7 @@ services:
 
   # ---------- Alert Service ----------
   alert-service:
-    image: amr-fm-registry.caas.intel.com/esh-user/alert-agent-service:latest
+    image: intel/alert-agent-service:2026.2.0-rc1
     ports:
       - "${ALERT_SERVICE_PORT:-8000}:8000"
     networks:
