@@ -16,18 +16,10 @@ router = APIRouter()
 
 
 def build_tag_query(cameras: list[str] | None) -> str | None:
-    """Camera ids -> comma-separated tag string (subset/OR matched by VSS).
-
-    VSS/VDMS silently returns zero hits when the tag filter carries exactly
-    one equality constraint (a known langchain-vdms single-constraint quirk;
-    two or more tags match correctly with OR semantics). Duplicate a lone tag
-    so the filter always sends >=2 constraints and matches as expected.
-    """
+    """Camera ids -> comma-separated tag string (subset/OR matched by VSS)."""
 
     if not cameras:
         return None
-    if len(cameras) == 1:
-        return f"{cameras[0]},{cameras[0]}"
     return ",".join(cameras)
 
 

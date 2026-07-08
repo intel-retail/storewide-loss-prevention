@@ -11,10 +11,8 @@ def test_build_tag_query_comma_joined():
     assert build_tag_query(["entrance", "cam-12"]) == "entrance,cam-12"
 
 
-def test_build_tag_query_duplicates_single_tag():
-    # VSS/VDMS returns nothing for a lone equality constraint; a single camera
-    # must be duplicated so the filter carries >=2 tags.
-    assert build_tag_query(["cam-12"]) == "cam-12,cam-12"
+def test_build_tag_query_single_tag():
+    assert build_tag_query(["cam-12"]) == "cam-12"
 
 
 def test_cameras_accepts_comma_separated_string():
