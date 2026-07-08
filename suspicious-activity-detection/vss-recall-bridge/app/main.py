@@ -6,14 +6,13 @@ import asyncio
 import logging
 from contextlib import asynccontextmanager
 
-from fastapi import Depends, FastAPI
+from fastapi import FastAPI
 
 from .clients.vss_client import VssClient
 from .config import get_settings, load_cameras
 from .ingest.file_ingest import ingest_file
 from .ingest.segmenter import run_segmenter
 from .query.routes import router as query_router
-from .security import require_api_key
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -22,9 +21,6 @@ logger = logging.getLogger(__name__)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     settings = get_settings()
-    if not settings.bridge_api_key:
-        logger.warning("BRIDGE_API_KEY is empty; all /api/v1/lp/recall/* requests will be rejected")
-
     cameras = load_cameras(
         settings.scene_config,
         settings.rtsp_base_url,
@@ -74,7 +70,6 @@ app = FastAPI(title="vss-recall-bridge", version="0.1.0", lifespan=lifespan)
 app.include_router(
     query_router,
     prefix="/api/v1/lp/recall",
-    dependencies=[Depends(require_api_key)],
 )
 
 

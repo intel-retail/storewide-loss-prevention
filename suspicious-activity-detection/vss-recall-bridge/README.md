@@ -19,7 +19,6 @@ app/
   main.py              # FastAPI app + background ingest workers (lifespan)
   config.py            # env settings + cameras.yaml loader
   models.py            # request/response DTOs
-  security.py          # X-API-Key dependency
   ingest/              # remux, tagger, pipeline, segmenter, file_ingest
   query/routes.py      # POST /recall/search, GET /recall/clips/{id}
   clients/vss_client.py
@@ -33,8 +32,8 @@ tests/
 python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 # Bridge settings come from the top-level stack env; for a standalone run set at
-# least BRIDGE_API_KEY and VSS_BASE_URL (see ../configs/.env.example):
-BRIDGE_API_KEY=change-me VSS_BASE_URL=http://localhost:3000 \
+# least VSS_BASE_URL (see ../configs/.env.example):
+VSS_BASE_URL=http://localhost:3000 \
   uvicorn app.main:app --host 0.0.0.0 --port 8080
 curl localhost:8080/health      # {"status":"ok"}
 ```
@@ -53,7 +52,6 @@ python -m app.ingest.file_ingest \
 
 ```bash
 curl -X POST http://localhost:8080/api/v1/lp/recall/search \
-  -H "X-API-Key: $BRIDGE_API_KEY" \
   -H 'Content-Type: application/json' \
   -d '{"query":"person in a blue shirt","cameras":["cam1"],"limit":20}'
 ```
@@ -82,5 +80,5 @@ pytest -q
 docker build -t intel/swlp-vss-recall-bridge .
 ```
 
-Attach the container to the VSS `vs_network` (external) and set `VSS_BASE_URL` +
-`BRIDGE_API_KEY`. See build-spec §10 / design doc §12.1.
+Attach the container to the VSS `vs_network` (external) and set `VSS_BASE_URL`.
+See build-spec §10 / design doc §12.1.

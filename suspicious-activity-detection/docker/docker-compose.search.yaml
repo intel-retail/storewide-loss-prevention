@@ -336,12 +336,12 @@ services:
     environment:
       VSS_BASE_URL: ${VSS_BASE_URL:-http://pipeline-manager:3000}
       DATAPREP_BASE_URL: ${DATAPREP_BASE_URL:-http://vdms-dataprep:8000}
-      BRIDGE_API_KEY: ${BRIDGE_API_KEY:-change-me}
       SCENE_CONFIG: configs/scene-config.yaml
       RTSP_BASE_URL: ${RECALL_RTSP_BASE_URL:-rtsp://mediaserver:8554}
       STORE_ID: ${STORE_ID:-}
       CLIPS_DIR: /clips
       DEFAULT_SEGMENT_SECONDS: ${RECALL_SEGMENT_SECONDS:-60}
+      MAX_UPLOAD_CLIPS: ${RECALL_MAX_UPLOAD_CLIPS:-0}
       SEARCH_TIMEZONE: ${TZ:-UTC}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
       http_proxy: ${http_proxy:-}
@@ -376,7 +376,6 @@ services:
         condition: service_started
     environment:
       RECALL_BASE_URL: http://vss-recall-bridge:8080
-      RECALL_API_KEY: ${BRIDGE_API_KEY:-change-me}
       TZ: ${TZ:-UTC}
       no_proxy: ${no_proxy:-localhost,127.0.0.1},vss-recall-bridge
       NO_PROXY: ${no_proxy:-localhost,127.0.0.1},vss-recall-bridge

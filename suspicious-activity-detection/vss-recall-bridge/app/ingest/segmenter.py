@@ -30,8 +30,6 @@ _SEGMENT_SETTLE_SECONDS = 2.0
 # hostname (the mediaserver startup race).
 _SOURCE_WAIT_BACKOFF_SECONDS = 1.0
 _SOURCE_WAIT_MAX_BACKOFF_SECONDS = 10.0
-# TESTING ONLY: stop uploading after this many clips per camera (0 = unlimited).
-_MAX_UPLOADS_FOR_TESTING = 5
 
 
 async def _is_complete_mp4(path: Path) -> bool:
@@ -69,17 +67,18 @@ async def _watch_segments(
     processed: set[str] = set()
     prefix = f"{camera.camera_id}_"
     uploaded = 0
+    max_uploads = settings.max_upload_clips
 
     while True:
         files = sorted(clips_dir.glob(f"{prefix}*.mp4"))
         for path in files[:-1]:  # exclude the in-progress newest segment
             if path.name in processed:
                 continue
-            # TESTING ONLY: stop after the configured number of uploads.
-            if _MAX_UPLOADS_FOR_TESTING and uploaded >= _MAX_UPLOADS_FOR_TESTING:
+            # Optional cap on uploads per camera (RECALL_MAX_UPLOAD_CLIPS; 0 = unlimited).
+            if max_uploads and uploaded >= max_uploads:
                 logger.info(
-                    "reached %s-clip test cap for %s; not uploading further segments",
-                    _MAX_UPLOADS_FOR_TESTING,
+                    "reached %s-clip upload cap for %s; not uploading further segments",
+                    max_uploads,
                     camera.camera_id,
                 )
                 return

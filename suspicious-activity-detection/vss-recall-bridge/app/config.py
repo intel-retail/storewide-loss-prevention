@@ -28,12 +28,14 @@ class Settings(BaseSettings):
     rtsp_base_url: str = "rtsp://mediaserver:8554"
     store_id: str = ""
     clips_dir: str = "./clips"
-    bridge_api_key: str = ""
     search_poll_seconds: float = 1.0
     search_poll_timeout_seconds: float = 30.0
     default_segment_seconds: int = 60
     search_timezone: str = "UTC"
     http_timeout_seconds: float = 30.0
+    # Stop uploading after this many clips per camera (0 = unlimited). Handy for
+    # capping ingest while testing; leave 0 in production.
+    max_upload_clips: int = 0
 
 
 @lru_cache

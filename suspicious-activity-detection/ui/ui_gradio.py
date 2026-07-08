@@ -24,10 +24,8 @@ SESSIONS_API = f"{LP_BASE_URL}/api/v1/lp/sessions?include_pending=true"
 ALERTS_API = f"{LP_BASE_URL}/api/v1/lp/alerts"
 ZONE_CONFIG = os.environ.get("ZONE_CONFIG", "/app/zone_config.json")
 
-# VLM-Recall bridge (investigator search). The API key is held server-side and
-# injected by the proxy endpoints below so the browser never sees it.
+# VLM-Recall bridge (investigator search).
 RECALL_BASE_URL = os.environ.get("RECALL_BASE_URL", "http://vss-recall-bridge:8080")
-RECALL_API_KEY = os.environ.get("RECALL_API_KEY", os.environ.get("BRIDGE_API_KEY", ""))
 RECALL_SEARCH_API = f"{RECALL_BASE_URL}/api/v1/lp/recall/search"
 RECALL_CLIPS_API = f"{RECALL_BASE_URL}/api/v1/lp/recall/clips"
 
@@ -774,12 +772,11 @@ def recall_health():
 
 @app.post("/api/recall/search")
 def recall_search(payload: dict):
-    """Proxy investigator queries to the bridge, injecting the API key server-side."""
+    """Proxy investigator queries to the bridge."""
     try:
         r = requests.post(
             RECALL_SEARCH_API,
             json=payload,
-            headers={"X-API-Key": RECALL_API_KEY},
             timeout=120,
         )
     except Exception as exc:
@@ -789,12 +786,12 @@ def recall_search(payload: dict):
 
 @app.get("/api/recall/clips/{video_id}")
 def recall_clip(video_id: str, request: Request):
-    """Stream a proxied clip from the bridge (key injected server-side).
+    """Stream a proxied clip from the bridge.
 
     Forwards the browser's Range header and propagates the upstream 206 +
     Content-Range/Accept-Ranges/Content-Length so the player can seek.
     """
-    fwd_headers = {"X-API-Key": RECALL_API_KEY}
+    fwd_headers = {}
     range_header = request.headers.get("range")
     if range_header:
         fwd_headers["Range"] = range_header
