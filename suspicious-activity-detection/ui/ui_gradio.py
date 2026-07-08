@@ -635,7 +635,6 @@ header .brand{display:flex;align-items:center;gap:.8rem;}
 header .brand span{font-size:16px;font-weight:600;color:#fff;letter-spacing:.3px;}
 header a.back{font-size:13px;font-weight:600;color:#fff;text-decoration:none;
  background:#ffffff22;padding:5px 12px;border-radius:4px;border:1px solid #ffffff44;}
-header #status{font-size:12px;color:#ffffffcc;}
 main{padding:64px 1rem 24px;display:grid;grid-template-columns:340px 1fr;gap:1rem;
  max-width:1600px;margin:0 auto;}
 .card{background:#fff;border-radius:8px;padding:1rem 1.1rem;
@@ -679,7 +678,6 @@ footer{text-align:center;color:#999;font-size:12px;padding:8px;}
   <span>&#128270; Recall</span>
  </div>
  <div style="display:flex;align-items:center;gap:1rem;">
-  <span id="status">checking&hellip;</span>
   <a class="back" href="/">&#8592; Dashboard</a>
  </div>
 </header>
@@ -711,10 +709,6 @@ footer{text-align:center;color:#999;font-size:12px;padding:8px;}
 var $=function(id){return document.getElementById(id);};
 function showBanner(m){var b=$('banner');b.textContent=m;b.classList.add('show');}
 function clearBanner(){$('banner').classList.remove('show');}
-function checkHealth(){fetch('/api/recall/health').then(function(r){return r.json();}).then(function(d){
- var s=$('status');if(d.status==='ok'){s.textContent='\\u25CF bridge online';s.style.color='#9affc0';}
- else{s.textContent='\\u25CF bridge error';s.style.color='#ffd27f';}}).catch(function(){
- $('status').textContent='\\u25CF bridge unreachable';$('status').style.color='#ffb3b3';});}
 function toIso(v){if(!v)return null;var d=new Date(v);return isNaN(d)?null:d.toISOString();}
 function parseCameras(v){var l=(v||'').split(',').map(function(s){return s.trim();}).filter(Boolean);return l.length?l:null;}
 function buildBody(){var q=$('query').value.trim();if(!q)throw new Error('Query is required.');
@@ -757,7 +751,6 @@ function loadClip(videoId,card,ph,seekTo,autoplay){ph.textContent='Loading clip\
  card.replaceChild(video,ph);if(autoplay)video.play().catch(function(){});}
 $('searchBtn').addEventListener('click',doSearch);
 $('query').addEventListener('keydown',function(e){if(e.key==='Enter'&&(e.ctrlKey||e.metaKey))doSearch();});
-checkHealth();
 </script>
 </body>
 </html>

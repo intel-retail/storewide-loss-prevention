@@ -80,7 +80,7 @@ defaults, either pass them on the `make` command line or export them before runn
 
 ```bash
 export SEARCH_REGISTRY=intel/                       # search image registry
-export SEARCH_TAG=latest                            # search image tag
+export TAG=latest                                   # image tag (shared with LP images)
 export EMBEDDING_MODEL_NAME=CLIP/clip-vit-b-32       # multimodal embedding model
 make up
 ```
@@ -88,13 +88,13 @@ make up
 | Variable | Default | Purpose |
 |----------|---------|---------|
 | `SEARCH_REGISTRY` | `intel/` | Registry for the VSS search images. |
-| `SEARCH_TAG` | `latest` | Tag for the VSS search images. |
+| `TAG` | `latest` | Image tag, shared by the LP and VSS search images. |
 | `EMBEDDING_MODEL_NAME` | `CLIP/clip-vit-b-32` | Multimodal model used for text+frame embeddings. |
 | `ENABLE_SEARCH` | `true` | Set `false` to skip the recall stack entirely. |
 
 Postgres/MinIO credentials are optional (they default in the compose files and the
 shared `pgserver` is used), so they don't need exporting. Equivalent one-liner:
-`make up EMBEDDING_MODEL_NAME=<model> SEARCH_TAG=<tag>`.
+`make up EMBEDDING_MODEL_NAME=<model> TAG=<tag>`.
 
 ## Configure Cameras
 

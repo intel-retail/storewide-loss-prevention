@@ -7,7 +7,7 @@
 # No Scenescape source checkout required.
 # Scenescape-specific targets are in scenescape/Makefile.
 
-TAG ?= 2026.1.0
+TAG ?= latest
 REGISTRY ?= true
 
 SCENESCAPE_DIR := ../scenescape
@@ -98,15 +98,20 @@ up: validate-device
 		DOCKER_REGISTRY=$(REGISTRY_URL) $(COMPOSE_ALL) pull; \
 	else \
 		echo "Building LP images..."; \
-		BUILD_SERVICES="behavioral-analysis"; \
+		BUILD_SERVICES="scene-understanding-service behavioral-analysis"; \
 		if [ "$(ENABLE_UI_LOWER)" = "true" ]; then \
 			BUILD_SERVICES="$$BUILD_SERVICES swlp-suscpicious-ui"; \
 		fi; \
 		$(COMPOSE_ALL) build $$BUILD_SERVICES; \
 	fi
 	@if [ "$(ENABLE_SEARCH_LOWER)" = "true" ]; then \
-		echo "Building recall bridge image..."; \
-		$(SEARCH_ENV) $(COMPOSE_FULL) build vss-recall-bridge; \
+		if [ "$(REGISTRY)" = "true" ]; then \
+			echo "Pulling recall bridge image from $(REGISTRY_URL)..."; \
+			DOCKER_REGISTRY=$(REGISTRY_URL) $(SEARCH_ENV) $(COMPOSE_FULL) pull vss-recall-bridge; \
+		else \
+			echo "Building recall bridge image..."; \
+			$(SEARCH_ENV) $(COMPOSE_FULL) build vss-recall-bridge; \
+		fi; \
 	fi
 	@echo ""
 	@echo "=== Starting all services (single docker compose) ==="
@@ -146,10 +151,10 @@ up: validate-device
 	@echo "  Login:           admin / $$(grep SUPASS docker/.env | cut -d= -f2-)"
 	@if [ "$(ENABLE_UI_LOWER)" = "true" ]; then \
 		echo "  SAD-DASHBOARD UI:       http://localhost:7860"; \
-		echo "  Investigator UI: http://localhost:7860/recall"; \
+		echo "  Recall UI: http://localhost:7860/recall"; \
 	else \
 		echo "  SAD-DASHBOARD UI:       DISABLED (ENABLE_UI=false)"; \
-		echo "  Investigator UI: DISABLED (ENABLE_UI=false)"; \
+		echo "  Recall UI: DISABLED (ENABLE_UI=false)"; \
 	fi
 	@echo ""
 	@echo "To stop: make down"
@@ -223,9 +228,9 @@ down-lp:
 # Self-contained: the recall bridge ingests clips from a mounted source file
 # (file ingest), so it does NOT need Scenescape or the suspicious-activity stack.
 SEARCH_REGISTRY ?= intel/
-SEARCH_TAG ?= latest
 EMBEDDING_MODEL_NAME ?= CLIP/clip-vit-b-32
-SEARCH_ENV := REGISTRY=$(SEARCH_REGISTRY) SEARCH_TAG=$(SEARCH_TAG) EMBEDDING_MODEL_NAME=$(EMBEDDING_MODEL_NAME)
+# Search-stack images share the same TAG as the main LP images (exported above).
+SEARCH_ENV := REGISTRY=$(SEARCH_REGISTRY) TAG=$(TAG) EMBEDDING_MODEL_NAME=$(EMBEDDING_MODEL_NAME)
 COMPOSE_SEARCH := docker compose --project-directory . -f docker/docker-compose.search.yaml
 
 # Single combined invocation: scenescape + LP (+ cameras override + ui profile) + search.
@@ -240,7 +245,7 @@ run-search:
 	$(SEARCH_ENV) $(COMPOSE_SEARCH) --profile recall-ui up -d --build
 	@echo ""
 	@echo "Search services running:"
-	@echo "  Investigator UI:  http://localhost:$${RECALL_UI_PORT:-7861}/recall"
+	@echo "  Recall UI:  http://localhost:$${RECALL_UI_PORT:-7861}/recall"
 	@echo "  Recall bridge:    http://localhost:$${RECALL_BRIDGE_PORT:-8090}/health"
 	@echo "  Pipeline Manager: http://localhost:$${PM_HOST_PORT:-3001}"
 	@echo "  Video Search MS:  http://localhost:$${VS_HOST_PORT:-7890}"
