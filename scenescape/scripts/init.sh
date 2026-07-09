@@ -184,31 +184,35 @@ fi
 # ---- Step 3: Generate DLStreamer config.json (per camera) ----
 echo -e "${YELLOW}[3/4] Generating DLStreamer pipeline configs...${NC}"
 
-DLSTREAMER_TEMPLATE="${APP_DIR}/configs/pipeline-config.json"
+# SceneScape-specific configs may live under configs/scenescape/ (preferred) or
+# directly under configs/ (legacy layout). Resolve each with that precedence.
+if [ -f "${APP_DIR}/configs/scenescape/pipeline-config.json" ]; then
+    DLSTREAMER_TEMPLATE="${APP_DIR}/configs/scenescape/pipeline-config.json"
+else
+    DLSTREAMER_TEMPLATE="${APP_DIR}/configs/pipeline-config.json"
+fi
 if [ ! -f "${DLSTREAMER_TEMPLATE}" ]; then
     echo -e "${RED}ERROR: DLStreamer template not found at ${DLSTREAMER_TEMPLATE}${NC}"
     exit 1
 fi
 
-# Validate app-specific controller configs exist
-if [ ! -f "${APP_DIR}/configs/tracker-config.json" ]; then
-    echo -e "${YELLOW}WARNING: tracker-config.json not found in ${APP_DIR}/configs/${NC}"
-    echo "  Scenescape will use default from scenescape/controller/tracker-config.json"
-fi
-if [ ! -f "${APP_DIR}/configs/reid-config.json" ]; then
-    echo -e "${YELLOW}WARNING: reid-config.json not found in ${APP_DIR}/configs/${NC}"
-    echo "  Scenescape will use default from scenescape/controller/reid-config.json"
-fi
-
 # Resolve controller config paths (app-specific or Scenescape default)
-if [ -f "${APP_DIR}/configs/tracker-config.json" ]; then
+if [ -f "${APP_DIR}/configs/scenescape/tracker-config.json" ]; then
+    TRACKER_CONFIG="${APP_DIR}/configs/scenescape/tracker-config.json"
+elif [ -f "${APP_DIR}/configs/tracker-config.json" ]; then
     TRACKER_CONFIG="${APP_DIR}/configs/tracker-config.json"
 else
+    echo -e "${YELLOW}WARNING: tracker-config.json not found in ${APP_DIR}/configs/scenescape/${NC}"
+    echo "  Scenescape will use default from scenescape/controller/tracker-config.json"
     TRACKER_CONFIG="${SCENESCAPE_DIR}/controller/tracker-config.json"
 fi
-if [ -f "${APP_DIR}/configs/reid-config.json" ]; then
+if [ -f "${APP_DIR}/configs/scenescape/reid-config.json" ]; then
+    REID_CONFIG="${APP_DIR}/configs/scenescape/reid-config.json"
+elif [ -f "${APP_DIR}/configs/reid-config.json" ]; then
     REID_CONFIG="${APP_DIR}/configs/reid-config.json"
 else
+    echo -e "${YELLOW}WARNING: reid-config.json not found in ${APP_DIR}/configs/scenescape/${NC}"
+    echo "  Scenescape will use default from scenescape/controller/reid-config.json"
     REID_CONFIG="${SCENESCAPE_DIR}/controller/reid-config.json"
 fi
 

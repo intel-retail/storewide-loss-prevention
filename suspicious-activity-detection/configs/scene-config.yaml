@@ -15,13 +15,24 @@ scenescape_api:
 
 # Scenes the service monitors. Each scene lists its cameras and a
 # zone-name -> zone-type mapping (HIGH_VALUE, CHECKOUT, EXIT, RESTRICTED).
+#
+# The extra deploy-only keys (scene_zip, sample_video_fps, sample_video_urls) are
+# consumed by the SceneScape provisioning scripts via scripts/gen-zone-config.py,
+# which translates this file into the legacy configs/zone_config.json (a generated,
+# gitignored artifact). The scene-understanding-service ignores these extra keys.
+# `cameras` must stay a plain list of names; sample-video URLs are keyed by name
+# and the local filename is derived as "<camera-name>.mp4".
 scenes:
   - scene_name: storewide loss prevention
+    scene_zip: storewide-loss-prevention.zip
+    sample_video_fps: 30
     cameras:
       - lp-camera1
     zones:
       aisle1: HIGH_VALUE
       aisle2: CHECKOUT
+    sample_video_urls:
+      lp-camera1: https://www.pexels.com/download/video/37668440/
 
 # MQTT broker connection and SceneScape topic patterns.
 mqtt:

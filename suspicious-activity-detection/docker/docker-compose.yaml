@@ -267,3 +267,17 @@ networks:
 volumes:
   seaweedfs-data:
   ovms-cache:
+
+# Override the SceneScape controller config sources to use this app's
+# configs/scenescape/ files directly, instead of the vendored defaults / env-var
+# indirection from init.sh. Paths resolve from the project directory (this app
+# dir), since `make up` runs with `--project-directory .`.
+#
+# Note: pipeline-config.json is intentionally NOT overridden here. It is a
+# template that init.sh renders per-camera; the `lp-config` source must keep
+# pointing at that rendered output (PIPELINE_CONFIG), not the raw template.
+configs:
+  tracker-config:
+    file: ./configs/scenescape/tracker-config.json
+  reid-config:
+    file: ./configs/scenescape/reid-config.json

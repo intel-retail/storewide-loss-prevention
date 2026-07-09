@@ -191,7 +191,7 @@ while sharing common infrastructure (MQTT, frame storage, configuration).
 | Zone name → type mapping | `configs/zone_config.json` |
 | Alert routing and time-window deduplication | `configs/alert-config.yaml` |
 | MQTT, storage, services | `configs/.env.example` / `docker/.env` |
-| DL Streamer pipeline template | `configs/pipeline-config.json` |
+| DL Streamer pipeline template | `configs/scenescape/pipeline-config.json` |
 
 Most behavior changes are YAML edits — adding a new rule, severity, deduplication
 scope, or alert type does not require Python changes.

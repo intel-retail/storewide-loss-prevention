@@ -22,10 +22,7 @@
 services:
   # ------------------------------- Storage -------------------------------
   postgres-service:
-    # Aligned with SceneScape's pgserver so only ONE postgres image is used.
-    # Under `make up`, this service is disabled (standalone-db profile) and
-    # pipeline-manager reuses the shared pgserver instead — one container, two DBs.
-    image: postgres:17.6
+    image: postgres:17.4
     ports:
       - "${POSTGRES_HOST_PORT:-5432}:5432"
     environment:
@@ -117,7 +114,7 @@ services:
       - ${RENDER_GROUP_ID:-1002}
     restart: unless-stopped
     healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost:8000/health || exit 1"]
+      test: ["CMD-SHELL", "python3 -c 'import urllib.request,sys; sys.exit(0 if urllib.request.urlopen(\"http://localhost:8000/health\").status==200 else 1)' || exit 1"]
       interval: 10s
       timeout: 10s
       retries: 40
@@ -185,7 +182,7 @@ services:
       minio-service:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost:8000/v1/dataprep/health || exit 1"]
+      test: ["CMD-SHELL", "python3 -c 'import urllib.request,sys; sys.exit(0 if urllib.request.urlopen(\"http://localhost:8000/v1/dataprep/health\").status==200 else 1)' || exit 1"]
       interval: 10s
       timeout: 10s
       retries: 40
@@ -308,11 +305,40 @@ services:
     networks:
       - vs_network
 
-  # ---------- VLM-Recall Bridge (file ingest + thin search proxy) ----------
-  # Cameras are derived from SceneScape's scene-config.yaml (scenes[].cameras);
-  # each camera's RTSP source is RTSP_BASE_URL/<name> and its tags are the scene's
-  # zone names + types. In the combined `make up` stack, SceneScape provides its
-  # own `mediaserver` for `lp-cams`.
+  # ---------- VLM-Recall Bridge (RTSP/file ingest + thin search proxy) ----------
+  # ---------- RTSP source (self-contained; replaces the Scenescape stack) ----------
+  # mediamtx RTSP server + an ffmpeg loop that streams a sample video file.
+  # The bridge ingests rtsp://mediaserver:8554/${STREAM_NAME} over vs_network,
+  # so no host port or external Scenescape stack is required.
+  mediaserver:
+    image: bluenviron/mediamtx:1.14.0
+    networks:
+      vs_network:
+        aliases:
+          - mediaserver
+    restart: unless-stopped
+
+  camera-stream:
+    image: linuxserver/ffmpeg:version-8.0-cli
+    # Standalone-only RTSP publisher. In the combined stack (`make up`) SceneScape's
+    # `lp-cams` already publishes `lp-camera1` to `mediaserver`, so running this too
+    # would create two publishers fighting over the same RTSP path (each evicts the
+    # other, causing constant reconnects). The `standalone-rtsp` profile keeps it
+    # OFF in `make up` and ON only for standalone `make run-search`.
+    profiles:
+      - standalone-rtsp
+    command: >
+      -nostdin -re -stream_loop -1 -i /media/${STREAM_VIDEO_FILE:-lp-camera1.mp4}
+      -c:v copy -an
+      -f rtsp -rtsp_transport tcp rtsp://mediaserver:8554/${STREAM_NAME:-lp-camera1}
+    volumes:
+      - ${STREAM_VIDEO_DIR:-../scenescape/sample_data}:/media:ro
+    networks:
+      - vs_network
+    depends_on:
+      - mediaserver
+    restart: unless-stopped
+
   vss-recall-bridge:
     build:
       context: vss-recall-bridge
@@ -336,12 +362,10 @@ services:
     environment:
       VSS_BASE_URL: ${VSS_BASE_URL:-http://pipeline-manager:3000}
       DATAPREP_BASE_URL: ${DATAPREP_BASE_URL:-http://vdms-dataprep:8000}
+      BRIDGE_API_KEY: ${BRIDGE_API_KEY:-change-me}
       SCENE_CONFIG: configs/scene-config.yaml
-      RTSP_BASE_URL: ${RECALL_RTSP_BASE_URL:-rtsp://mediaserver:8554}
-      STORE_ID: ${STORE_ID:-}
       CLIPS_DIR: /clips
-      DEFAULT_SEGMENT_SECONDS: ${RECALL_SEGMENT_SECONDS:-60}
-      MAX_UPLOAD_CLIPS: ${RECALL_MAX_UPLOAD_CLIPS:-0}
+      WINDOW_PAD_SECONDS: ${RECALL_WINDOW_PAD_SECONDS:-60}
       SEARCH_TIMEZONE: ${TZ:-UTC}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
       http_proxy: ${http_proxy:-}
@@ -376,6 +400,7 @@ services:
         condition: service_started
     environment:
       RECALL_BASE_URL: http://vss-recall-bridge:8080
+      RECALL_API_KEY: ${BRIDGE_API_KEY:-change-me}
       TZ: ${TZ:-UTC}
       no_proxy: ${no_proxy:-localhost,127.0.0.1},vss-recall-bridge
       NO_PROXY: ${no_proxy:-localhost,127.0.0.1},vss-recall-bridge

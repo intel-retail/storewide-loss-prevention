@@ -114,7 +114,7 @@ make up DEVICE=all-cpu.env
 
 Device profiles are defined in `configs/res/` and control the GStreamer decode
 chain, inference device, pre-process backend, and throughput options. A single
-unified pipeline template (`configs/pipeline-config.json`) is rendered at
+unified pipeline template (`configs/scenescape/pipeline-config.json`) is rendered at
 init time using the selected profile.
 
 ### Disable the Gradio UI

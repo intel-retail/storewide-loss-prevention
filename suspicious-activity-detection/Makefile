@@ -81,15 +81,21 @@ download-sample-data:
 
 # ---- Initialization ----
 
+# Generate the legacy configs/zone_config.json that the vendored SceneScape
+# scripts consume, from configs/scene-config.yaml (the single source of truth).
+.PHONY: gen-zone-config
+gen-zone-config:
+	@python3 scripts/gen-zone-config.py
+
 .PHONY: init
-init:
+init: gen-zone-config
 	@$(MAKE) -C $(SCENESCAPE_DIR) APP_DIR=$(CURDIR) RESOURCE_CONFIG=$(RESOURCE_CONFIG) init
 
 # ---- Full Stack (Scenescape + LP) ----
 
 .PHONY: up
 
-up: validate-device
+up: validate-device gen-zone-config
 	@$(MAKE) -C $(SCENESCAPE_DIR) APP_DIR=$(CURDIR) RESOURCE_CONFIG=$(RESOURCE_CONFIG) init init-sample-data download-models init-volumes
 	@$(MAKE) patch-device
 	@mkdir -p $(RESULTS_PATH) $(RESULTS_PATH)/ba $(RESULTS_PATH)/swlp
@@ -242,7 +248,7 @@ COMPOSE_FULL := $(COMPOSE_ALL) -f docker/docker-compose.search.yaml -f docker/do
 .PHONY: run-search
 run-search:
 	@echo "=== Starting search stack (VSS search + recall bridge + investigator UI) ==="
-	$(SEARCH_ENV) $(COMPOSE_SEARCH) --profile recall-ui up -d --build
+	$(SEARCH_ENV) $(COMPOSE_SEARCH) --profile recall-ui --profile standalone-rtsp up -d --build
 	@echo ""
 	@echo "Search services running:"
 	@echo "  Recall UI:  http://localhost:$${RECALL_UI_PORT:-7861}/recall"

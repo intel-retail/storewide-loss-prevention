@@ -5,5 +5,5 @@
 
 [submodule "edge-ai-libraries"]
 	path = edge-ai-libraries
-	url = https://github.com/sachinkaushik/edge-ai-libraries.git
-	branch = ITEP-92367
+	url = https://github.com/open-edge-platform/edge-ai-libraries.git
+	branch = main
