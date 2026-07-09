@@ -14,11 +14,15 @@ scenescape/sample_data/store-wide-loss-prevention.*
 # Python
 __pycache__/
 
-# Download models — ignore everything except the scripts
+# Download models — ignore everything except the scripts and vendored export tools
 download_models/*
 !download_models/model_download.sh
 !download_models/download_models.sh
 !download_models/download_sample_video.sh
+# Vendored OVMS export tools — committed so a clean checkout never needs to
+# fetch them from GitHub raw (which rate-limits, causing curl exit 22).
+!download_models/export_model.py
+!download_models/export_requirements.txt
 
 # Downloaded models
 models/
