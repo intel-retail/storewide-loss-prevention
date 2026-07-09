@@ -74,7 +74,7 @@ download-models:
 	bash download_models/model_download.sh
 
 .PHONY: download-sample-data
-download-sample-data:
+download-sample-data: gen-zone-config
 	@echo "Downloading sample video..."
 	bash download_models/download_sample_video.sh
 

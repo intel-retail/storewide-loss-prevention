@@ -158,25 +158,20 @@ ensure_python_env() {
 
     if [ ! -f "${SCRIPT_DIR}/export_model.py" ] || [ ! -f "${SCRIPT_DIR}/export_requirements.txt" ]; then
         echo "  Downloading OVMS export tools..."
-        EXPORT_BASE_URL="https://raw.githubusercontent.com/openvinotoolkit/model_server/refs/heads/releases/2026/0/demos/common/export_models"
-        # raw.githubusercontent.com rate-limits by IP and returns HTTP 429.
-        # `curl --retry` treats 429/5xx as transient and retries with backoff.
-        # Download to temp files first so a failed/partial fetch never leaves a
-        # broken file that the `[ ! -f ]` guard above would treat as "present".
-        local _tmp_export _tmp_req
-        _tmp_export="$(mktemp)"
-        _tmp_req="$(mktemp)"
-        if curl -fsSL --retry 5 --retry-delay 5 "${EXPORT_BASE_URL}/export_model.py" -o "${_tmp_export}" \
-           && curl -fsSL --retry 5 --retry-delay 5 "${EXPORT_BASE_URL}/requirements.txt" -o "${_tmp_req}"; then
-            mv "${_tmp_export}" "${SCRIPT_DIR}/export_model.py"
-            mv "${_tmp_req}" "${SCRIPT_DIR}/export_requirements.txt"
-            echo "  ✓ Export tools downloaded"
-        else
-            rm -f "${_tmp_export}" "${_tmp_req}"
-            echo "  ✗ Failed to download OVMS export tools (GitHub rate-limit/HTTP 429 or network error)."
-            echo "    Wait a minute and re-run 'make download-models', or pre-place export_model.py / export_requirements.txt in ${SCRIPT_DIR}."
-            return 1
-        fi
+        # Primary: GitHub raw. Fallback: jsDelivr CDN mirror (raw.githubusercontent.com
+        # frequently rate-limits, returning 429/503 which surfaces as curl exit 22).
+        local gh_base="https://raw.githubusercontent.com/openvinotoolkit/model_server/refs/heads/releases/2026/0/demos/common/export_models"
+        local cdn_base="https://cdn.jsdelivr.net/gh/openvinotoolkit/model_server@releases/2026/0/demos/common/export_models"
+        _fetch_export_tool() {
+            # $1 = remote filename, $2 = local destination path
+            if ! curl -fsSL --retry 3 --retry-delay 2 "${gh_base}/$1" -o "$2"; then
+                echo "  ! GitHub raw unavailable for $1, retrying via jsDelivr mirror..."
+                curl -fsSL --retry 3 --retry-delay 2 "${cdn_base}/$1" -o "$2"
+            fi
+        }
+        _fetch_export_tool "export_model.py" "${SCRIPT_DIR}/export_model.py"
+        _fetch_export_tool "requirements.txt" "${SCRIPT_DIR}/export_requirements.txt"
+        echo "  ✓ Export tools downloaded"
     fi
 
     if [ ! -d "${SCRIPT_DIR}/venv" ] || [ ! -f "${SCRIPT_DIR}/venv/bin/pip" ]; then
@@ -611,25 +606,24 @@ DETECT_LINES=0
 REID_LINES=0
 YOLO_LINES=0
 while true; do
-    # NOTE: `wait` is placed inside an `if` condition so that `set -e` does not
-    # abort the whole script when a child exits non-zero. This lets the
-    # per-job error handling below report which download actually failed
-    # (previously a failing child made `wait` return its exit code and
-    # `set -e` killed the parent, masking the real cause as e.g. "Error 22").
     if [ ${VLM_DONE} -eq 0 ] && ! kill -0 ${VLM_PID} 2>/dev/null; then
-        if wait ${VLM_PID}; then VLM_RC=0; else VLM_RC=$?; fi
+        wait ${VLM_PID}
+        VLM_RC=$?
         VLM_DONE=1
     fi
     if [ ${DETECT_DONE} -eq 0 ] && ! kill -0 ${DETECT_PID} 2>/dev/null; then
-        if wait ${DETECT_PID}; then DETECT_RC=0; else DETECT_RC=$?; fi
+        wait ${DETECT_PID}
+        DETECT_RC=$?
         DETECT_DONE=1
     fi
     if [ ${REID_DONE} -eq 0 ] && ! kill -0 ${REID_PID} 2>/dev/null; then
-        if wait ${REID_PID}; then REID_RC=0; else REID_RC=$?; fi
+        wait ${REID_PID}
+        REID_RC=$?
         REID_DONE=1
     fi
     if [ ${YOLO_DONE} -eq 0 ] && ! kill -0 ${YOLO_PID} 2>/dev/null; then
-        if wait ${YOLO_PID}; then YOLO_RC=0; else YOLO_RC=$?; fi
+        wait ${YOLO_PID}
+        YOLO_RC=$?
         YOLO_DONE=1
     fi
 
