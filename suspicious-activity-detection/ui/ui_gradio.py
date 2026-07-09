@@ -684,9 +684,9 @@ footer{text-align:center;color:#999;font-size:12px;padding:8px;}
   <div class="title">Search</div>
   <label for="query">Appearance query *</label>
   <textarea id="query" placeholder="e.g. man in red hoodie carrying a black backpack"></textarea>
-  <label for="cameras">Cameras (optional)</label>
-  <input id="cameras" placeholder="cam1, cam-12" />
-  <div class="hint">Comma-separated. Blank = all cameras.</div>
+  <label for="cameras">Cameras or Zones (optional)</label>
+  <input id="cameras" placeholder="e.g. lp-camera1, aisle1" />
+  <div class="hint">Comma-separated cameras / zones. Blank = all cameras.</div>
   <div class="row">
    <div><label for="time_start">From (optional)</label><input id="time_start" type="datetime-local" /></div>
   </div>
@@ -712,7 +712,10 @@ function parseCameras(v){var l=(v||'').split(',').map(function(s){return s.trim(
 function buildBody(){var q=$('query').value.trim();if(!q)throw new Error('Query is required.');
  var b={query:q,limit:20};
  var c=parseCameras($('cameras').value);if(c)b.cameras=c;
- var ts=toIso($('time_start').value),te=toIso($('time_end').value);
+ var tsRaw=$('time_start').value,teRaw=$('time_end').value;
+ if(tsRaw&&!teRaw)throw new Error('Please also select a "To" time (or clear "From").');
+ if(teRaw&&!tsRaw)throw new Error('Please also select a "From" time (or clear "To").');
+ var ts=toIso(tsRaw),te=toIso(teRaw);
  if(ts)b.time_start=ts;if(te)b.time_end=te;return b;}
 function fmtTime(t){if(!t)return '\\u2014';var d=new Date(t);return isNaN(d)?t:d.toLocaleString();}
 function doSearch(){clearBanner();var btn=$('searchBtn'),grid=$('grid'),empty=$('empty');var body;
@@ -720,7 +723,7 @@ function doSearch(){clearBanner();var btn=$('searchBtn'),grid=$('grid'),empty=$(
  btn.disabled=true;btn.textContent='Searching\\u2026';grid.innerHTML='';empty.textContent='Searching\\u2026';empty.style.display='block';
  fetch('/api/recall/search',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})
  .then(function(r){if(r.status===401){showBanner('Bridge rejected the API key (server config).');empty.style.display='none';return null;}
-  return r.text().then(function(t){if(!r.ok){showBanner('Search failed ('+r.status+'): '+t);empty.style.display='none';return null;}
+  return r.text().then(function(t){if(!r.ok){var msg=t;try{var j=JSON.parse(t);if(j&&j.detail){msg=(typeof j.detail==='string')?j.detail:JSON.stringify(j.detail);}}catch(e){}showBanner('Search failed: '+msg);empty.style.display='none';return null;}
   return JSON.parse(t);});})
  .then(function(d){if(d)renderResults(d.results||[]);})
  .catch(function(e){showBanner('Network error: '+e.message);empty.style.display='none';})

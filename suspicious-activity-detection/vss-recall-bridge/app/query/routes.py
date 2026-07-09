@@ -47,7 +47,15 @@ async def search(req: RecallSearchRequest, request: Request) -> RecallSearchResp
     if req.cameras:
         unknown = [c for c in req.cameras if c not in known]
         if unknown:
-            raise HTTPException(status_code=400, detail=f"unknown tags: {unknown}")
+            valid = ", ".join(sorted(known)) or "(none configured)"
+            plural = "cameras/zones" if len(unknown) > 1 else "camera/zone"
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"Unknown {plural}: {', '.join(unknown)}. "
+                    f"Valid cameras/zones: {valid}"
+                ),
+            )
 
     tags = build_tag_query(req.cameras)
 
