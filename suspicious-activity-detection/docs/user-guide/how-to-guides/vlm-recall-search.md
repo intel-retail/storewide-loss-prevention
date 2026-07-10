@@ -10,6 +10,10 @@ embeddings, time is matched by a capture‑time filter, and location is matched 
 per‑camera tag. Results are short video clips you can play back directly in the
 dashboard.
 
+## Architecture
+
+![VLM Recall Search architecture](vlm-recall.png)
+
 ## How It Works
 
 Recall is powered by the **Video Search & Summarization (VSS)** stack plus a thin
