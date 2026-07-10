@@ -7,7 +7,7 @@
 # No Scenescape source checkout required.
 # Scenescape-specific targets are in scenescape/Makefile.
 
-TAG ?= 2026.1.0
+TAG ?= latest
 REGISTRY ?= true
 
 SCENESCAPE_DIR := ../scenescape
@@ -26,6 +26,10 @@ ENABLE_UI_LOWER := $(shell echo $(ENABLE_UI) | tr A-Z a-z)
 ifeq ($(ENABLE_UI_LOWER),true)
   COMPOSE_ALL := $(COMPOSE_ALL) --profile ui
 endif
+
+# Also bring up the self-contained search stack as part of `make up` (set false to skip)
+ENABLE_SEARCH ?= true
+ENABLE_SEARCH_LOWER := $(shell echo $(ENABLE_SEARCH) | tr A-Z a-z)
 
 RESULTS_PATH ?= ./results
 
@@ -70,22 +74,28 @@ download-models:
 	bash download_models/model_download.sh
 
 .PHONY: download-sample-data
-download-sample-data:
+download-sample-data: gen-zone-config
 	@echo "Downloading sample video..."
 	bash download_models/download_sample_video.sh
 
 
 # ---- Initialization ----
 
+# Generate the legacy configs/zone_config.json that the vendored SceneScape
+# scripts consume, from configs/scene-config.yaml (the single source of truth).
+.PHONY: gen-zone-config
+gen-zone-config:
+	@python3 scripts/gen-zone-config.py
+
 .PHONY: init
-init:
+init: gen-zone-config
 	@$(MAKE) -C $(SCENESCAPE_DIR) APP_DIR=$(CURDIR) RESOURCE_CONFIG=$(RESOURCE_CONFIG) init
 
 # ---- Full Stack (Scenescape + LP) ----
 
 .PHONY: up
 
-up: validate-device
+up: validate-device gen-zone-config
 	@$(MAKE) -C $(SCENESCAPE_DIR) APP_DIR=$(CURDIR) RESOURCE_CONFIG=$(RESOURCE_CONFIG) init init-sample-data download-models init-volumes
 	@$(MAKE) patch-device
 	@mkdir -p $(RESULTS_PATH) $(RESULTS_PATH)/ba $(RESULTS_PATH)/swlp
@@ -94,25 +104,63 @@ up: validate-device
 		DOCKER_REGISTRY=$(REGISTRY_URL) $(COMPOSE_ALL) pull; \
 	else \
 		echo "Building LP images..."; \
-		BUILD_SERVICES="swlp-service behavioral-analysis"; \
+		BUILD_SERVICES="scene-understanding-service behavioral-analysis"; \
 		if [ "$(ENABLE_UI_LOWER)" = "true" ]; then \
 			BUILD_SERVICES="$$BUILD_SERVICES swlp-suscpicious-ui"; \
 		fi; \
 		$(COMPOSE_ALL) build $$BUILD_SERVICES; \
 	fi
+	@if [ "$(ENABLE_SEARCH_LOWER)" = "true" ]; then \
+		if [ "$(REGISTRY)" = "true" ]; then \
+			echo "Pulling recall bridge image from $(REGISTRY_URL)..."; \
+			DOCKER_REGISTRY=$(REGISTRY_URL) $(SEARCH_ENV) $(COMPOSE_FULL) pull vss-recall-bridge; \
+		else \
+			echo "Building recall bridge image..."; \
+			$(SEARCH_ENV) $(COMPOSE_FULL) build vss-recall-bridge; \
+		fi; \
+	fi
 	@echo ""
-	@echo "=== Starting all services ==="
-	$(COMPOSE_ALL) up -d
-	@echo ""
+	@echo "=== Starting all services (single docker compose) ==="
+	@if [ "$(ENABLE_SEARCH_LOWER)" = "true" ]; then \
+		echo "Starting pgserver first and ensuring 'video_summary_db' exists (before pipeline-manager)..."; \
+		$(SEARCH_ENV) $(COMPOSE_FULL) up -d pgserver; \
+		PG=$$(docker ps --filter name=pgserver --format '{{.Names}}' | head -n1); \
+		if [ -n "$$PG" ]; then \
+			for i in $$(seq 1 30); do \
+				docker exec "$$PG" pg_isready -U scenescape -d scenescape >/dev/null 2>&1 && break; \
+				sleep 2; \
+			done; \
+			docker exec "$$PG" psql -U scenescape -tc "SELECT 1 FROM pg_database WHERE datname='video_summary_db'" 2>/dev/null | grep -q 1 \
+				|| docker exec "$$PG" createdb -U scenescape video_summary_db 2>/dev/null \
+				&& echo "  ✓ database video_summary_db ready on $$PG" \
+				|| echo "  ✓ database video_summary_db already present"; \
+		else \
+			echo "  ! pgserver container not found — pipeline-manager may need a manual createdb"; \
+		fi; \
+		$(SEARCH_ENV) $(COMPOSE_FULL) up -d; \
+		echo "Ensuring recall bridge is running..."; \
+		$(SEARCH_ENV) $(COMPOSE_FULL) up -d vss-recall-bridge 2>/dev/null || true; \
+		echo "Connecting recall bridge to the LP network for the unified UI..."; \
+		BRIDGE=$$(docker ps --filter name=vss-recall-bridge --format '{{.Names}}' | head -n1); \
+		if [ -n "$$BRIDGE" ]; then \
+			docker network connect --alias vss-recall-bridge $(LP_NETWORK) "$$BRIDGE" 2>/dev/null \
+				&& echo "  ✓ $$BRIDGE attached to $(LP_NETWORK)" \
+				|| echo "  ✓ $$BRIDGE already on $(LP_NETWORK)"; \
+		fi; \
+	else \
+		$(COMPOSE_ALL) up -d; \
+	fi
 
 	@echo ""
 	@echo "Services running:"
 	@echo "  Scenescape UI:   https://localhost"
 	@echo "  Login:           admin / $$(grep SUPASS docker/.env | cut -d= -f2-)"
 	@if [ "$(ENABLE_UI_LOWER)" = "true" ]; then \
-		echo "  Gradio UI:       http://localhost:7860"; \
+		echo "  SAD-DASHBOARD UI:       http://localhost:7860"; \
+		echo "  Recall UI: http://localhost:7860/recall"; \
 	else \
-		echo "  Gradio UI:       DISABLED (ENABLE_UI=false)"; \
+		echo "  SAD-DASHBOARD UI:       DISABLED (ENABLE_UI=false)"; \
+		echo "  Recall UI: DISABLED (ENABLE_UI=false)"; \
 	fi
 	@echo ""
 	@echo "To stop: make down"
@@ -129,7 +177,15 @@ up: validate-device
 
 .PHONY: down
 down:
-	-$(COMPOSE_ALL) --profile ui down  --remove-orphans
+	@BRIDGE=$$(docker ps -a --filter name=vss-recall-bridge --format '{{.Names}}' | head -n1); \
+	if [ -n "$$BRIDGE" ]; then \
+		docker network disconnect $(LP_NETWORK) "$$BRIDGE" 2>/dev/null || true; \
+	fi
+	@if [ "$(ENABLE_SEARCH_LOWER)" = "true" ]; then \
+		$(SEARCH_ENV) $(COMPOSE_FULL) --profile ui --profile recall-ui down --remove-orphans; \
+	else \
+		$(COMPOSE_ALL) --profile ui down --remove-orphans; \
+	fi
 	-docker volume rm storewide-lp_seaweedfs-data 2>/dev/null || true
 
 
@@ -160,17 +216,65 @@ status:
 run-lp:
 ifeq ($(REGISTRY_LOWER),true)
 	@echo "Pulling LP images from $(REGISTRY_URL)..."
-	DOCKER_REGISTRY=$(REGISTRY_URL) $(COMPOSE_ALL) pull swlp-service behavioral-analysis swlp-suscpicious-ui
+	DOCKER_REGISTRY=$(REGISTRY_URL) $(COMPOSE_ALL) pull  behavioral-analysis swlp-suscpicious-ui
 else
 	@echo "Building LP images..."
-	$(COMPOSE_ALL) build swlp-service behavioral-analysis swlp-suscpicious-ui
+	$(COMPOSE_ALL) build  behavioral-analysis swlp-suscpicious-ui
 endif
-	@echo "Starting LP services only (Scenescape must be running)..."
-	$(COMPOSE_ALL) up -d swlp-service behavioral-analysis swlp-suscpicious-ui
+	@echo "Starting LP services only (SceneScape must be running)..."
+	$(COMPOSE_ALL) up -d  behavioral-analysis swlp-suscpicious-ui
 
 .PHONY: down-lp
 down-lp:
 	$(COMPOSE_LP) down
+
+
+
+# ---- Search Stack (VSS search services + recall bridge + investigator UI) ----
+# Self-contained: the recall bridge ingests clips from a mounted source file
+# (file ingest), so it does NOT need Scenescape or the suspicious-activity stack.
+SEARCH_REGISTRY ?= intel/
+EMBEDDING_MODEL_NAME ?= CLIP/clip-vit-b-32
+# Search-stack images share the same TAG as the main LP images (exported above).
+SEARCH_ENV := REGISTRY=$(SEARCH_REGISTRY) TAG=$(TAG) EMBEDDING_MODEL_NAME=$(EMBEDDING_MODEL_NAME)
+COMPOSE_SEARCH := docker compose --project-directory . -f docker/docker-compose.search.yaml
+
+# Single combined invocation: scenescape + LP (+ cameras override + ui profile) + search.
+# Lets `make up`/`make down` manage everything in ONE docker compose command/project.
+# The consolidated override disables the search stack's postgres-service and points
+# the VSS pipeline-manager at the shared SceneScape `pgserver`.
+COMPOSE_FULL := $(COMPOSE_ALL) -f docker/docker-compose.search.yaml -f docker/docker-compose.search-consolidated.yaml
+
+.PHONY: run-search
+run-search:
+	@echo "=== Starting search stack (VSS search + recall bridge + investigator UI) ==="
+	$(SEARCH_ENV) $(COMPOSE_SEARCH) --profile recall-ui --profile standalone-rtsp up -d --build
+	@echo ""
+	@echo "Search services running:"
+	@echo "  Recall UI:  http://localhost:$${RECALL_UI_PORT:-7861}/recall"
+	@echo "  Recall bridge:    http://localhost:$${RECALL_BRIDGE_PORT:-8090}/health"
+	@echo "  Pipeline Manager: http://localhost:$${PM_HOST_PORT:-3001}"
+	@echo "  Video Search MS:  http://localhost:$${VS_HOST_PORT:-7890}"
+	@echo ""
+	@echo "To stop: make down-search"
+
+# Backend-only search stack (no swlp-recall-ui). Used by `make up`, where the
+# unified dashboard UI (swlp-suscpicious-ui) serves /recall. The recall bridge is
+# attached to the LP network (with its service alias) so the dashboard UI can
+# reach it by name within the combined stack.
+LP_NETWORK ?= storewide-lp_storewide-lp
+
+.PHONY: down-search
+down-search:
+	$(SEARCH_ENV) $(COMPOSE_SEARCH) down --remove-orphans
+
+.PHONY: logs-search
+logs-search:
+	$(SEARCH_ENV) $(COMPOSE_SEARCH) logs -f
+
+.PHONY: status-search
+status-search:
+	$(SEARCH_ENV) $(COMPOSE_SEARCH) ps
 
 
 

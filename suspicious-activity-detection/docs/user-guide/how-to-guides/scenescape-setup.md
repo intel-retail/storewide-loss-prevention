@@ -41,7 +41,7 @@ Scenescape reads its configuration from the application's `configs/` directory:
 | File | Purpose |
 |------|---------|
 | `configs/zone_config.json` | Defines the scene, camera(s), video source, and zone-to-type mappings (e.g., `aisle1` → `HIGH_VALUE`). |
-| `configs/pipeline-config.json` | DLStreamer pipeline template with `{{CAMERA_NAME}}` placeholder. Rendered at init time with device-specific settings. |
+| `configs/scenescape/pipeline-config.json` | DLStreamer pipeline template with `{{CAMERA_NAME}}` placeholder. Rendered at init time with device-specific settings. |
 | `configs/.env.example` | Reference environment variables including `SCENESCAPE_REGISTRY`, `SCENESCAPE_VERSION`, and model/device settings. |
 | `configs/res/*.env` | Device resource profiles that control inference device, decode chain, and throughput options. |
 

@@ -12,6 +12,9 @@ person-of-interest/mcp_server/
 suspicious-activity-detection/docker/.env
 suspicious-activity-detection/docker/.env.bak
 
+# Generated from configs/scene-config.yaml by scripts/gen-zone-config.py
+suspicious-activity-detection/configs/zone_config.json
+
 # Generated secrets
 scenescape/secrets/ca/
 scenescape/secrets/certs/
@@ -34,3 +37,7 @@ suspicious-activity-detection/results/
 scenescape.zip
 person-of-interest/backend/**/__pycache__/
 **/__pycache__/
+
+# Vendored edge-ai-libraries checkout (not tracked here)
+edge-ai-libraries/
+performance-tools/

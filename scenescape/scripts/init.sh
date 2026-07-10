@@ -184,31 +184,35 @@ fi
 # ---- Step 3: Generate DLStreamer config.json (per camera) ----
 echo -e "${YELLOW}[3/4] Generating DLStreamer pipeline configs...${NC}"
 
-DLSTREAMER_TEMPLATE="${APP_DIR}/configs/pipeline-config.json"
+# SceneScape-specific configs may live under configs/scenescape/ (preferred) or
+# directly under configs/ (legacy layout). Resolve each with that precedence.
+if [ -f "${APP_DIR}/configs/scenescape/pipeline-config.json" ]; then
+    DLSTREAMER_TEMPLATE="${APP_DIR}/configs/scenescape/pipeline-config.json"
+else
+    DLSTREAMER_TEMPLATE="${APP_DIR}/configs/pipeline-config.json"
+fi
 if [ ! -f "${DLSTREAMER_TEMPLATE}" ]; then
     echo -e "${RED}ERROR: DLStreamer template not found at ${DLSTREAMER_TEMPLATE}${NC}"
     exit 1
 fi
 
-# Validate app-specific controller configs exist
-if [ ! -f "${APP_DIR}/configs/tracker-config.json" ]; then
-    echo -e "${YELLOW}WARNING: tracker-config.json not found in ${APP_DIR}/configs/${NC}"
-    echo "  Scenescape will use default from scenescape/controller/tracker-config.json"
-fi
-if [ ! -f "${APP_DIR}/configs/reid-config.json" ]; then
-    echo -e "${YELLOW}WARNING: reid-config.json not found in ${APP_DIR}/configs/${NC}"
-    echo "  Scenescape will use default from scenescape/controller/reid-config.json"
-fi
-
 # Resolve controller config paths (app-specific or Scenescape default)
-if [ -f "${APP_DIR}/configs/tracker-config.json" ]; then
+if [ -f "${APP_DIR}/configs/scenescape/tracker-config.json" ]; then
+    TRACKER_CONFIG="${APP_DIR}/configs/scenescape/tracker-config.json"
+elif [ -f "${APP_DIR}/configs/tracker-config.json" ]; then
     TRACKER_CONFIG="${APP_DIR}/configs/tracker-config.json"
 else
+    echo -e "${YELLOW}WARNING: tracker-config.json not found in ${APP_DIR}/configs/scenescape/${NC}"
+    echo "  Scenescape will use default from scenescape/controller/tracker-config.json"
     TRACKER_CONFIG="${SCENESCAPE_DIR}/controller/tracker-config.json"
 fi
-if [ -f "${APP_DIR}/configs/reid-config.json" ]; then
+if [ -f "${APP_DIR}/configs/scenescape/reid-config.json" ]; then
+    REID_CONFIG="${APP_DIR}/configs/scenescape/reid-config.json"
+elif [ -f "${APP_DIR}/configs/reid-config.json" ]; then
     REID_CONFIG="${APP_DIR}/configs/reid-config.json"
 else
+    echo -e "${YELLOW}WARNING: reid-config.json not found in ${APP_DIR}/configs/scenescape/${NC}"
+    echo "  Scenescape will use default from scenescape/controller/reid-config.json"
     REID_CONFIG="${SCENESCAPE_DIR}/controller/reid-config.json"
 fi
 
@@ -226,6 +230,19 @@ if [ -f "${ENV_EXAMPLE}" ]; then
     set +a
     rm -f "${AI_ENV_TMP}"
     echo "  Loaded AI-model settings from ${ENV_EXAMPLE}"
+fi
+
+# ---- Source VLM-recall / video-search settings from configs/.env.example ----
+RECALL_KEYS_REGEX='^(RECALL_RTSP_BASE_URL|RECALL_BRIDGE_PORT|RECALL_UI_PORT|RECALL_SEGMENT_SECONDS|RECALL_MAX_UPLOAD_CLIPS)='
+if [ -f "${ENV_EXAMPLE}" ]; then
+    RECALL_ENV_TMP="$(mktemp)"
+    grep -E "${RECALL_KEYS_REGEX}" "${ENV_EXAMPLE}" > "${RECALL_ENV_TMP}" || true
+    set -a
+    # shellcheck disable=SC1090
+    . "${RECALL_ENV_TMP}"
+    set +a
+    rm -f "${RECALL_ENV_TMP}"
+    echo "  Loaded VLM-recall settings from ${ENV_EXAMPLE}"
 fi
 
 # Source device resource config (all-gpu-cpu.env, all-gpu.env, or all-cpu.env)
@@ -492,6 +509,13 @@ INFERENCE_INTERVAL=${INFERENCE_INTERVAL}
 
 # ---- WebRTC / MediaMTX ----
 HOST_IP=${HOST_IP}
+
+# ---- VLM Recall Bridge / Video Search (from configs/.env.example) ----
+RECALL_RTSP_BASE_URL=${RECALL_RTSP_BASE_URL:-rtsp://mediaserver:8554}
+RECALL_BRIDGE_PORT=${RECALL_BRIDGE_PORT:-8090}
+RECALL_UI_PORT=${RECALL_UI_PORT:-7861}
+RECALL_SEGMENT_SECONDS=${RECALL_SEGMENT_SECONDS:-60}
+RECALL_MAX_UPLOAD_CLIPS=${RECALL_MAX_UPLOAD_CLIPS:-0}
 
 # ---- Host user identity (for Docker bind-mount file ownership) ----
 HOST_UID=$(id -u)
