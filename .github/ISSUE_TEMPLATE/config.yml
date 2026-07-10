@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Documentation
+    url: https://github.com/GrzegorzWrobel/storewide-loss-prevention/blob/main/person-of-interest/docs/user-guide/get-started.md
+    about: Read the user guide before opening an issue — your question may already be answered there.

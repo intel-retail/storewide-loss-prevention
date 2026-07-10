@@ -1,0 +1,62 @@
+name: Bug Report
+description: Report a bug to help us improve Store-wide Loss Prevention
+title: "[BUG] <Short summary>"
+labels: ['BUG','TRIAGE']
+type: "Bug"
+body:
+  - type: markdown
+    attributes:
+      value: |
+        <br>
+
+        > [!TIP]
+        > Before submitting, please search [open and closed issues](../../issues?q=is%3Aissue) to avoid duplicates.
+        > Existing issues often contain workarounds or resolution details.
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Bug Description
+      description: >
+        Describe the bug: what did you do, what actually happened,
+        and what you expected to happen instead.
+      placeholder: |
+        **What I did:** Started the stack with `make up` and enrolled a person of interest.
+        **What happened:** No alert was triggered when the enrolled person appeared on camera.
+        **What I expected:** A matching alert with a confidence score displayed in the UI at http://localhost:3000.
+    validations:
+      required: true
+
+  - type: textarea
+    id: system-setup
+    attributes:
+      label: System Setup
+      description: Describe your hardware and software environment.
+      placeholder: |
+        - OS: Ubuntu 22.04
+        - CPU/GPU: Intel Core Ultra 7 165H / Intel Arc GPU
+        - OpenVINO version: 2025.x
+        - Docker version: 27.x
+        - Browser (if UI issue): Chrome 126
+        - Deployment mode: Docker Compose / standalone
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to Reproduce
+      description: Minimal, reliable steps to reproduce the issue.
+      placeholder: |
+        1. Run `make init` and `make up` from the `person-of-interest/` directory
+        2. Open the UI
+        3. Enroll a person of interest and start the camera feed
+        4. Observe the error in the terminal / UI
+    validations:
+      required: true
+
+  - type: textarea
+    id: rca
+    attributes:
+      label: Root Cause Analysis
+      description: If you have already investigated the issue, share your findings here.
