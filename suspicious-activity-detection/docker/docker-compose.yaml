@@ -116,6 +116,10 @@ services:
       # MQTT
       MQTT_HOST: ${MQTT_HOST:-broker.scenescape.intel.com}
       MQTT_PORT: ${MQTT_PORT:-1883}
+      # BA integration contract: topics shared with behavioral-analysis.
+      # Must match the values set on the behavioral-analysis service.
+      BA_REQUEST_TOPIC: ${BA_REQUEST_TOPIC:-ba/requests}
+      BA_RESULT_TOPIC: ${BA_RESULT_TOPIC:-ba/results}
       # Scenescape API (for zone auto-discovery)
       SCENESCAPE_API_USER: ${SCENESCAPE_API_USER:-}
       SCENESCAPE_API_PASSWORD: ${SCENESCAPE_API_PASSWORD:-}
