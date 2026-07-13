@@ -165,13 +165,13 @@ up: validate-device gen-zone-config
 	@echo ""
 	@echo "To stop: make down"
 	@if [ -f /tmp/swlp-auto-stop.pid ]; then \
-		kill $$(cat /tmp/swlp-auto-stop.pid) 2>/dev/null || true; \
+		kill -- -$$(cat /tmp/swlp-auto-stop.pid) 2>/dev/null || kill $$(cat /tmp/swlp-auto-stop.pid) 2>/dev/null || true; \
 		rm -f /tmp/swlp-auto-stop.pid; \
 	fi
 	@if [ "$(AUTO_STOP_MINUTES)" -gt 0 ] 2>/dev/null; then \
 		echo ""; \
-		echo "=== Auto-shutdown scheduled in $(AUTO_STOP_MINUTES) minutes ==="; \
-		( sleep `expr $(AUTO_STOP_MINUTES) \* 60` && cd $(CURDIR) && $(MAKE) down ) &  \
+		echo "=== Auto-shutdown scheduled in $(AUTO_STOP_MINUTES) minutes (detached; log: /tmp/swlp-auto-stop.log) ==="; \
+		setsid sh -c 'sleep '`expr $(AUTO_STOP_MINUTES) \* 60`'; cd "$(CURDIR)" && $(MAKE) down' </dev/null >/tmp/swlp-auto-stop.log 2>&1 & \
 		echo $$! > /tmp/swlp-auto-stop.pid; \
 	fi
 
