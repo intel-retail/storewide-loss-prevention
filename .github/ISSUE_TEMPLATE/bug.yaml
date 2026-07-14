@@ -6,15 +6,11 @@ type: "Bug"
 body:
   - type: markdown
     attributes:
-      value: |
-        <br>
-
-        > [!TIP]
-        > Before submitting, please search [open and closed issues](../../issues?q=is%3Aissue) to avoid duplicates.
-        > Existing issues often contain workarounds or resolution details.
+      value: >
+        <br>To expedite issue processing please search open and closed issues before submitting a new one. 
+        Existing issues often contain information about workarounds, resolution, or progress updates.
 
   - type: textarea
-    id: description
     attributes:
       label: Bug Description
       description: >
@@ -28,7 +24,6 @@ body:
       required: true
 
   - type: textarea
-    id: system-setup
     attributes:
       label: System Setup
       description: Describe your hardware and software environment.
@@ -43,7 +38,6 @@ body:
       required: true
 
   - type: textarea
-    id: steps
     attributes:
       label: Steps to Reproduce
       description: Minimal, reliable steps to reproduce the issue.
@@ -56,7 +50,6 @@ body:
       required: true
 
   - type: textarea
-    id: rca
     attributes:
       label: Root Cause Analysis
       description: If you have already investigated the issue, share your findings here.
