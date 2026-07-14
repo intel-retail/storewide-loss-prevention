@@ -61,10 +61,12 @@ validate-device:
 
 .PHONY: update-submodules
 update-submodules:
-	@echo "Cloning performance tool repositories"
-	cd .. && git submodule deinit -f .
-	cd .. && git submodule update --init --remote --recursive
-	@echo "Submodules updated (if any present)."
+	@echo "Updating submodules: edge-ai-libraries and performance-tools"
+	cd .. && git submodule sync -- edge-ai-libraries performance-tools
+	cd .. && git submodule update --init --remote edge-ai-libraries performance-tools
+	cd ../edge-ai-libraries && git sparse-checkout init --cone
+	cd ../edge-ai-libraries && git sparse-checkout set microservices/scene-understanding-service microservices/behavioral-analysis
+	@echo "Submodules updated. edge-ai-libraries sparse checkout ready."
 
 # ---- Models ----
 

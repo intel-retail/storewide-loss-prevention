@@ -33,9 +33,9 @@ services:
   # ---------- Behavioral Analysis (YOLO Pose + VLM) ----------
   behavioral-analysis:
     build:
-      context: behavioral-analysis
-      dockerfile: Dockerfile
-    image: intel/swlp-behavioral-analysis:${TAG}
+      context: ../edge-ai-libraries/microservices/behavioral-analysis
+      dockerfile: docker/Dockerfile
+    image: intel/behavioral-analysis:${TAG}
     ports:
       - "${BA_SERVICE_PORT:-8085}:8080"
     networks:
@@ -52,15 +52,15 @@ services:
       ovms-vlm:
         condition: service_healthy
     environment:
-      SEAWEEDFS_ENDPOINT: http://seaweedfs:8333
-      SEAWEEDFS_BUCKET: behavioral-frames
+      SEAWEEDFS_ENDPOINT: ${SEAWEEDFS_ENDPOINT:-http://seaweedfs:8333}
+      SEAWEEDFS_BUCKET: ${SEAWEEDFS_BUCKET:-behavioral-frames}
       MIN_FRAMES_FOR_DETECTION: ${BA_MIN_FRAMES:-3}
       MAX_FRAMES_TO_FETCH: ${BA_MAX_FRAMES:-120}
       POSE_FRAMES_COUNT: ${BA_POSE_FRAMES:-60}
       POSE_CONFIDENCE_THRESHOLD: ${BA_CONFIDENCE:-0.5}
       YOLO_POSE_MODEL: /models/yolo_models/yolo26n-pose/yolo26n-pose.xml
       GST_INFERENCE_DEVICE: ${BA_GST_DEVICE:-CPU}
-      VLM_ENDPOINT: http://ovms-vlm:8001
+      VLM_ENDPOINT: ${VLM_ENDPOINT:-http://ovms-vlm:8001}
       VLM_MODEL_NAME: ${VLM_MODEL_NAME:-Qwen/Qwen2.5-VL-7B-Instruct}
       VLM_ENABLED: ${VLM_ENABLED:-true}
       VLM_TIMEOUT: ${VLM_TIMEOUT:-120}
@@ -77,7 +77,7 @@ services:
       - ${MODEL_PATH:-./models}:/models:ro
       - ../scenescape/secrets:/app/secrets:ro
       - ${RESULTS_PATH:-./results}:/app/results
-      - ./behavioral-analysis/config:/app/config:ro
+      - ../edge-ai-libraries/microservices/behavioral-analysis/config:/app/config:ro
     restart: unless-stopped
 
   # ---------- Scene Understanding Service ----------
