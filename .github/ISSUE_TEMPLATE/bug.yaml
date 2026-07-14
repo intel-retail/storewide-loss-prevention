@@ -19,7 +19,7 @@ body:
       placeholder: |
         **What I did:** Started the stack with `make up` and enrolled a person of interest.
         **What happened:** No alert was triggered when the enrolled person appeared on camera.
-        **What I expected:** A matching alert with a confidence score displayed in the UI at http://localhost:3000.
+        **What I expected:** A matching alert with a confidence score displayed in the UI.
     validations:
       required: true
 
