@@ -299,6 +299,13 @@ COMPOSE_FULL := $(COMPOSE_ALL) -f docker/docker-compose.search.yaml -f docker/do
 .PHONY: run-search
 run-search:
 	@echo "=== Starting search stack (VSS search + recall bridge + investigator UI) ==="
+	@# Cancel any pending auto-shutdown scheduled by an earlier `make up`, so it
+	@# doesn't tear down this standalone search stack partway through.
+	@if [ -f /tmp/swlp-auto-stop.pid ]; then \
+		kill -- -$$(cat /tmp/swlp-auto-stop.pid) 2>/dev/null || kill $$(cat /tmp/swlp-auto-stop.pid) 2>/dev/null || true; \
+		rm -f /tmp/swlp-auto-stop.pid; \
+		echo "  (cancelled a pending auto-shutdown from an earlier 'make up')"; \
+	fi
 	@if [ "$(REGISTRY)" = "true" ]; then \
 		echo "Pulling recall bridge + UI from registry (no local build)..."; \
 		$(SEARCH_ENV) $(COMPOSE_SEARCH) --profile recall-ui pull vss-recall-bridge swlp-recall-ui; \

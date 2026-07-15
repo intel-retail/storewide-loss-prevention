@@ -97,7 +97,9 @@ async def _watch_segments(
                 except OSError:
                     pass
                 continue
-            processed.add(path.name)
+            # Upload the clip. Mark it processed only on success, so a transient
+            # failure (e.g. the search backend not being ready yet at startup) is
+            # retried on the next watch loop instead of dropping the clip.
             try:
                 await process_clip(
                     camera=camera,
@@ -105,9 +107,11 @@ async def _watch_segments(
                     vss=vss,
                     clips_dir=str(clips_dir),
                 )
-                uploaded += 1
-            except Exception:  # one bad clip must not kill the camera task
-                logger.exception("failed to process segment %s", path)
+            except Exception:  # transient — retry next loop, don't lose the clip
+                logger.warning("upload failed for %s; will retry", path)
+                continue
+            processed.add(path.name)
+            uploaded += 1
         await asyncio.sleep(_WATCH_INTERVAL_SECONDS)
 
 
