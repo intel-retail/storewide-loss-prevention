@@ -44,41 +44,37 @@ services:
   # runtime. A compose-level dependency would also create a cycle
   # (lp-cams -> swlp-suscpicious-ui -> vss-recall-bridge -> lp-cams).
 
-  # Gate the whole search stack behind SceneScape + scene-understanding so it
-  # does not come up before them in the combined stack. These three services are
-  # the dependency roots of the search stack (everything else — vdms-dataprep,
-  # video-search, pipeline-manager, vss-recall-bridge — depends on them), so
-  # holding them until `scene-understanding-service` is healthy transitively
-  # delays the entire stack. `scene-understanding-service` itself only reports
-  # healthy after SceneScape `web`, `seaweedfs`, `behavioral-analysis`, and
-  # `scene-import` are ready, so this effectively orders search after SceneScape.
-  # Only `make up` loads this override; standalone `make run-search` (which has
-  # no `scene-understanding-service`) is unaffected. `depends_on` maps merge with
-  # the base definitions.
-  minio-service:
-    depends_on:
-      scene-understanding-service:
-        condition: service_healthy
+  # The search stack starts in PARALLEL with SceneScape + suspicious-activity in
+  # the combined stack — it is intentionally NOT gated behind
+  # `scene-understanding-service`, so both stacks come up together instead of the
+  # search stack lagging ~1-2 min behind. The search stack keeps its own internal
+  # ordering (embedding -> dataprep -> video-search -> pipeline-manager) from
+  # docker-compose.search.yaml. Trade-off: heavier concurrent startup load, since
+  # the VLM, CLIP embedding, and YOLOX models load at the same time.
 
-  vdms-vector-db:
-    depends_on:
-      scene-understanding-service:
-        condition: service_healthy
-
-  multimodal-embedding-serving:
-    depends_on:
-      scene-understanding-service:
-        condition: service_healthy
-
-  # Bring the unified dashboard UI up LAST. The base compose already gates it on
-  # `scene-understanding-service: service_healthy`; here we additionally gate it on
-  # the recall bridge being healthy. The bridge only reports healthy after its own
-  # deps (pipeline-manager healthy -> video-search) are up, so this transitively
-  # holds the UI until the entire search backend is ready. Only `make up` loads
-  # this override, so standalone runs (no search stack) are unaffected.
-  # `depends_on` maps merge with the base (scene-understanding-service).
+  # Additionally gate the unified dashboard UI on the recall bridge being up, so
+  # the /recall page's backend exists before the UI serves it. The bridge now
+  # starts early (it no longer waits for the search backend), so this does not
+  # delay the dashboard. Only `make up` loads this override; standalone runs are
+  # unaffected. `depends_on` maps merge with the base (scene-understanding-service).
   swlp-suscpicious-ui:
     depends_on:
       vss-recall-bridge:
+        condition: service_healthy
+
+  # Hold the camera video pipeline until the recall search backend is ready to
+  # ingest, so video only starts streaming once recall can capture it — no window
+  # where video plays on the dashboard but clips aren't being recorded/indexed.
+  # The recall bridge is already up and waiting, so it captures from the first
+  # published frame → no missed clips. `pipeline-manager: service_healthy` is the
+  # search stack's "ready to ingest" signal. Only `make up MODE=full` loads this
+  # override, so core (no-search) and standalone runs are unaffected.
+  lp-cams:
+    depends_on:
+      pipeline-manager:
+        condition: service_healthy
+  lp-video:
+    depends_on:
+      pipeline-manager:
         condition: service_healthy
 

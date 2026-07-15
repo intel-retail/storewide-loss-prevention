@@ -349,11 +349,11 @@ services:
       - "${RECALL_BRIDGE_PORT:-8090}:8080"
     networks:
       - vs_network
-    depends_on:
-      pipeline-manager:
-        condition: service_healthy
-      video-search:
-        condition: service_started
+    # No hard dependency on the search backend: the segmenter waits for the RTSP
+    # source at runtime (_wait_for_source) and records into /clips immediately, so
+    # the first 60s segment is captured *in parallel* with backend startup. Clip
+    # uploads retry until pipeline-manager/dataprep are ready, so nothing is lost.
+    # This removes the ~1 min "wait for backend healthy" gap before ingest begins.
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8080/health')"]
       interval: 10s
