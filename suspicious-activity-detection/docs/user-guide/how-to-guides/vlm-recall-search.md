@@ -59,64 +59,86 @@ The recall feature adds these containers to the stack:
 
 ## Enable and Run
 
-Recall is on by default. Start the full stack from the application directory:
+Which stack `make up` brings up is controlled by **`MODE`**:
+
+| Command | What runs | Recall UI |
+|---------|-----------|-----------|
+| `make up` *(`MODE=core`, default)* | SceneScape + Suspicious Activity **only** — no search | Recall button hidden |
+| `make up MODE=full` | core **+** the search/recall stack | `http://localhost:7860/recall` (in the dashboard) |
+| `make up MODE=search` | **only** the standalone search/recall stack | `http://localhost:7860/recall` (standalone UI) |
+
+> Search is **opt-in**: a plain `make up` does not start the recall stack. Use
+> `MODE=full` to include it, or `MODE=search` to run search by itself.
+
+Tear down with the matching mode:
 
 ```bash
-make up
+make up MODE=full        &&  make down                # `make down` also cleans a stray search stack
+make up MODE=search      &&  make down MODE=search    # (plain `make down` also cleans it, best-effort)
 ```
 
-This builds the bridge and UI, brings up the search services, and links the bridge to
-the LP network. When it finishes, open the Investigator UI:
+### Overriding defaults
 
-```
-http://localhost:7860/recall
-```
-
-To run the search stack on its own (separate from the LP UI):
+The `Makefile` sets sensible defaults, so nothing else is mandatory. To override,
+pass variables on the command line or export them first:
 
 ```bash
-make run-search   # Investigator UI on http://localhost:7861/recall
-```
-
-The `Makefile` already sets sensible defaults, so nothing is mandatory. To override the
-defaults, either pass them on the `make` command line or export them before running
-`make up`:
-
-```bash
-export SEARCH_REGISTRY=intel/                       # search image registry
-export TAG=latest                                   # image tag (shared with LP images)
-export EMBEDDING_MODEL_NAME=CLIP/clip-vit-b-32       # multimodal embedding model
-make up
+make up MODE=full EMBEDDING_MODEL_NAME=CLIP/clip-vit-b-32 TAG=latest
 ```
 
 | Variable | Default | Purpose |
 |----------|---------|---------|
+| `MODE` | `core` | `core` (no search) · `full` (core + search) · `search` (search only). |
 | `SEARCH_REGISTRY` | `intel/` | Registry for the VSS search images. |
 | `TAG` | `latest` | Image tag, shared by the LP and VSS search images. |
 | `EMBEDDING_MODEL_NAME` | `CLIP/clip-vit-b-32` | Multimodal model used for text+frame embeddings. |
-| `ENABLE_SEARCH` | `true` | Set `false` to skip the recall stack entirely. |
+| `RECALL_UI_PORT` | `7860` | Host port for the standalone Investigator UI (`MODE=search`). |
+
+**Legacy aliases** (still work, map onto `MODE`): `ENABLE_SEARCH=true` → `MODE=full`;
+`SEARCH_ONLY=true` → `MODE=search`.
 
 Postgres/MinIO credentials are optional (they default in the compose files and the
-shared `pgserver` is used), so they don't need exporting. Equivalent one-liner:
-`make up EMBEDDING_MODEL_NAME=<model> TAG=<tag>`.
+shared `pgserver` is used), so they don't need exporting.
+
+## Disable Recall
+
+Recall is **off by default** — a plain `make up` (`MODE=core`) already skips it. With
+search disabled:
+
+- The VSS search services and the `vss-recall-bridge` are never started.
+- The dashboard hides the **Recall** button, and the `/recall` page returns
+  *"Recall Search is disabled."* — so operators don't see a broken tab.
+
+This is wired automatically: the UI reads `ENABLE_RECALL`, which the `Makefile`
+derives from `MODE` (true for `full`/`search`, false for `core`). In standalone
+`MODE=search`, the recall page also hides its **← Dashboard** back-link, since no
+dashboard is running.
 
 ## Configure Cameras
 
-Cameras are tagged once in `vss-recall-bridge/configs/cameras.yaml`. Each enabled
-camera is segmented and uploaded with its tags so location filtering works:
+Cameras are **not** configured in the bridge — they are derived automatically from
+SceneScape's `configs/scene-config.yaml`. Every camera name listed under a scene is
+segmented, uploaded, and tagged so location filtering works:
 
 ```yaml
-cameras:
-  - id: cam2
-    source_file: /media/lp-camera1.mp4   # or an RTSP url
-    enabled: true
-    area_label: entrance
-    store_id: store-001
-    extra_tags: ["front-of-store"]
+scenes:
+  - scene_name: storewide loss prevention
+    cameras:
+      - lp-camera1
+    zones:
+      aisle1: HIGH_VALUE
+      aisle2: CHECKOUT
 ```
 
-A clip from this camera is tagged `cam2`, `entrance`, `store-001`, `front-of-store`,
-so a query filtered to any of those tags returns it.
+For each camera name the bridge derives:
+
+- **RTSP source** — `${RECALL_RTSP_BASE_URL}/<camera-name>`
+  (e.g. `rtsp://mediaserver:8554/lp-camera1`).
+- **Tags** — the camera name plus the scene's zone names (`aisle1`, `aisle2`), and the
+  optional `STORE_ID`. A query filtered to any of those tags returns that camera's clips.
+
+Adding a camera in SceneScape (a new name under `scenes[].cameras`) is the only step
+needed to ingest it — there is no separate camera file to edit.
 
 ## Search From the UI
 
@@ -130,8 +152,8 @@ so a query filtered to any of those tags returns it.
 
 - **No results with a time filter:** use the UI date pickers (they send UTC). Direct API
   calls with naive local timestamps are treated as UTC by VSS.
-- **No results for a camera:** check the camera is `enabled: true` in `cameras.yaml` and
-  re‑run; only enabled cameras are ingested.
+- **No results for a camera:** check the camera name is listed under `scenes[].cameras`
+  in `configs/scene-config.yaml`; only cameras defined there are ingested.
 - **`/recall` shows 404:** rebuild the UI image (`make up` rebuilds it).
 - **pipeline-manager keeps restarting (`database "video_summary_db" does not exist`):**
   start with `make up`, which creates the database on `pgserver` automatically.

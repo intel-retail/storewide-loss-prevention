@@ -29,6 +29,34 @@ RECALL_BASE_URL = os.environ.get("RECALL_BASE_URL", "http://vss-recall-bridge:80
 RECALL_SEARCH_API = f"{RECALL_BASE_URL}/api/v1/lp/recall/search"
 RECALL_CLIPS_API = f"{RECALL_BASE_URL}/api/v1/lp/recall/clips"
 
+# Recall feature toggle (mirrors the Makefile ENABLE_SEARCH flag). When off, the
+# nav button is hidden and the /recall page is not served.
+RECALL_ENABLED = os.environ.get("ENABLE_RECALL", "true").strip().lower() in (
+    "1",
+    "true",
+    "yes",
+    "on",
+)
+_RECALL_NAV = (
+    '<a href="/recall" style="font-size:13px;font-weight:600;color:#fff;'
+    'text-decoration:none;background:#ffffff22;padding:5px 12px;border-radius:4px;'
+    'border:1px solid #ffffff44;">&#128270; Recall</a>'
+    if RECALL_ENABLED
+    else ""
+)
+
+# Standalone recall UI (MODE=search / run-search): there is no dashboard at "/",
+# so the "← Dashboard" back-link is hidden.
+RECALL_STANDALONE = os.environ.get("RECALL_STANDALONE", "false").strip().lower() in (
+    "1",
+    "true",
+    "yes",
+    "on",
+)
+_DASHBOARD_BACK = (
+    "" if RECALL_STANDALONE else '<a class="back" href="/">&#8592; Dashboard</a>'
+)
+
 # MQTT config for real-time alerts
 MQTT_HOST = os.environ.get("MQTT_HOST", "broker.scenescape.intel.com")
 MQTT_PORT = int(os.environ.get("MQTT_PORT", "1883"))
@@ -493,7 +521,7 @@ table.dt tr:hover td{background:#f0f6ff;}
   <span>Suspicious Activity Detection</span>
  </div>
  <div style="display:flex;align-items:center;gap:1rem;">
-  <a href="/recall" style="font-size:13px;font-weight:600;color:#fff;text-decoration:none;background:#ffffff22;padding:5px 12px;border-radius:4px;border:1px solid #ffffff44;">&#128270; Recall</a>
+  """ + _RECALL_NAV + """
   <span class="scene">""" + SCENE_NAME + """</span>
  </div>
 </header>
@@ -676,7 +704,7 @@ footer{text-align:center;color:#999;font-size:12px;padding:8px;}
   <span>&#128270; Recall</span>
  </div>
  <div style="display:flex;align-items:center;gap:1rem;">
-  <a class="back" href="/">&#8592; Dashboard</a>
+  """ + _DASHBOARD_BACK + """
  </div>
 </header>
 <main>
@@ -760,6 +788,8 @@ $('query').addEventListener('keydown',function(e){if(e.key==='Enter'&&(e.ctrlKey
 
 @app.get("/recall", response_class=HTMLResponse)
 def recall_page():
+    if not RECALL_ENABLED:
+        return HTMLResponse("<h3>Recall Search is disabled.</h3>", status_code=404)
     return RECALL_HTML
 
 

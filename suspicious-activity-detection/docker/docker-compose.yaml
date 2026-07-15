@@ -162,6 +162,7 @@ services:
     environment:
       - LP_BASE_URL=http://scene-understanding-service:8082
       - RECALL_BASE_URL=${RECALL_BASE_URL:-http://vss-recall-bridge:8080}
+      - ENABLE_RECALL=${ENABLE_RECALL:-true}
       - MQTT_HOST=${MQTT_HOST:-broker.scenescape.intel.com}
       - MQTT_PORT=${MQTT_PORT:-1883}
       - MQTT_ALERT_TOPIC=alerts/#

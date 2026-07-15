@@ -17,14 +17,17 @@ comes straight from VSS.
 ```
 app/
   main.py              # FastAPI app + background ingest workers (lifespan)
-  config.py            # env settings + cameras.yaml loader
+  config.py            # env settings + scene-config.yaml camera loader
   models.py            # request/response DTOs
   ingest/              # remux, tagger, pipeline, segmenter, file_ingest
   query/routes.py      # POST /recall/search, GET /recall/clips/{id}
   clients/vss_client.py
-configs/cameras.yaml
 tests/
 ```
+
+The camera list is **not** configured in this repo — it is read from
+`scene-config.yaml`, mounted at runtime from the consuming application's `configs/`
+(path set by the `SCENE_CONFIG` env, default `configs/scene-config.yaml`).
 
 ## Run locally
 

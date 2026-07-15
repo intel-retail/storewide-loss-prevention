@@ -393,7 +393,7 @@ services:
       dockerfile: Dockerfile
     image: intel/swlp-suscpicious-ui:${TAG:-latest}
     ports:
-      - "${RECALL_UI_PORT:-7861}:7860"
+      - "${RECALL_UI_PORT:-7860}:7860"
     networks:
       - vs_network
     depends_on:
@@ -402,6 +402,7 @@ services:
     environment:
       RECALL_BASE_URL: http://vss-recall-bridge:8080
       RECALL_API_KEY: ${BRIDGE_API_KEY:-change-me}
+      RECALL_STANDALONE: "true"
       TZ: ${TZ:-UTC}
       no_proxy: ${no_proxy:-localhost,127.0.0.1},vss-recall-bridge
       NO_PROXY: ${no_proxy:-localhost,127.0.0.1},vss-recall-bridge

@@ -27,9 +27,40 @@ ifeq ($(ENABLE_UI_LOWER),true)
   COMPOSE_ALL := $(COMPOSE_ALL) --profile ui
 endif
 
-# Also bring up the self-contained search stack as part of `make up` (set false to skip)
-ENABLE_SEARCH ?= true
+# ---- Stack mode -------------------------------------------------------------
+# MODE selects what `make up` / `make down` operate on:
+#   core   (default) — SceneScape + Suspicious Activity only (no search)
+#   full             — core + the search/recall stack
+#   search           — only the standalone search/recall stack
+#
+# Legacy aliases still work (and map onto MODE):
+#   ENABLE_SEARCH=true  =>  MODE=full
+#   SEARCH_ONLY=true    =>  MODE=search
+MODE ?= core
+MODE_LOWER := $(shell echo $(MODE) | tr A-Z a-z)
+
+ENABLE_SEARCH ?= false
 ENABLE_SEARCH_LOWER := $(shell echo $(ENABLE_SEARCH) | tr A-Z a-z)
+SEARCH_ONLY ?= false
+SEARCH_ONLY_LOWER := $(shell echo $(SEARCH_ONLY) | tr A-Z a-z)
+
+# MODE is the primary selector; map it onto the underlying control flags that
+# the up/down targets already use.
+ifeq ($(MODE_LOWER),full)
+  ENABLE_SEARCH_LOWER := true
+endif
+ifeq ($(MODE_LOWER),search)
+  SEARCH_ONLY_LOWER := true
+endif
+
+# Recall UI button/page: shown whenever the search stack runs (full or search).
+ifeq ($(ENABLE_SEARCH_LOWER),true)
+  export ENABLE_RECALL := true
+else ifeq ($(SEARCH_ONLY_LOWER),true)
+  export ENABLE_RECALL := true
+else
+  export ENABLE_RECALL := false
+endif
 
 RESULTS_PATH ?= ./results
 
@@ -97,6 +128,13 @@ init: gen-zone-config
 
 .PHONY: up
 
+ifeq ($(SEARCH_ONLY_LOWER),true)
+# SEARCH_ONLY=true → run only the standalone search/recall stack (no SceneScape,
+# no LP services). Delegates to `run-search`.
+up:
+	@echo "=== SEARCH_ONLY=true → starting standalone search stack only (SceneScape + LP skipped) ==="
+	@$(MAKE) run-search
+else
 up: validate-device gen-zone-config
 	@$(MAKE) -C $(SCENESCAPE_DIR) APP_DIR=$(CURDIR) RESOURCE_CONFIG=$(RESOURCE_CONFIG) init init-sample-data download-models init-volumes
 	@$(MAKE) patch-device
@@ -159,10 +197,11 @@ up: validate-device gen-zone-config
 	@echo "  Login:           admin / $$(grep SUPASS docker/.env | cut -d= -f2-)"
 	@if [ "$(ENABLE_UI_LOWER)" = "true" ]; then \
 		echo "  SAD-DASHBOARD UI:       http://localhost:7860"; \
-		echo "  Recall UI: http://localhost:7860/recall"; \
+		if [ "$(ENABLE_SEARCH_LOWER)" = "true" ]; then \
+			echo "  Recall UI: http://localhost:7860/recall"; \
+		fi; \
 	else \
 		echo "  SAD-DASHBOARD UI:       DISABLED (ENABLE_UI=false)"; \
-		echo "  Recall UI: DISABLED (ENABLE_UI=false)"; \
 	fi
 	@echo ""
 	@echo "To stop: make down"
@@ -176,8 +215,14 @@ up: validate-device gen-zone-config
 		setsid sh -c 'sleep '`expr $(AUTO_STOP_MINUTES) \* 60`'; cd "$(CURDIR)" && $(MAKE) down' </dev/null >/tmp/swlp-auto-stop.log 2>&1 & \
 		echo $$! > /tmp/swlp-auto-stop.pid; \
 	fi
+endif
 
 .PHONY: down
+ifeq ($(SEARCH_ONLY_LOWER),true)
+# SEARCH_ONLY=true → tear down only the standalone search/recall stack.
+down:
+	@$(MAKE) down-search
+else
 down:
 	@BRIDGE=$$(docker ps -a --filter name=vss-recall-bridge --format '{{.Names}}' | head -n1); \
 	if [ -n "$$BRIDGE" ]; then \
@@ -188,7 +233,11 @@ down:
 	else \
 		$(COMPOSE_ALL) --profile ui down --remove-orphans; \
 	fi
-	-docker volume rm storewide-lp_seaweedfs-data 2>/dev/null || true
+	@# Best-effort: also stop a standalone search stack (from `make up MODE=search`),
+	@# which the combined compose files above don't know about. No-op if none running.
+	@$(SEARCH_ENV) $(COMPOSE_SEARCH) --profile recall-ui --profile standalone-rtsp down --remove-orphans || true
+	@-docker volume rm storewide-lp_seaweedfs-data 2>/dev/null || true
+endif
 
 
 # Scenescape only (without LP services)
@@ -253,12 +302,9 @@ run-search:
 	$(SEARCH_ENV) $(COMPOSE_SEARCH) --profile recall-ui --profile standalone-rtsp up -d --build
 	@echo ""
 	@echo "Search services running:"
-	@echo "  Recall UI:  http://localhost:$${RECALL_UI_PORT:-7861}/recall"
-	@echo "  Recall bridge:    http://localhost:$${RECALL_BRIDGE_PORT:-8090}/health"
-	@echo "  Pipeline Manager: http://localhost:$${PM_HOST_PORT:-3001}"
-	@echo "  Video Search MS:  http://localhost:$${VS_HOST_PORT:-7890}"
+	@echo "  Recall UI:  http://localhost:$${RECALL_UI_PORT:-7860}/recall"
 	@echo ""
-	@echo "To stop: make down-search"
+	@echo "To stop: make down"
 
 # Backend-only search stack (no swlp-recall-ui). Used by `make up`, where the
 # unified dashboard UI (swlp-suscpicious-ui) serves /recall. The recall bridge is
@@ -268,7 +314,7 @@ LP_NETWORK ?= storewide-lp_storewide-lp
 
 .PHONY: down-search
 down-search:
-	$(SEARCH_ENV) $(COMPOSE_SEARCH) down --remove-orphans
+	$(SEARCH_ENV) $(COMPOSE_SEARCH) --profile recall-ui --profile standalone-rtsp down --remove-orphans
 
 .PHONY: logs-search
 logs-search:
