@@ -299,7 +299,14 @@ COMPOSE_FULL := $(COMPOSE_ALL) -f docker/docker-compose.search.yaml -f docker/do
 .PHONY: run-search
 run-search:
 	@echo "=== Starting search stack (VSS search + recall bridge + investigator UI) ==="
-	$(SEARCH_ENV) $(COMPOSE_SEARCH) --profile recall-ui --profile standalone-rtsp up -d --build
+	@if [ "$(REGISTRY)" = "true" ]; then \
+		echo "Pulling recall bridge + UI from registry (no local build)..."; \
+		$(SEARCH_ENV) $(COMPOSE_SEARCH) --profile recall-ui pull vss-recall-bridge swlp-recall-ui; \
+		$(SEARCH_ENV) $(COMPOSE_SEARCH) --profile recall-ui --profile standalone-rtsp up -d --no-build; \
+	else \
+		echo "Building recall bridge + UI locally..."; \
+		$(SEARCH_ENV) $(COMPOSE_SEARCH) --profile recall-ui --profile standalone-rtsp up -d --build; \
+	fi
 	@echo ""
 	@echo "Search services running:"
 	@echo "  Recall UI:  http://localhost:$${RECALL_UI_PORT:-7860}/recall"
