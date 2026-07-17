@@ -1,9 +1,9 @@
 # Copyright (C) 2026 Intel Corporation
 # SPDX-License-Identifier: Apache-2.0
 
-# Full-stack deployment: SceneScape (pre-built images) + Storewide Loss Prevention
+# Full-stack deployment: Scenescape (pre-built images) + Storewide Loss Prevention
 #
-# All SceneScape services run from Docker Hub images — no source checkout needed.
+# All Scenescape services run from Docker Hub images — no source checkout needed.
 #
 # Quick start:
 #   1. ./scenescape/scripts/init.sh                    # generate secrets, download videos
@@ -41,7 +41,7 @@ secrets:
     file: ${SECRETSDIR}/calibration.auth
 
 # =========================================================================
-#  SceneScape Core Services (pre-built images from Docker Hub / registry)
+#  Scenescape Core Services (pre-built images from Docker Hub / registry)
 # =========================================================================
 
 services:
@@ -95,7 +95,7 @@ services:
       retries: 30
       start_period: 5s
 
-  # ---- SceneScape Web / Manager ----
+  # ---- Scenescape Web / Manager ----
   web:
     image: ${SCENESCAPE_REGISTRY-intel/}${SCENESCAPE_MANAGER_IMAGE:-scenescape-manager}:${SCENESCAPE_VERSION:-latest}
     init: true
@@ -183,7 +183,7 @@ services:
     entrypoint: ["/bin/bash", "/webserver/scene-import.sh"]
     restart: "no"
 
-  # ---- SceneScape Controller (tracking + analytics) ----
+  # ---- Scenescape Controller (tracking + analytics) ----
   # scenescape-controller:latest
   scene:
     image: ${SCENESCAPE_REGISTRY-intel/}${SCENESCAPE_CONTROLLER_IMAGE:-scenescape-controller}:${SCENESCAPE_VERSION:-latest}

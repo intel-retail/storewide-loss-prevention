@@ -3,9 +3,9 @@
 
 # Storewide Loss Prevention - Makefile
 #
-# Full-stack deployment using pre-built SceneScape Docker images.
-# No SceneScape source checkout required.
-# SceneScape-specific targets are in scenescape/Makefile.
+# Full-stack deployment using pre-built Scenescape Docker images.
+# No Scenescape source checkout required.
+# Scenescape-specific targets are in scenescape/Makefile.
 
 SCENESCAPE_DIR := ../scenescape
 
@@ -57,7 +57,7 @@ init:
 	@# (which runs as HOST_UID:HOST_GID) can write uploads and results.
 	@mkdir -p data/uploads data/faiss results
 
-# ---- Full Stack (SceneScape + LP) ----
+# ---- Full Stack (Scenescape + LP) ----
 
 .PHONY: demo
 demo:
@@ -79,7 +79,7 @@ lp-down:
 	@rm -f $(SCENESCAPE_DIR)/dlstreamer-pipeline-server/person-of-interest-*-[0-9]*-pipeline-config.json 2>/dev/null || true
 	@rm -f docker/docker-compose.cameras.yaml 2>/dev/null || true
 
-# SceneScape only (without LP services)
+# Scenescape only (without LP services)
 .PHONY: run-scenescape
 run-scenescape:
 	@$(MAKE) -C $(SCENESCAPE_DIR) APP_DIR=$(CURDIR) run
@@ -104,13 +104,13 @@ lp-logs:
 status:
 	$(COMPOSE_ALL) ps
 
-# ---- LP-Only (SceneScape must be running separately) ----
+# ---- LP-Only (Scenescape must be running separately) ----
 
 .PHONY: demo-lp
 demo-lp:
 	@echo "Building LP images..."
 	$(COMPOSE_ALL) build swlp-service behavioral-analysis gradio-ui
-	@echo "Starting LP services only (SceneScape must be running)..."
+	@echo "Starting LP services only (Scenescape must be running)..."
 	$(COMPOSE_LP) up -d
 
 .PHONY: down-lp
@@ -471,17 +471,17 @@ clean-all: clean clean-secrets clean-images
 help:
 	@echo "Storewide Loss Prevention - Available targets:"
 	@echo ""
-	@echo "  Full Stack (SceneScape + LP, using pre-built images):"
+	@echo "  Full Stack (Scenescape + LP, using pre-built images):"
 	@echo "    make run-scenescape  - Single command: init + models + start"
 	@echo "    make demo            - Initialize and start everything"
 	@echo "    make download-models - Download OpenVINO AI models"
-	@echo "    make export-scene    - Export scene config from running SceneScape"
+	@echo "    make export-scene    - Export scene config from running Scenescape"
 	@echo "    make lp-down         - Stop all LP services"
-	@echo "    make down-scenescape - Stop SceneScape only"
+	@echo "    make down-scenescape - Stop Scenescape only"
 	@echo "    make lp-logs         - Follow LP logs"
 	@echo "    make status          - Show LP service status"
 	@echo ""
-	@echo "  LP-Only (SceneScape must be running separately):"
+	@echo "  LP-Only (Scenescape must be running separately):"
 	@echo "    make demo-lp         - Start LP services only"
 	@echo "    make down-lp         - Stop LP services"
 	@echo ""
@@ -550,8 +550,8 @@ NC := \033[0m
 
 .PHONY: build
 build:
-	@echo "$(BLUE)=== Using local SceneScape images (skipping registry pull) ===$(NC)"
-	-$(COMPOSE_SCENESCAPE) pull 2>/dev/null || echo "SceneScape images already available locally"
+	@echo "$(BLUE)=== Using local Scenescape images (skipping registry pull) ===$(NC)"
+	-$(COMPOSE_SCENESCAPE) pull 2>/dev/null || echo "Scenescape images already available locally"
 	@echo ""
 	@echo "$(BLUE)=== Building POI images ===$(NC)"
 	$(COMPOSE_POI) build poi-backend ui
@@ -611,24 +611,24 @@ up:
 	fi
 	@$(MAKE) -C $(SCENESCAPE_DIR) APP_DIR=$(CURDIR) RESOURCE_CONFIG=$(RESOURCE_CONFIG) init init-sample-data init-volumes
 	@chmod 644 $(SCENESCAPE_DIR)/secrets/certs/*.key $(SCENESCAPE_DIR)/secrets/ca/*.key 2>/dev/null || true
-	@echo "$(BLUE)=== Starting SceneScape services ===$(NC)"
+	@echo "$(BLUE)=== Starting Scenescape services ===$(NC)"
 	@# CONTROLLER_AUTH must be in the process environment (not just --env-file) for the
 	@# environment:-source Docker secret to be injected at container creation time.
 	CONTROLLER_AUTH="$$(grep '^CONTROLLER_AUTH=' docker/.env | cut -d= -f2-)" $(COMPOSE_SCENESCAPE) up -d
-	@echo "  Waiting for SceneScape web health check..."; \
+	@echo "  Waiting for Scenescape web health check..."; \
 	attempts=0; \
 	while [ $$attempts -lt 15 ]; do \
 		status=$$(docker inspect storewide-lp-web-1 --format='{{.State.Health.Status}}' 2>/dev/null || echo "missing"); \
 		if [ "$$status" = "healthy" ]; then break; fi; \
 		if [ "$$status" = "unhealthy" ]; then \
 			if docker logs storewide-lp-pgserver-1 2>&1 | tail -20 | grep -q 'password authentication failed'; then \
-				echo "$(BLUE)=== SceneScape DB password mismatch — resetting stale DB volumes ===$(NC)"; \
+				echo "$(BLUE)=== Scenescape DB password mismatch — resetting stale DB volumes ===$(NC)"; \
 				$(COMPOSE_SCENESCAPE) stop pgserver web scene scene-import 2>/dev/null || true; \
 				docker volume rm storewide-lp_vol-db storewide-lp_vol-migrations 2>/dev/null && \
 					echo "  Removed storewide-lp_vol-db and storewide-lp_vol-migrations" || true; \
 				CONTROLLER_AUTH="$$(grep '^CONTROLLER_AUTH=' docker/.env | cut -d= -f2-)" $(COMPOSE_SCENESCAPE) up -d; \
 			else \
-				echo "$(YELLOW)=== SceneScape web unhealthy (not a DB password issue) — check logs with: docker logs storewide-lp-web-1 ===$(NC)"; \
+				echo "$(YELLOW)=== Scenescape web unhealthy (not a DB password issue) — check logs with: docker logs storewide-lp-web-1 ===$(NC)"; \
 			fi; \
 			break; \
 		fi; \
@@ -643,7 +643,7 @@ up:
 	$(COMPOSE_POI) up -d poi-backend ui poi-alert-service
 	@echo ""
 	@echo "System running:"
-	@echo "  SceneScape UI:   https://localhost"
+	@echo "  Scenescape UI:   https://localhost"
 	@echo "  Backend API:     http://localhost:8000"
 	@echo "  POI UI:          http://localhost:3000"
 	@echo "  Alert Service:   http://localhost:8001"
@@ -651,7 +651,7 @@ up:
 	@if [ -f docker/.env ]; then \
 		SUPASS=$$(grep '^SUPASS=' docker/.env 2>/dev/null | cut -d= -f2-); \
 		if [ -n "$$SUPASS" ]; then \
-			echo "  SceneScape Login: admin / $$SUPASS"; \
+			echo "  Scenescape Login: admin / $$SUPASS"; \
 			echo ""; \
 		fi; \
 	fi

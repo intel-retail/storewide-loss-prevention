@@ -312,7 +312,7 @@ class DetectionIndexRepository(IDetectionIndexRepository):
         """Store or merge a durable final exit record for a track.
 
         Merges with any existing record so that both the ExitPromoterThread
-        and SceneScape exit events can contribute fields without overwriting
+        and Scenescape exit events can contribute fields without overwriting
         each other.  Uses a Lua script for atomic read-modify-write.
         """
         key = f"{_REDIS_FINAL_EXIT_PREFIX}{track_id}"
@@ -419,7 +419,7 @@ class DetectionIndexRepository(IDetectionIndexRepository):
 
         Used to deduplicate: one embedding per tracker track, not one per frame.
         Uses track_seen_ttl (default 600s), NOT the 7-day data TTL — so that when
-        the SceneScape tracker recycles an integer ID for a new person, the gate
+        the Scenescape tracker recycles an integer ID for a new person, the gate
         expires in time and the new person is stored as a distinct detection.
 
         NOTE: gate is NOT refreshed here — call refresh_track_gate() separately

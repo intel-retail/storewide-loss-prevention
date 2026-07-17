@@ -1,0 +1,80 @@
+# Consolidated-Postgres override — loaded ONLY by `make up` (combined stack).
+#
+# In the combined stack the SceneScape `pgserver` is the single Postgres instance.
+# The search stack's own `postgres-service` is disabled (profile-gated) and the
+# VSS pipeline-manager is repointed at `pgserver` (which already lives on the
+# `storewide-lp` network). Standalone `make run-search` does NOT load this file,
+# so it keeps its self-contained `postgres-service`.
+#
+# NOTE on VDMS: the combined stack intentionally runs TWO VDMS containers, and
+# they are NOT consolidated. SceneScape's `vdms` (TLS, `intellabs/vdms`) is used
+# by the controller for person re-identification (ReID), while the search stack's
+# `vdms-vector-db` (plaintext) stores CLIP embeddings for video search. They use
+# the same image (no duplicate pull) but have incompatible transports and
+# separate data, so both must run.
+
+services:
+  # Disable the duplicate search Postgres in the combined stack by hiding it
+  # behind a profile that `make up` never activates.
+  postgres-service:
+    profiles:
+      - standalone-db
+
+  # Point the VSS pipeline-manager at the shared SceneScape Postgres. The
+  # `video_summary_db` database is created in pgserver by `make up`.
+  pipeline-manager:
+    networks:
+      - vs_network
+      - storewide-lp
+    environment:
+      DB_HOST: pgserver
+      DB_PORT: 5432
+      DB_USER: scenescape
+      DB_PASSWORD: ${DATABASE_PASSWORD:-}
+      DB_NAME: video_summary_db
+
+  # NOTE: The search stack no longer defines `mediaserver` or `camera-stream`.
+  # In the combined stack the recall bridge ingests live RTSP: SceneScape's
+  # `lp-cams` publishes `lp-camera1` to SceneScape's own `mediaserver` on the
+  # `storewide-lp` network, and the bridge reads `rtsp://mediaserver:8554/...`.
+  #
+  # We intentionally do NOT gate `vss-recall-bridge` on `mediaserver`/`lp-cams`
+  # here: the segmenter waits for the RTSP source to become resolvable and
+  # listening before launching ffmpeg, so the startup DNS race is handled at
+  # runtime. A compose-level dependency would also create a cycle
+  # (lp-cams -> swlp-suscpicious-ui -> vss-recall-bridge -> lp-cams).
+
+  # The search stack starts in PARALLEL with SceneScape + suspicious-activity in
+  # the combined stack — it is intentionally NOT gated behind
+  # `scene-understanding-service`, so both stacks come up together instead of the
+  # search stack lagging ~1-2 min behind. The search stack keeps its own internal
+  # ordering (embedding -> dataprep -> video-search -> pipeline-manager) from
+  # docker-compose.search.yaml. Trade-off: heavier concurrent startup load, since
+  # the VLM, CLIP embedding, and YOLOX models load at the same time.
+
+  # Additionally gate the unified dashboard UI on the recall bridge being up, so
+  # the /recall page's backend exists before the UI serves it. The bridge now
+  # starts early (it no longer waits for the search backend), so this does not
+  # delay the dashboard. Only `make up` loads this override; standalone runs are
+  # unaffected. `depends_on` maps merge with the base (scene-understanding-service).
+  swlp-suscpicious-ui:
+    depends_on:
+      vss-recall-bridge:
+        condition: service_healthy
+
+  # Hold the camera video pipeline until the recall search backend is ready to
+  # ingest, so video only starts streaming once recall can capture it — no window
+  # where video plays on the dashboard but clips aren't being recorded/indexed.
+  # The recall bridge is already up and waiting, so it captures from the first
+  # published frame → no missed clips. `pipeline-manager: service_healthy` is the
+  # search stack's "ready to ingest" signal. Only `make up MODE=full` loads this
+  # override, so core (no-search) and standalone runs are unaffected.
+  lp-cams:
+    depends_on:
+      pipeline-manager:
+        condition: service_healthy
+  lp-video:
+    depends_on:
+      pipeline-manager:
+        condition: service_healthy
+

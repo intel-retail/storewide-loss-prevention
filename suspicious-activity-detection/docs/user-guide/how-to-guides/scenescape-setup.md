@@ -1,27 +1,27 @@
-# Setup Intel® SceneScape
+# Setup Scenescape
 
-SceneScape is the spatial intelligence layer that provides person detection,
+Scenescape is the spatial intelligence layer that provides person detection,
 tracking, and re-identification for the Suspicious Activity Detection
 application. It runs entirely from pre-built Docker images — no source
 checkout is required.
 
-This page explains how SceneScape is configured and managed within the
+This page explains how Scenescape is configured and managed within the
 application stack.
 
 ## Overview
 
-SceneScape is a **shared component** located at
+Scenescape is a **shared component** located at
 `storewide-loss-prevention/scenescape/`. It is never run directly from that
-directory. Instead, the application's `Makefile` invokes SceneScape targets
+directory. Instead, the application's `Makefile` invokes Scenescape targets
 with `APP_DIR` pointing to the application directory, so that `init.sh` reads
 the correct configs and writes to the correct `docker/.env`.
 
 When you run `make up` from the `suspicious-activity-detection/` directory,
-SceneScape is automatically initialized and started alongside the LP services.
+Scenescape is automatically initialized and started alongside the LP services.
 
 ## Architecture
 
-SceneScape provides the following services:
+Scenescape provides the following services:
 
 | Service | Description |
 |---------|-------------|
@@ -32,16 +32,16 @@ SceneScape provides the following services:
 | **VDMS** | Vector database for person re-identification descriptor storage. |
 | **NTP Server** | Provides time synchronization for all containers. |
 | **Media Server** | RTSP relay for camera streams. |
-| **Web UI** | SceneScape admin interface for scene management and live visualization. |
+| **Web UI** | Scenescape admin interface for scene management and live visualization. |
 
 ## Configuration Files
 
-SceneScape reads its configuration from the application's `configs/` directory:
+Scenescape reads its configuration from the application's `configs/` directory:
 
 | File | Purpose |
 |------|---------|
 | `configs/zone_config.json` | Defines the scene, camera(s), video source, and zone-to-type mappings (e.g., `aisle1` → `HIGH_VALUE`). |
-| `configs/pipeline-config.json` | DLStreamer pipeline template with `{{CAMERA_NAME}}` placeholder. Rendered at init time with device-specific settings. |
+| `configs/scenescape/pipeline-config.json` | DLStreamer pipeline template with `{{CAMERA_NAME}}` placeholder. Rendered at init time with device-specific settings. |
 | `configs/.env.example` | Reference environment variables including `SCENESCAPE_REGISTRY`, `SCENESCAPE_VERSION`, and model/device settings. |
 | `configs/res/*.env` | Device resource profiles that control inference device, decode chain, and throughput options. |
 
@@ -57,7 +57,7 @@ running `make up`. The filename must match the
 "camera_name": "lp-camera1",
 ```
 
-This archive defines the scene in SceneScape and contains:
+This archive defines the scene in Scenescape and contains:
 
 - A floor plan image
 - Zone polygon definitions (regions of interest)
@@ -66,7 +66,7 @@ This archive defines the scene in SceneScape and contains:
 On first startup, the import script (`scenescape/webserver/scene-import.sh`)
 waits for the controller to become healthy, then uploads all `.zip` files
 from that directory to create the scene, zones, and camera configuration
-inside SceneScape.
+inside Scenescape.
 
 ## Initialization
 
@@ -74,7 +74,7 @@ The `scenescape/scripts/init.sh` script performs the following steps:
 
 1. **Generates TLS certificates** for MQTT broker authentication (stored in
    `scenescape/secrets/certs/`).
-2. **Creates Django secrets** for the SceneScape web UI (stored in
+2. **Creates Django secrets** for the Scenescape web UI (stored in
    `scenescape/secrets/django/`).
 3. **Generates a random admin password** (`SUPASS`) for the web interface.
 4. **Reads `configs/.env.example`** and sources AI-model settings
@@ -101,22 +101,22 @@ make init DEVICE=all-gpu.env
 
 ## Image Versions
 
-SceneScape container images are controlled by two variables in
+Scenescape container images are controlled by two variables in
 `configs/.env.example`:
 
 ```bash
 # Private registry prefix (leave empty for local images)
 SCENESCAPE_REGISTRY=
 
-# Image tag for SceneScape containers (controller, manager, etc.)
-# Must match the deployed SceneScape release — see configs/.env.example for the current value
+# Image tag for Scenescape containers (controller, manager, etc.)
+# Must match the deployed Scenescape release — see configs/.env.example for the current value
 SCENESCAPE_VERSION=
 ```
 
 - **`SCENESCAPE_REGISTRY`**: Set to a registry URL if pulling from a private
   registry (e.g., `myregistry.com/scenescape/`). Leave empty to use locally
   available images.
-- **`SCENESCAPE_VERSION`**: Must match the SceneScape release deployed. This
+- **`SCENESCAPE_VERSION`**: Must match the Scenescape release deployed. This
   tag is applied to the controller and manager images.
 
 ## Device Profiles
@@ -143,7 +143,7 @@ Profiles are defined in `configs/res/` and control:
 
 ## Prerequisites
 
-Before running SceneScape, ensure the following steps are completed:
+Before running Scenescape, ensure the following steps are completed:
 
 ### 1. Download Sample Video
 
@@ -175,7 +175,7 @@ filename matching `scene_zip` in `configs/zone_config.json`.
 
 ## Running the Stack
 
-To start the full stack (SceneScape + LP services + model mounts), run from
+To start the full stack (Scenescape + LP services + model mounts), run from
 the `suspicious-activity-detection/` directory:
 
 ```bash
@@ -185,7 +185,7 @@ make up
 
 `make up` automatically performs initialization (`init.sh`), downloads
 sample data and models, creates Docker volumes, and starts all services
-including SceneScape infrastructure and the LP detection pipeline.
+including Scenescape infrastructure and the LP detection pipeline.
 
 The app-level Docker Compose overlay
 ([docker/docker-compose.yaml](https://github.com/intel-retail/storewide-loss-prevention/blob/main/suspicious-activity-detection/docker/docker-compose.yaml)) mounts
@@ -205,13 +205,13 @@ make down
 
 ## Re-Identification (ReID)
 
-SceneScape tracks persons across frames and camera views using a
+Scenescape tracks persons across frames and camera views using a
 re-identification model. The ReID descriptor store uses VDMS (Vector Data
 Management System).
 
 ## MQTT Authentication
 
-The SceneScape MQTT broker (Mosquitto) uses **TLS client certificates** for
+The Scenescape MQTT broker (Mosquitto) uses **TLS client certificates** for
 authentication — not username/password. Certificates are auto-generated by
 `init.sh` into `scenescape/secrets/certs/` and mounted read-only into all
 containers that connect to the broker.
@@ -227,13 +227,13 @@ MQTT_PORT=1883                           # Broker port
 > connections are authenticated via TLS client certificates. If you see
 > connection errors, re-run `make init` to regenerate the certificates.
 
-## Accessing the SceneScape UI
+## Accessing the Scenescape UI
 
 Once the stack is running:
 
 | Service | URL | Credentials |
 |---------|-----|-------------|
-| SceneScape UI | `https://localhost` | `admin` / password printed by `make up` |
+| Scenescape UI | `https://localhost` | `admin` / password printed by `make up` |
 
 The password is auto-generated and stored in `docker/.env` as `SUPASS`. You
 can retrieve it at any time:
@@ -244,15 +244,15 @@ grep SUPASS docker/.env | cut -d= -f2-
 
 ## Environment Variable Reference
 
-The following variables in `configs/.env.example` are specific to SceneScape
+The following variables in `configs/.env.example` are specific to Scenescape
 configuration. They are read by `init.sh` and written to `docker/.env`.
 
-### SceneScape Image Versions
+### Scenescape Image Versions
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `SCENESCAPE_REGISTRY` | Private registry prefix for SceneScape images. Leave empty for local images. Set to a registry URL (e.g., `myregistry.com/scenescape/`) when pulling from a private registry. | *(empty)* |
-| `SCENESCAPE_VERSION` | Image tag for SceneScape containers (controller, manager). Must match the SceneScape release deployed alongside this application. | `v2026.1.0-rc1` |
+| `SCENESCAPE_REGISTRY` | Private registry prefix for Scenescape images. Leave empty for local images. Set to a registry URL (e.g., `myregistry.com/scenescape/`) when pulling from a private registry. | *(empty)* |
+| `SCENESCAPE_VERSION` | Image tag for Scenescape containers (controller, manager). Must match the Scenescape release deployed alongside this application. | `v2026.1.0-rc1` |
 | `DLSTREAMER_VERSION` | Intel DL Streamer image tag for video analytics pipelines. | `2026.1.0-ubuntu24-rc1.1` |
 
 ### Host / Proxy
@@ -268,9 +268,9 @@ configuration. They are read by `init.sh` and written to `docker/.env`.
 > `HTTP_PROXY`, `HTTPS_PROXY`, `NO_PROXY`. The Docker Compose file
 > auto-derives these from the lowercase variables.
 
-### MQTT (SceneScape Broker)
+### MQTT (Scenescape Broker)
 
-The MQTT broker is provided by the SceneScape stack (Mosquitto).
+The MQTT broker is provided by the Scenescape stack (Mosquitto).
 Authentication uses **TLS client certificates** auto-generated by `init.sh`
 into `scenescape/secrets/`. No `MQTT_USERNAME` or `MQTT_PASSWORD` is needed.
 
@@ -279,16 +279,16 @@ into `scenescape/secrets/`. No `MQTT_USERNAME` or `MQTT_PASSWORD` is needed.
 | `MQTT_HOST` | Broker hostname (resolved via Docker DNS). | `broker.scenescape.intel.com` |
 | `MQTT_PORT` | Broker port. | `1883` |
 
-### SceneScape Secrets (auto-populated)
+### Scenescape Secrets (auto-populated)
 
 These are generated automatically by `init.sh` — do not edit them manually.
 
 | Variable | Description |
 |----------|-------------|
 | `SECRETSDIR` | Path to TLS certificates and Django secrets. Default: `./scenescape/secrets` |
-| `SUPASS` | Auto-generated admin password for the SceneScape web UI. |
+| `SUPASS` | Auto-generated admin password for the Scenescape web UI. |
 | `DATABASE_PASSWORD` | Auto-generated PostgreSQL password. |
-| `CONTROLLER_AUTH` | Auto-generated auth token for SceneScape controller. |
+| `CONTROLLER_AUTH` | Auto-generated auth token for Scenescape controller. |
 | `UID` / `GID` | User/group ID for container file permissions. Default: `1000` |
 
 ### DLStreamer Pipeline

@@ -36,7 +36,7 @@ You are a DevOps engineer specialising in Docker containerisation for this retai
 - Docker socket → `/var/run/docker.sock:ro` — MCP server only, always read-only.
 
 ### Networks
-- `storewide-lp` — external, connects backend to SceneScape MQTT broker.
+- `storewide-lp` — external, connects backend to Scenescape MQTT broker.
 - `poi-internal` — bridge, all POI services.
 - Only `poi-backend` joins both networks. Never attach Redis to `storewide-lp`.
 

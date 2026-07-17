@@ -1,9 +1,9 @@
 # Copyright (C) 2026 Intel Corporation
 # SPDX-License-Identifier: Apache-2.0
 
-# SceneScape - Makefile
+# Scenescape - Makefile
 #
-# Manages SceneScape services: init, volumes, models, start, stop.
+# Manages Scenescape services: init, volumes, models, start, stop.
 
 SCENESCAPE_DIR := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))
 ENV_FILE := $(APP_DIR)/docker/.env
@@ -63,7 +63,7 @@ init-volumes:
 	@docker volume create storewide-lp_vol-models 2>/dev/null || true
 	@echo "Volumes initialized."
 
-# ---- Load local SceneScape images from reid-drop ----
+# ---- Load local Scenescape images from reid-drop ----
 # Use after receiving a reid-drop.tar containing updated controller/manager images.
 # The loaded images are tagged scenescape-controller:latest / scenescape-manager:latest.
 # To use them, set in docker/.env:
@@ -75,7 +75,7 @@ REID_DROP_DIR ?= $(SCENESCAPE_DIR)/../reid-drop
 
 .PHONY: load-images
 load-images:
-	@echo "=== Loading SceneScape images from $(REID_DROP_DIR) ==="
+	@echo "=== Loading Scenescape images from $(REID_DROP_DIR) ==="
 	@test -f "$(REID_DROP_DIR)/scenescape-controller.tar" || { echo "ERROR: $(REID_DROP_DIR)/scenescape-controller.tar not found"; exit 1; }
 	@test -f "$(REID_DROP_DIR)/scenescape-manager.tar"    || { echo "ERROR: $(REID_DROP_DIR)/scenescape-manager.tar not found"; exit 1; }
 	docker load < "$(REID_DROP_DIR)/scenescape-controller.tar"
@@ -89,21 +89,21 @@ load-images:
 	@echo "  SCENESCAPE_MANAGER_IMAGE=scenescape-manager"
 	@echo "  SCENESCAPE_VERSION=latest"
 
-# ---- Start SceneScape ----
+# ---- Start Scenescape ----
 
 .PHONY: run
 run: init init-sample-data download-models init-volumes
 	@echo ""
-	@echo "=== Starting SceneScape ==="
+	@echo "=== Starting Scenescape ==="
 	$(COMPOSE_SCENESCAPE) up -d
 	@echo ""
-	@echo "=== SceneScape is running ==="
+	@echo "=== Scenescape is running ==="
 	@echo "  UI:    https://localhost"
 	@echo "  Login: admin / $$(grep SUPASS $(ENV_FILE) | cut -d= -f2-)"
 	@echo ""
 	@echo "To stop: make -C $(SCENESCAPE_DIR) down"
 
-# ---- Stop SceneScape ----
+# ---- Stop Scenescape ----
 
 .PHONY: down
 down:

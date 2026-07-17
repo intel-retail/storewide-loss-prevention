@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: "User Guide – Person of Interest (POI)"
+    url: https://github.com/intel-retail/storewide-loss-prevention/blob/main/person-of-interest/docs/user-guide/get-started.md
+    about: Issue with re-identification, alerts, or enrollment? Read this first.
+  - name: "User Guide – Suspicious Activity Detection (SAD)"
+    url: https://github.com/intel-retail/storewide-loss-prevention/blob/main/suspicious-activity-detection/docs/user-guide/get-started.md
+    about: Issue with zone detection, behavioral analysis, or VLM? Read this first.

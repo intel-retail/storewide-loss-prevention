@@ -11,7 +11,7 @@ Before running any benchmark, ensure the following setup steps have been
 completed:
 
 ```bash
-# 1. Initialize Git submodules (performance-tools, SceneScape, etc.)
+# 1. Initialize Git submodules (performance-tools, Scenescape, etc.)
 make update-submodules
 
 # 2. Download required AI models (face detection, re-identification)
@@ -26,8 +26,8 @@ make init DEVICE=all-npu-cpu.env  # or NPU variant
 
 **Sample data requirements:**
 
-- **SceneScape video files** — sample video files must be present in the
-  SceneScape sample data directory (e.g., `scenescape/sample_data/`). These
+- **Scenescape video files** — sample video files must be present in the
+  Scenescape sample data directory (e.g., `scenescape/sample_data/`). These
   provide the camera feed for the benchmark pipeline.
 - **POI sample images** — at least `sample_data/poi_1.png` must exist in the
   POI directory. The benchmark enrolls this image as the target POI.

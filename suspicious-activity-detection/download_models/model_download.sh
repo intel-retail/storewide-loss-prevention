@@ -156,11 +156,21 @@ ensure_python_env() {
         return 0
     fi
 
-    if [ ! -f "${SCRIPT_DIR}/export_model.py" ]; then
+    if [ ! -f "${SCRIPT_DIR}/export_model.py" ] || [ ! -f "${SCRIPT_DIR}/export_requirements.txt" ]; then
         echo "  Downloading OVMS export tools..."
-        EXPORT_BASE_URL="https://raw.githubusercontent.com/openvinotoolkit/model_server/refs/heads/releases/2026/0/demos/common/export_models"
-        curl -fsSL "${EXPORT_BASE_URL}/export_model.py" -o "${SCRIPT_DIR}/export_model.py"
-        curl -fsSL "${EXPORT_BASE_URL}/requirements.txt" -o "${SCRIPT_DIR}/export_requirements.txt"
+        # Primary: GitHub raw. Fallback: jsDelivr CDN mirror (raw.githubusercontent.com
+        # frequently rate-limits, returning 429/503 which surfaces as curl exit 22).
+        local gh_base="https://raw.githubusercontent.com/openvinotoolkit/model_server/refs/heads/releases/2026/0/demos/common/export_models"
+        local cdn_base="https://cdn.jsdelivr.net/gh/openvinotoolkit/model_server@releases/2026/0/demos/common/export_models"
+        _fetch_export_tool() {
+            # $1 = remote filename, $2 = local destination path
+            if ! curl -fsSL --retry 3 --retry-delay 2 "${gh_base}/$1" -o "$2"; then
+                echo "  ! GitHub raw unavailable for $1, retrying via jsDelivr mirror..."
+                curl -fsSL --retry 3 --retry-delay 2 "${cdn_base}/$1" -o "$2"
+            fi
+        }
+        _fetch_export_tool "export_model.py" "${SCRIPT_DIR}/export_model.py"
+        _fetch_export_tool "requirements.txt" "${SCRIPT_DIR}/export_requirements.txt"
         echo "  ✓ Export tools downloaded"
     fi
 

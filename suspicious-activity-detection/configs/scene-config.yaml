@@ -1,0 +1,49 @@
+# SPDX-FileCopyrightText: (C) 2026 Intel Corporation
+# SPDX-License-Identifier: Apache-2.0
+#
+# Self-contained configuration for scene-understanding-service.
+# Defines how the service connects to SceneScape (MQTT + REST API) and which
+# scenes/cameras/zones it monitors. Decoupled from how SceneScape is provisioned.
+
+# SceneScape REST API — used for zone auto-discovery.
+scenescape_api:
+  base_url: https://web.scenescape.intel.com
+  auth_path: /api/v1/auth
+  scenes_path: /api/v1/scenes
+  regions_path: /api/v1/regions
+  verify_ssl: false
+
+# Scenes the service monitors. Each scene lists its cameras and a
+# zone-name -> zone-type mapping (HIGH_VALUE, CHECKOUT, EXIT, RESTRICTED).
+#
+# The extra deploy-only keys (scene_zip, sample_video_fps, sample_video_urls) are
+# consumed by the SceneScape provisioning scripts via scripts/gen-zone-config.py,
+# which translates this file into the legacy configs/zone_config.json (a generated,
+# gitignored artifact). The scene-understanding-service ignores these extra keys.
+# `cameras` must stay a plain list of names; sample-video URLs are keyed by name
+# and the local filename is derived as "<camera-name>.mp4".
+scenes:
+  - scene_name: storewide loss prevention
+    scene_zip: storewide-loss-prevention.zip
+    sample_video_fps: 30
+    cameras:
+      - lp-camera1
+    zones:
+      aisle1: HIGH_VALUE
+      aisle2: CHECKOUT
+    sample_video_urls:
+      lp-camera1: https://www.pexels.com/download/video/37668440/
+
+# MQTT broker connection and SceneScape topic patterns.
+mqtt:
+  host: broker.scenescape.intel.com
+  port: 1883
+  use_tls: false
+  cert_required: false
+  verify_hostname: false
+  ca_cert_path: secrets/certs/scenescape-ca.pem
+  scene_data_topic_pattern: scenescape/data/scene/+/+
+  region_event_topic_pattern: scenescape/event/region/+/+/+
+  image_topic_pattern: scenescape/image/camera/+
+  cmd_topic_pattern: scenescape/cmd/camera/{camera_name}
+  alert_topic_prefix: lp/alerts

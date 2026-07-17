@@ -2,7 +2,7 @@
 # Copyright (C) 2026 Intel Corporation
 # SPDX-License-Identifier: Apache-2.0
 #
-# Import a SceneScape scene configuration from a zip file.
+# Import a Scenescape scene configuration from a zip file.
 # If the scene already exists, prompts the user before replacing.
 #
 # Usage:
@@ -10,7 +10,7 @@
 #
 # The script reads scene_zip and scene_name from zone_config.json,
 # locates the zip under scenescape/webserver/, authenticates with
-# the SceneScape REST API, and imports (or replaces) the scene.
+# the Scenescape REST API, and imports (or replaces) the scene.
 
 set -e
 
@@ -78,7 +78,7 @@ if [ -z "${SUPASS}" ]; then
     exit 1
 fi
 
-# ---- SceneScape API connection ----
+# ---- Scenescape API connection ----
 SCENESCAPE_URL="${API_BASE_URL}"
 CA_CERT="${SCENESCAPE_DIR}/secrets/certs/scenescape-ca.pem"
 CURL_TLS_FLAGS="-k"
@@ -86,7 +86,7 @@ if [ -f "${CA_CERT}" ]; then
     CURL_TLS_FLAGS="-k --cacert ${CA_CERT}"
 fi
 
-echo -e "${GREEN}=== SceneScape Scene Import ===${NC}"
+echo -e "${GREEN}=== Scenescape Scene Import ===${NC}"
 echo "  Scene:  ${SCENE_NAME}"
 echo "  Zip:    ${ZIP_PATH}"
 echo "  API:    ${SCENESCAPE_URL}"

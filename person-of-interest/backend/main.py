@@ -111,7 +111,7 @@ async def lifespan(app: FastAPI):
     )
     detection_index = DetectionIndexRepository(_redis_client) if cfg.detection_index_enabled else None
 
-    log.info("Initializing SceneScape adapter...")
+    log.info("Initializing Scenescape adapter...")
     scenescape = ScenescapeAPIAdapter()
 
     # ── Strategy ──

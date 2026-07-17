@@ -2,7 +2,7 @@
 # Copyright (C) 2026 Intel Corporation
 # SPDX-License-Identifier: Apache-2.0
 #
-# Resolve the SceneScape Scene UID dynamically by querying the SceneScape API.
+# Resolve the Scenescape Scene UID dynamically by querying the Scenescape API.
 # Authenticates with username/password, fetches the first scene, and writes
 # SCENE_UID into the .env file.
 #
@@ -55,9 +55,9 @@ if [ -n "${CURRENT_UID}" ]; then
     exit 0
 fi
 
-echo "  Resolving SCENE_UID from SceneScape API..."
+echo "  Resolving SCENE_UID from Scenescape API..."
 
-# ── Wait for SceneScape API to be ready (up to 60s) ──
+# ── Wait for Scenescape API to be ready (up to 60s) ──
 MAX_WAIT=60
 WAITED=0
 while [ ${WAITED} -lt ${MAX_WAIT} ]; do
@@ -72,11 +72,11 @@ while [ ${WAITED} -lt ${MAX_WAIT} ]; do
     fi
     sleep 2
     WAITED=$((WAITED + 2))
-    echo "  Waiting for SceneScape API... (${WAITED}s)"
+    echo "  Waiting for Scenescape API... (${WAITED}s)"
 done
 
 if [ "${HTTP_CODE}" != "200" ]; then
-    echo -e "${YELLOW}WARNING: SceneScape API not reachable at ${SCENESCAPE_API_URL} (HTTP ${HTTP_CODE})${NC}"
+    echo -e "${YELLOW}WARNING: Scenescape API not reachable at ${SCENESCAPE_API_URL} (HTTP ${HTTP_CODE})${NC}"
     echo "  SCENE_UID will remain empty. Set it manually in ${ENV_FILE}"
     exit 0
 fi
@@ -90,7 +90,7 @@ AUTH_RESPONSE=$(curl -sk -X POST "${SCENESCAPE_API_URL}/api/v1/auth" \
 TOKEN=$(echo "${AUTH_RESPONSE}" | python3 -c "import sys,json; print(json.load(sys.stdin).get('token',''))" 2>/dev/null)
 
 if [ -z "${TOKEN}" ]; then
-    echo -e "${YELLOW}WARNING: Failed to authenticate with SceneScape API${NC}"
+    echo -e "${YELLOW}WARNING: Failed to authenticate with Scenescape API${NC}"
     exit 0
 fi
 
@@ -108,7 +108,7 @@ if scenes:
 " 2>/dev/null)
 
 if [ -z "${SCENE_UID}" ]; then
-    echo -e "${YELLOW}WARNING: No scenes found in SceneScape${NC}"
+    echo -e "${YELLOW}WARNING: No scenes found in Scenescape${NC}"
     exit 0
 fi
 

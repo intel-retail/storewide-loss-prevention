@@ -136,7 +136,7 @@ class EventRepository(ABC):
         return {}
 
     def set_reid_matched(self, camera_id: str, global_uuid: str, metadata: dict, ttl: int = 15) -> None:
-        """Store SceneScape reid_state=matched signal for a camera (with TTL)."""
+        """Store Scenescape reid_state=matched signal for a camera (with TTL)."""
 
     def get_reid_matched_uuid(self, camera_id: str) -> Optional[str]:
         """Return the current matched global UUID for a camera, or None if no recent signal."""

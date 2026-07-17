@@ -49,7 +49,7 @@ class AlertService:
         """Observer callback when a POI match is found."""
         poi_id = event.alert.poi_id
         # Dedup strategy depends on whether the object_id is a stable
-        # SceneScape UUID or a camera-local fallback like ``cam:Camera_01:1``.
+        # Scenescape UUID or a camera-local fallback like ``cam:Camera_01:1``.
         #
         # Stable UUIDs are unique per physical person, so dedup is per-object
         # only — one alert per person per dedup window, regardless of which

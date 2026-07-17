@@ -222,7 +222,7 @@ Redis key. Frame URLs are returned in search results (`entry_frame_url`, `exit_f
 GET /api/v1/cameras
 ```
 
-Returns available cameras from SceneScape.
+Returns available cameras from Scenescape.
 
 **Response** (200 OK):
 
@@ -244,7 +244,7 @@ Returns available cameras from SceneScape.
 GET /api/v1/cameras/{camera_id}
 ```
 
-Returns details for a single camera from SceneScape.
+Returns details for a single camera from Scenescape.
 
 ---
 

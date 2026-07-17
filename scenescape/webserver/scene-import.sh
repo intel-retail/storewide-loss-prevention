@@ -2,7 +2,7 @@
 # Copyright (C) 2026 Intel Corporation
 # SPDX-License-Identifier: Apache-2.0
 #
-# Import SceneScape scene .zip file(s) via the REST API.
+# Import Scenescape scene .zip file(s) via the REST API.
 # Runs as a sidecar container after the web service is healthy.
 #
 # When STREAM_DENSITY > 1, clones the base scene zip on-the-fly with unique
@@ -29,7 +29,7 @@ CA_CERT="${CA_CERT:-/run/secrets/certs/scenescape-ca.pem}"
 MAX_RETRIES="${MAX_RETRIES:-60}"
 RETRY_INTERVAL="${RETRY_INTERVAL:-5}"
 
-echo "=== SceneScape Scene Import ==="
+echo "=== Scenescape Scene Import ==="
 echo "  Stream density: ${STREAM_DENSITY}"
 
 # Build list of zip files to import
@@ -76,8 +76,8 @@ echo "  Found ${#ZIP_FILES[@]} zip file(s) to import."
 echo "  API URL:  ${SCENESCAPE_URL}"
 echo "  User:     ${SCENESCAPE_USER}"
 
-# Wait for SceneScape web to be healthy
-echo "Waiting for SceneScape web service..."
+# Wait for Scenescape web to be healthy
+echo "Waiting for Scenescape web service..."
 for i in $(seq 1 ${MAX_RETRIES}); do
     HEALTH=$(python3 -c "
 import urllib.request, ssl, os
@@ -134,7 +134,7 @@ except Exception as e:
 ")
 
 if [ -z "${TOKEN}" ]; then
-    echo "ERROR: Failed to authenticate with SceneScape."
+    echo "ERROR: Failed to authenticate with Scenescape."
     exit 1
 fi
 echo "  Authenticated successfully."
@@ -218,5 +218,5 @@ echo "  Imported:  ${IMPORT_SUCCESS}"
 echo "  Failed:    ${IMPORT_FAIL}"
 
 if [ ${IMPORT_FAIL} -gt 0 ]; then
-    echo "  Some imports failed. Check logs above or use SceneScape UI > Import Scene."
+    echo "  Some imports failed. Check logs above or use Scenescape UI > Import Scene."
 fi

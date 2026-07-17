@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 # Generate all TLS certificates, MQTT auth files, Django secrets, and DB
-# passwords required by the SceneScape + Loss Prevention stack.
+# passwords required by the Scenescape + Loss Prevention stack.
 
 set -e
 
@@ -14,7 +14,7 @@ EXEC_PATH="$(dirname "$(readlink -f "$0")")"
 MQTTUSERS="controller.auth=scenectrl browser.auth=webuser calibration.auth=calibuser"
 SECRETSDIR="$EXEC_PATH"
 
-echo "=== Generating SceneScape secrets ==="
+echo "=== Generating Scenescape secrets ==="
 
 # ---- Root CA ----
 echo "Generating root CA key..."

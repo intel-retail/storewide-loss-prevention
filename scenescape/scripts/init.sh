@@ -41,8 +41,8 @@ NC='\033[0m'
 echo -e "${GREEN}=== Storewide Loss Prevention - Full Stack Init ===${NC}"
 echo ""
 
-# ---- Step 1: Generate SceneScape secrets ----
-echo -e "${YELLOW}[1/4] Generating SceneScape secrets...${NC}"
+# ---- Step 1: Generate Scenescape secrets ----
+echo -e "${YELLOW}[1/4] Generating Scenescape secrets...${NC}"
 SECRETS_GENERATED=0
 if [ -f "${SECRETS_DIR}/django/secrets.py" ] && [ -f "${SECRETS_DIR}/certs/scenescape-ca.pem" ]; then
     echo "  Secrets already exist, skipping generation."
@@ -97,7 +97,7 @@ else:
 print(f'MODELS=\"{cfg.get(\"models\", \"\")}\"')
 print(f'MODEL_PRECISION=\"{cfg.get(\"model_precision\", \"FP32\")}\"')
 
-# SceneScape images
+# Scenescape images
 ss = cfg.get('scenescape', {})
 print(f'SCENESCAPE_REGISTRY=\"{ss.get(\"registry\", \"\")}\"')
 print(f'SCENESCAPE_VERSION=\"{ss.get(\"version\", \"latest\")}\"')
@@ -106,7 +106,7 @@ print(f'SCENESCAPE_MANAGER_IMAGE=\"{ss.get(\"manager_image\", \"intel/scenescape
 print(f'DLSTREAMER_VERSION=\"{ss.get(\"dlstreamer_version\", \"2026.1.0-20260331-weekly-ubuntu24\")}\"')
 print(f'SCENESCAPE_API_USER=\"{ss.get(\"api_user\", \"admin\")}\"')
 
-# SceneScape API
+# Scenescape API
 api = cfg.get('scenescape_api', {})
 print(f'SCENESCAPE_API_URL=\"{api.get(\"base_url\", \"https://localhost\")}\"')
 
@@ -163,7 +163,7 @@ fi
 SCENE_ZIP_PATH="${SCENESCAPE_DIR}/webserver/${SCENE_ZIP}"
 if [ -n "${SCENE_ZIP}" ] && [ ! -f "${SCENE_ZIP_PATH}" ]; then
     echo -e "${YELLOW}WARNING: Scene zip not found at ${SCENE_ZIP_PATH}${NC}"
-    echo "  Scene import will be skipped. Import manually via SceneScape UI."
+    echo "  Scene import will be skipped. Import manually via Scenescape UI."
 fi
 
 # Validate video exists
@@ -184,31 +184,35 @@ fi
 # ---- Step 3: Generate DLStreamer config.json (per camera) ----
 echo -e "${YELLOW}[3/4] Generating DLStreamer pipeline configs...${NC}"
 
-DLSTREAMER_TEMPLATE="${APP_DIR}/configs/pipeline-config.json"
+# SceneScape-specific configs may live under configs/scenescape/ (preferred) or
+# directly under configs/ (legacy layout). Resolve each with that precedence.
+if [ -f "${APP_DIR}/configs/scenescape/pipeline-config.json" ]; then
+    DLSTREAMER_TEMPLATE="${APP_DIR}/configs/scenescape/pipeline-config.json"
+else
+    DLSTREAMER_TEMPLATE="${APP_DIR}/configs/pipeline-config.json"
+fi
 if [ ! -f "${DLSTREAMER_TEMPLATE}" ]; then
     echo -e "${RED}ERROR: DLStreamer template not found at ${DLSTREAMER_TEMPLATE}${NC}"
     exit 1
 fi
 
-# Validate app-specific controller configs exist
-if [ ! -f "${APP_DIR}/configs/tracker-config.json" ]; then
-    echo -e "${YELLOW}WARNING: tracker-config.json not found in ${APP_DIR}/configs/${NC}"
-    echo "  SceneScape will use default from scenescape/controller/tracker-config.json"
-fi
-if [ ! -f "${APP_DIR}/configs/reid-config.json" ]; then
-    echo -e "${YELLOW}WARNING: reid-config.json not found in ${APP_DIR}/configs/${NC}"
-    echo "  SceneScape will use default from scenescape/controller/reid-config.json"
-fi
-
-# Resolve controller config paths (app-specific or SceneScape default)
-if [ -f "${APP_DIR}/configs/tracker-config.json" ]; then
+# Resolve controller config paths (app-specific or Scenescape default)
+if [ -f "${APP_DIR}/configs/scenescape/tracker-config.json" ]; then
+    TRACKER_CONFIG="${APP_DIR}/configs/scenescape/tracker-config.json"
+elif [ -f "${APP_DIR}/configs/tracker-config.json" ]; then
     TRACKER_CONFIG="${APP_DIR}/configs/tracker-config.json"
 else
+    echo -e "${YELLOW}WARNING: tracker-config.json not found in ${APP_DIR}/configs/scenescape/${NC}"
+    echo "  Scenescape will use default from scenescape/controller/tracker-config.json"
     TRACKER_CONFIG="${SCENESCAPE_DIR}/controller/tracker-config.json"
 fi
-if [ -f "${APP_DIR}/configs/reid-config.json" ]; then
+if [ -f "${APP_DIR}/configs/scenescape/reid-config.json" ]; then
+    REID_CONFIG="${APP_DIR}/configs/scenescape/reid-config.json"
+elif [ -f "${APP_DIR}/configs/reid-config.json" ]; then
     REID_CONFIG="${APP_DIR}/configs/reid-config.json"
 else
+    echo -e "${YELLOW}WARNING: reid-config.json not found in ${APP_DIR}/configs/scenescape/${NC}"
+    echo "  Scenescape will use default from scenescape/controller/reid-config.json"
     REID_CONFIG="${SCENESCAPE_DIR}/controller/reid-config.json"
 fi
 
@@ -226,6 +230,19 @@ if [ -f "${ENV_EXAMPLE}" ]; then
     set +a
     rm -f "${AI_ENV_TMP}"
     echo "  Loaded AI-model settings from ${ENV_EXAMPLE}"
+fi
+
+# ---- Source VLM-recall / video-search settings from configs/.env.example ----
+RECALL_KEYS_REGEX='^(RECALL_RTSP_BASE_URL|RECALL_BRIDGE_PORT|RECALL_UI_PORT|RECALL_SEGMENT_SECONDS|RECALL_MAX_UPLOAD_CLIPS)='
+if [ -f "${ENV_EXAMPLE}" ]; then
+    RECALL_ENV_TMP="$(mktemp)"
+    grep -E "${RECALL_KEYS_REGEX}" "${ENV_EXAMPLE}" > "${RECALL_ENV_TMP}" || true
+    set -a
+    # shellcheck disable=SC1090
+    . "${RECALL_ENV_TMP}"
+    set +a
+    rm -f "${RECALL_ENV_TMP}"
+    echo "  Loaded VLM-recall settings from ${ENV_EXAMPLE}"
 fi
 
 # Source device resource config (all-gpu-cpu.env, all-gpu.env, or all-cpu.env)
@@ -425,7 +442,7 @@ REID_CONFIG=${REID_CONFIG}
 MODELS=${MODELS}
 MODEL_PRECISION=${MODEL_PRECISION}
 
-# ---- SceneScape images (from zone_config.json) ----
+# ---- Scenescape images (from zone_config.json) ----
 SCENESCAPE_REGISTRY=${SCENESCAPE_REGISTRY}
 SCENESCAPE_VERSION=${SCENESCAPE_VERSION}
 SCENESCAPE_CONTROLLER_IMAGE=${SCENESCAPE_CONTROLLER_IMAGE}
@@ -446,7 +463,7 @@ SEAWEEDFS_S3_PORT=${SEAWEEDFS_S3_PORT}
 SEAWEEDFS_MASTER_PORT=${SEAWEEDFS_MASTER_PORT}
 SEAWEEDFS_VOLUME_PORT=${SEAWEEDFS_VOLUME_PORT}
 
-# ---- SceneScape API (from zone_config.json scenescape_api.base_url) ----
+# ---- Scenescape API (from zone_config.json scenescape_api.base_url) ----
 SCENESCAPE_API_URL=${SCENESCAPE_API_URL}
 SCENESCAPE_API_USER=${SCENESCAPE_API_USER}
 SCENESCAPE_API_PASSWORD=${SUPASS}
@@ -492,6 +509,13 @@ INFERENCE_INTERVAL=${INFERENCE_INTERVAL}
 
 # ---- WebRTC / MediaMTX ----
 HOST_IP=${HOST_IP}
+
+# ---- VLM Recall Bridge / Video Search (from configs/.env.example) ----
+RECALL_RTSP_BASE_URL=${RECALL_RTSP_BASE_URL:-rtsp://mediaserver:8554}
+RECALL_BRIDGE_PORT=${RECALL_BRIDGE_PORT:-8090}
+RECALL_UI_PORT=${RECALL_UI_PORT:-7861}
+RECALL_SEGMENT_SECONDS=${RECALL_SEGMENT_SECONDS:-60}
+RECALL_MAX_UPLOAD_CLIPS=${RECALL_MAX_UPLOAD_CLIPS:-0}
 
 # ---- Host user identity (for Docker bind-mount file ownership) ----
 HOST_UID=$(id -u)
@@ -551,8 +575,8 @@ echo "Next steps:"
 echo "  1. Place your video in scenescape/sample_data/${VIDEO_FILE}"
 echo "  2. Place your scene zip in scenescape/webserver/${SCENE_ZIP}"
 echo "  3. Start from your app directory:"
-echo "       make run-scenescape   (SceneScape only)"
+echo "       make run-scenescape   (Scenescape only)"
 echo "       make demo             (full stack)"
 echo ""
-echo "  4. Open SceneScape UI:  https://localhost"
+echo "  4. Open Scenescape UI:  https://localhost"
 echo "     Login: admin / ${SUPASS}"

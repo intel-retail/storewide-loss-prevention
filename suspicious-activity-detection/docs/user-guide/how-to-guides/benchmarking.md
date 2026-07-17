@@ -53,7 +53,7 @@ At each iteration the framework:
 5. Collects latency samples from `swlp-service` docker logs and
    `vlm_application_metrics` files.
 
-SceneScape core services (`web`, `controller`, `broker`), `ovms-vlm`,
+Scenescape core services (`web`, `controller`, `broker`), `ovms-vlm`,
 `behavioral-analysis`, `seaweedfs`, and `alert-service` remain running
 throughout.
 
@@ -105,7 +105,7 @@ make benchmark-stream-density DEVICE=all-npu-cpu.env  # NPU detect + CPU re-id (
 ```
 
 Available profiles are in `configs/res/`. See
-[SceneScape Setup — Device Profiles](./scenescape-setup.md#device-profiles)
+[Scenescape Setup — Device Profiles](./scenescape-setup.md#device-profiles)
 for details.
 
 ## Results and Metrics

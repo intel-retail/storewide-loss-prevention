@@ -12,7 +12,7 @@ expose alerts and evidence to a UI for store operators.
 
 The main services in this deployment are:
 
-- [SceneScape](#scenescape)
+- [Scenescape](#scenescape)
 - [swlp-service](#swlp-service)
 - [Behavioral Analysis Service](#behavioral-analysis-service)
 - [Alert Service](#alert-service)
@@ -21,9 +21,9 @@ The main services in this deployment are:
 
 The following sections describe each service in more detail.
 
-### SceneScape
+### Scenescape
 
-Intel® SceneScape provides the upstream tracking pipeline:
+Scenescape provides the upstream tracking pipeline:
 
 - **DL Streamer pipeline:** Person detection (`person-detection-retail-0013`)
   and re-identification (`person-reidentification-retail-0277`) on the camera
@@ -33,7 +33,7 @@ Intel® SceneScape provides the upstream tracking pipeline:
 - **MQTT bus (Mosquitto):** Publishes scene-data, region events, region data,
   and camera-image responses on standard topics.
 
-SceneScape is an upstream dependency; the LP application subscribes to its MQTT
+Scenescape is an upstream dependency; the LP application subscribes to its MQTT
 topics rather than running its own detector.
 
 ### swlp-service
@@ -41,7 +41,7 @@ topics rather than running its own detector.
 The **swlp-service** is the core of the LP application. It is purely
 MQTT-driven and has no direct dependency on the camera pipeline.
 
-- **MQTT subscription and event routing:** Subscribes to SceneScape topics and
+- **MQTT subscription and event routing:** Subscribes to Scenescape topics and
   fans events out to handlers.
 - **Session state management:** Creates, updates, and expires a `PersonSession`
   per tracked person. Sessions are kept in memory, keyed by
@@ -132,7 +132,7 @@ browser.
 
 Putting the pieces together:
 
-1. **Tracking** — SceneScape ingests camera streams, runs detection and
+1. **Tracking** — Scenescape ingests camera streams, runs detection and
    re-identification, and publishes per-person region events and scene data
    to MQTT.
 2. **Session updates** — swlp-service consumes those events, creating or
@@ -191,7 +191,7 @@ while sharing common infrastructure (MQTT, frame storage, configuration).
 | Zone name → type mapping | `configs/zone_config.json` |
 | Alert routing and time-window deduplication | `configs/alert-config.yaml` |
 | MQTT, storage, services | `configs/.env.example` / `docker/.env` |
-| DL Streamer pipeline template | `configs/pipeline-config.json` |
+| DL Streamer pipeline template | `configs/scenescape/pipeline-config.json` |
 
 Most behavior changes are YAML edits — adding a new rule, severity, deduplication
 scope, or alert type does not require Python changes.

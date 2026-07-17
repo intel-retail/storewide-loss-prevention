@@ -4,7 +4,7 @@
 #
 # Download OpenVINO models required by the DLStreamer inference pipeline.
 # Models are downloaded via curl from the OpenVINO Model Zoo storage,
-# following the same approach as SceneScape's model_installer.
+# following the same approach as Scenescape's model_installer.
 #
 # Usage:
 #   ./scenescape/scripts/download_models.sh [--precisions FP32,FP16]
@@ -22,7 +22,7 @@ if [ -f "${ENV_FILE}" ]; then
     MODEL_PRECISION="${MODEL_PRECISION:-$(grep ^MODEL_PRECISION= "${ENV_FILE}" 2>/dev/null | cut -d= -f2-)}"
 fi
 
-# OpenVINO Model Zoo download URL (same as SceneScape model_installer)
+# OpenVINO Model Zoo download URL (same as Scenescape model_installer)
 OMZ_BASE_URL="https://storage.openvinotoolkit.org/repositories/open_model_zoo/2023.0/models_bin/1"
 
 # Models required by the DLStreamer pipeline (from .env or defaults)
@@ -71,7 +71,7 @@ docker run --rm \
     debian:bookworm-slim \
     sh -c "apt-get update -qq && apt-get install -y -qq curl >/dev/null 2>&1 && ${DOWNLOAD_CMDS}"
 
-# Copy model-proc files (same as SceneScape's copy-config-files)
+# Copy model-proc files (same as Scenescape's copy-config-files)
 echo "[2/2] Copying model-proc files..."
 if [ -d "${MODEL_PROC_DIR}" ] && [ -n "$(ls -A "${MODEL_PROC_DIR}"/*.json 2>/dev/null)" ]; then
     docker run --rm \
