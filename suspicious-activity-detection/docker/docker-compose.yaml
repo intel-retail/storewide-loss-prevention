@@ -180,7 +180,7 @@ services:
 
   # ---------- Alert Service ----------
   alert-service:
-    image: intel/alert-service:0.0.1
+    image: intel/alert-agent-service:2026.2.0-rc1
     ports:
       - "${ALERT_SERVICE_PORT:-8000}:8000"
     networks:
@@ -200,10 +200,15 @@ services:
       DELIVERY_HANDLERS: log,mqtt,websocket
       http_proxy: ${http_proxy}
       https_proxy: ${https_proxy}
-      no_proxy: ${no_proxy:-${NO_PROXY:-}},broker.scenescape.intel.com,localhost,127.0.0.1,172.18.0.0/16,10.0.0.0/8
+      AGENT_MODE: ${AGENT_MODE:-false}
+      LLM_URL: ${LLM_URL:-http://ovms-llm:9000/v3}
+      LLM_MODEL: ${LLM_MODEL:-OpenVINO/Phi-4-mini-instruct-int4-ov}
+      LLM_TIMEOUT: ${LLM_TIMEOUT:-10.0}
+      no_proxy: ${no_proxy:-${NO_PROXY:-}},broker.scenescape.intel.com,localhost,127.0.0.1,172.18.0.0/16,10.0.0.0/8,ovms-llm
     volumes:
       - ./configs/alert-config.yaml:/app/config/config.yaml:ro
     restart: unless-stopped
+  
 
   # ---------- SeaweedFS (S3-compatible Object Storage) ----------
   seaweedfs:
@@ -264,6 +269,42 @@ services:
       retries: 10
       start_period: 120s
     restart: unless-stopped
+  
+  ovms-llm:
+    image: openvino/model_server:2026.1-gpu
+    container_name: ovms-llm
+    restart: unless-stopped
+    user: "0:0"
+    ports:
+      - "${LLM_PORT:-9000}:9000"
+    environment:
+      - no_proxy=${no_proxy},localhost
+      - NO_PROXY=${no_proxy},localhost
+      - http_proxy=${http_proxy:-}
+      - HTTP_PROXY=${http_proxy:-}
+      - https_proxy=${https_proxy:-}
+      - HTTPS_PROXY=${https_proxy:-}
+    volumes:
+      - ovms-models:/models
+    command:
+      - --rest_port 
+      - "9000"
+      - --source_model 
+      - "OpenVINO/Phi-4-mini-instruct-int4-ov" 
+      - --model_repository_path 
+      - "models/" 
+      - --model_name 
+      - "Phi-4-mini-instruct-int4-ov"
+      - --task 
+      - text_generation
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/v1/config"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 300s
+    networks:
+      - storewide-lp
 
 networks:
   storewide-lp:
@@ -272,6 +313,7 @@ networks:
 volumes:
   seaweedfs-data:
   ovms-cache:
+  ovms-models:
 
 # Override the SceneScape controller config sources to use this app's
 # configs/scenescape/ files directly, instead of the vendored defaults / env-var
