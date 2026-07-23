@@ -727,7 +727,7 @@ footer{text-align:center;color:#999;font-size:12px;padding:8px;}
    <div style="flex:1;"><label for="time_end_t">Time</label><input id="time_end_t" type="time" step="1" /></div>
   </div>
   <div class="hint">Pick a date range. Leave a Time blank to cover the whole day (From = start of day, To = end of day).</div>
-  <div style="margin:.25rem 0 .5rem;"><button id="clearTimeBtn" type="button" class="linkbtn">Clear time range</button></div>
+  <div style="margin:.25rem 0 .5rem;"><button id="clearTimesOnlyBtn" type="button" class="linkbtn">Clear times only</button></div>
   <button id="searchBtn">Search</button>
  </div>
  <div>
@@ -794,7 +794,7 @@ function loadClip(videoId,card,ph,seekTo,autoplay){ph.textContent='Loading clip\
  video.onerror=function(){ph.textContent='Clip load failed';};
  card.replaceChild(video,ph);if(autoplay)video.play().catch(function(){});}
 $('searchBtn').addEventListener('click',doSearch);
-$('clearTimeBtn').addEventListener('click',function(){$('time_start').value='';$('time_end').value='';$('time_start_t').value='';$('time_end_t').value='';clearBanner();});
+$('clearTimesOnlyBtn').addEventListener('click',function(){$('time_start_t').value='';$('time_end_t').value='';clearBanner();});
 $('query').addEventListener('keydown',function(e){if(e.key==='Enter'&&(e.ctrlKey||e.metaKey))doSearch();});
 </script>
 </body>
