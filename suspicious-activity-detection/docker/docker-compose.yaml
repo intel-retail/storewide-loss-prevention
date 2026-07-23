@@ -180,7 +180,7 @@ services:
 
   # ---------- Alert Service ----------
   alert-service:
-    image: intel/alert-service:0.0.1
+    image: intel/alert-agent-service:2026.2.0-rc1
     ports:
       - "${ALERT_SERVICE_PORT:-8000}:8000"
     networks:
@@ -198,6 +198,10 @@ services:
       CONFIG_PATH: /app/config/config.yaml
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
       DELIVERY_HANDLERS: log,mqtt,websocket
+      AGENT_MODE: ${AGENT_MODE:-false}
+      LLM_URL: ${LLM_URL:-http://ovms-llm:9000/v3}
+      LLM_MODEL: ${LLM_MODEL:-OpenVINO/Phi-4-mini-instruct-int4-ov}
+      LLM_TIMEOUT: ${LLM_TIMEOUT:-10.0}
       http_proxy: ${http_proxy}
       https_proxy: ${https_proxy}
       no_proxy: ${no_proxy:-${NO_PROXY:-}},broker.scenescape.intel.com,localhost,127.0.0.1,172.18.0.0/16,10.0.0.0/8
