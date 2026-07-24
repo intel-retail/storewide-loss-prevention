@@ -103,6 +103,11 @@ services:
       - ./configs/alert-service-config.yaml:/app/config/config.yaml:ro
       - ./configs/alert-service-overrides/ws_manager.py:/app/src/delivery/ws_manager.py:ro
       - ./configs/alert-service-overrides/alerts.py:/app/src/api/endpoints/alerts.py:ro
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8000/api/v1/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
     networks:
       - poi-net
       - storewide-lp

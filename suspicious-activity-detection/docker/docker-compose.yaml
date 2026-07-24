@@ -180,17 +180,16 @@ services:
 
   # ---------- Alert Service ----------
   alert-service:
-    image: intel/alert-agent-service:2026.2.0-rc1
+    image: intel/alert-agent-service:${TAG}
     ports:
       - "${ALERT_SERVICE_PORT:-8000}:8000"
     networks:
       - storewide-lp
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/v1/health')"]
-      interval: 10s
-      timeout: 5s
+      test: ["CMD-SHELL", "curl -f http://localhost:8000/api/v1/health || exit 1"]
+      interval: 30s
+      timeout: 10s
       retries: 5
-      start_period: 10s
     environment:
       MQTT_MODE: external
       MQTT_HOST: ${MQTT_HOST:-broker.scenescape.intel.com}
