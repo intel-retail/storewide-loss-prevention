@@ -219,6 +219,29 @@ rules:
 See [How It Works](./how-it-works.md) for a full description of triggers,
 conditions, and the rule engine.
 
+## 12. Search Recorded Footage (VLM Recall Search)
+
+Recall Search lets an investigator find historical footage with a plain-English
+query such as *"person in a blue shirt between 2:00–3:00 PM at the entrance
+camera."* Appearance is matched by multimodal embeddings, time by a capture-time
+filter, and location by a per-camera tag — results are short, playable video clips.
+
+Recall is **opt-in** — a plain `make up` does not start it. Use the `MODE` flag:
+
+```bash
+# Core stack only (SceneScape + Suspicious Activity) — recall hidden (default)
+make up
+
+# Core + the search/recall stack — recall available at http://localhost:7860/recall
+make up MODE=full
+
+# Only the standalone search/recall stack
+make up MODE=search
+```
+
+See the [VLM Recall Search](./how-to-guides/vlm-recall-search.md) guide for the
+architecture, all tunable variables, and how to run recall queries from the dashboard.
+
 ## Clean Up
 
 ```bash
@@ -233,6 +256,8 @@ make clean-all
 
 - Learn more about [How It Works](./how-it-works.md) for a high-level
   architectural overview.
+- Search recorded footage with plain-English queries using
+  [VLM Recall Search](./how-to-guides/vlm-recall-search.md).
 - Experiment with different device profiles (`all-npu-cpu.env`,
   `all-gpu-cpu.env`, `all-cpu.env`) to compare NPU, GPU, and CPU behavior.
 - Replace the sample video, zone map, or rules with your own assets by

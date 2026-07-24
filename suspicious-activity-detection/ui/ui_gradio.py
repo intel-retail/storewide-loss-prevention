@@ -675,6 +675,9 @@ input:focus,textarea:focus{outline:none;border-color:#0071c5;}
 button{cursor:pointer;border:none;border-radius:5px;font-size:14px;font-weight:600;
  padding:11px;background:#0071c5;color:#fff;width:100%;margin-top:16px;}
 button:hover{background:#005a9e;}button:disabled{opacity:.5;cursor:not-allowed;}
+.linkbtn{width:auto;margin:0;padding:2px 0;background:none;color:#0071c5;font-weight:600;
+ font-size:12px;text-decoration:underline;}
+.linkbtn:hover{background:none;color:#005a9e;}
 .hint{font-size:11px;color:#888;margin-top:4px;}
 .title{font-size:14px;font-weight:700;color:#0071c5;text-transform:uppercase;
  letter-spacing:.5px;padding-bottom:.3rem;margin-bottom:.2rem;border-bottom:2px solid #0071c5;}
@@ -716,11 +719,15 @@ footer{text-align:center;color:#999;font-size:12px;padding:8px;}
   <input id="cameras" placeholder="e.g. lp-camera1, aisle1" />
   <div class="hint">Comma-separated cameras / zones. Blank = all cameras.</div>
   <div class="row">
-   <div><label for="time_start">From (optional)</label><input id="time_start" type="datetime-local" /></div>
+   <div style="flex:2;"><label for="time_start">From (optional)</label><input id="time_start" type="date" /></div>
+   <div style="flex:1;"><label for="time_start_t">Time</label><input id="time_start_t" type="time" step="1" /></div>
   </div>
   <div class="row">
-   <div><label for="time_end">To (optional)</label><input id="time_end" type="datetime-local" /></div>
+   <div style="flex:2;"><label for="time_end">To (optional)</label><input id="time_end" type="date" /></div>
+   <div style="flex:1;"><label for="time_end_t">Time</label><input id="time_end_t" type="time" step="1" /></div>
   </div>
+  <div class="hint">Pick a date range. Leave a Time blank to cover the whole day (From = start of day, To = end of day).</div>
+  <div style="margin:.25rem 0 .5rem;"><button id="clearTimesOnlyBtn" type="button" class="linkbtn">Clear times only</button></div>
   <button id="searchBtn">Search</button>
  </div>
  <div>
@@ -736,14 +743,22 @@ var $=function(id){return document.getElementById(id);};
 function showBanner(m){var b=$('banner');b.textContent=m;b.classList.add('show');}
 function clearBanner(){$('banner').classList.remove('show');}
 function toIso(v){if(!v)return null;var d=new Date(v);return isNaN(d)?null:d.toISOString();}
+function combineIso(dateV,timeV,endOfDay){if(!dateV)return null;
+ var t=timeV||(endOfDay?'23:59:59.999':'00:00:00');
+ if(/^\\d{2}:\\d{2}$/.test(t))t+=(endOfDay?':59.999':':00');
+ var d=new Date(dateV+'T'+t);return isNaN(d)?null:d.toISOString();}
 function parseCameras(v){var l=(v||'').split(',').map(function(s){return s.trim();}).filter(Boolean);return l.length?l:null;}
-function buildBody(){var q=$('query').value.trim();if(!q)throw new Error('Query is required.');
+function sanitizeQuery(q){return q.replace(/[^a-zA-Z0-9 ,.'-]/g,' ').replace(/ +/g,' ').trim();}
+function buildBody(){var raw=$('query').value.trim();if(!raw)throw new Error('Query is required.');
+ var q=sanitizeQuery(raw);
+ if((q.match(/[a-zA-Z]/g)||[]).length<3)throw new Error('Enter a descriptive query with words, e.g. "person in red shirt".');
+ if(q!==raw)$('query').value=q;
  var b={query:q,limit:20};
  var c=parseCameras($('cameras').value);if(c)b.cameras=c;
  var tsRaw=$('time_start').value,teRaw=$('time_end').value;
- if(tsRaw&&!teRaw)throw new Error('Please also select a "To" time (or clear "From").');
- if(teRaw&&!tsRaw)throw new Error('Please also select a "From" time (or clear "To").');
- var ts=toIso(tsRaw),te=toIso(teRaw);
+ if(tsRaw&&!teRaw)throw new Error('Please also select a "To" date (or clear "From").');
+ if(teRaw&&!tsRaw)throw new Error('Please also select a "From" date (or clear "To").');
+ var ts=combineIso(tsRaw,$('time_start_t').value,false),te=combineIso(teRaw,$('time_end_t').value,true);
  if(ts)b.time_start=ts;if(te)b.time_end=te;return b;}
 function fmtTime(t){if(!t)return '\\u2014';var d=new Date(t);return isNaN(d)?t:d.toLocaleString();}
 function doSearch(){clearBanner();var btn=$('searchBtn'),grid=$('grid'),empty=$('empty');var body;
@@ -779,6 +794,7 @@ function loadClip(videoId,card,ph,seekTo,autoplay){ph.textContent='Loading clip\
  video.onerror=function(){ph.textContent='Clip load failed';};
  card.replaceChild(video,ph);if(autoplay)video.play().catch(function(){});}
 $('searchBtn').addEventListener('click',doSearch);
+$('clearTimesOnlyBtn').addEventListener('click',function(){$('time_start_t').value='';$('time_end_t').value='';clearBanner();});
 $('query').addEventListener('keydown',function(e){if(e.key==='Enter'&&(e.ctrlKey||e.metaKey))doSearch();});
 </script>
 </body>

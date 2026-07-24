@@ -83,7 +83,7 @@ services:
 
   # ── Alert Service ──────────────────────────────────────
   poi-alert-service:
-    image: intel/alert-service:2026.1.0
+    image: intel/alert-agent-service:2026.2.0-rc1
     container_name: poi-alert-service
     restart: unless-stopped
     ports:
@@ -95,10 +95,19 @@ services:
       - MQTT_HOST=${MQTT_HOST:-localhost}
       - MQTT_PORT=${MQTT_PORT:-1883}
       - DELIVERY_HANDLERS=log,websocket
+      - AGENT_MODE=${AGENT_MODE:-false}
+      - LLM_URL=${LLM_URL:-http://ovms-llm:9000/v3}
+      - LLM_MODEL=${LLM_MODEL:-OpenVINO/Phi-4-mini-instruct-int4-ov}
+      - LLM_TIMEOUT=${LLM_TIMEOUT:-10.0}
     volumes:
       - ./configs/alert-service-config.yaml:/app/config/config.yaml:ro
       - ./configs/alert-service-overrides/ws_manager.py:/app/src/delivery/ws_manager.py:ro
       - ./configs/alert-service-overrides/alerts.py:/app/src/api/endpoints/alerts.py:ro
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8000/api/v1/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
     networks:
       - poi-net
       - storewide-lp
