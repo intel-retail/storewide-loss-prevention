@@ -36,9 +36,9 @@ running the Store-wide Loss Prevention application.
       VLM inference (see [Release Notes](../release-notes.md) for a known
       issue on systems without NPU).
 
-  - The host must expose GPU and NPU devices to Docker, for example:
+  - The host must expose the device used by the selected `DEVICE` profile to Docker, for example:
     - `/dev/dri` (GPU)
-    - `/dev/accel/accel0` (NPU)
+    - `/dev/accel/accel0` (NPU, only for `all-npu*.env` profiles)
 
   - Cameras: at least one RTSP source or a sample video file replayed via
     the bundled `lp-video` container.

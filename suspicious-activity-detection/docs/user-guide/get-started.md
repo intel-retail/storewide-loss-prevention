@@ -91,19 +91,22 @@ suspicious-activity-detection/models/
 make up
 ```
 
-By default this uses the **NPU detect + CPU re-identification** configuration
-(`all-npu-cpu.env`). To select a different device profile, pass the `DEVICE`
-parameter:
+By default this uses the **GPU detect + CPU re-identification** configuration
+(`all-gpu-cpu.env`) so the app can deploy on hosts without an NPU. To select a
+different device profile, pass the `DEVICE` parameter:
 
 ```bash
-# NPU detect + CPU reid (default — recommended for long-running deployments)
-make up DEVICE=all-npu-cpu.env
+# GPU detect + CPU reid (default — works on hosts without NPU)
+make up DEVICE=all-gpu-cpu.env
 
 # NPU detect + NPU reid
 make up DEVICE=all-npu.env
 
-# GPU detect + CPU reid
-make up DEVICE=all-gpu-cpu.env
+# NPU detect + CPU reid
+make up DEVICE=all-npu-cpu.env
+
+# NPU detect + GPU reid
+make up DEVICE=all-npu-gpu.env
 
 # All GPU (detect + reid on GPU)
 make up DEVICE=all-gpu.env

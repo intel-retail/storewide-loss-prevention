@@ -1,0 +1,11 @@
+# Copyright (C) 2026 Intel Corporation
+# SPDX-License-Identifier: Apache-2.0
+
+services:
+  # NPU device mapping. Included by the Makefile only when the selected
+  # configs/res/*.env profile uses NPU for detection or re-identification.
+  lp-video:
+    devices:
+      - /dev/accel:/dev/accel
+    device_cgroup_rules:
+      - "c 261:* rmw"
