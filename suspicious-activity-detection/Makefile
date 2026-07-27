@@ -14,6 +14,18 @@ SCENESCAPE_DIR := ../scenescape
 COMPOSE_SCENESCAPE := docker compose --project-directory . --env-file docker/.env -f $(SCENESCAPE_DIR)/docker-compose.yaml
 COMPOSE_LP := docker compose --project-directory . --env-file docker/.env -f docker/docker-compose.yaml
 COMPOSE_ALL := docker compose --project-directory . --env-file docker/.env -f $(SCENESCAPE_DIR)/docker-compose.yaml -f docker/docker-compose.yaml
+
+# Device resource config: pass DEVICE=all-gpu-cpu.env, all-gpu.env, all-cpu.env, or all-npu-cpu.env.
+# Default to the portable GPU detect + CPU re-identification profile; NPU profiles
+# add their device mapping through docker-compose.npu.yaml below.
+DEVICE ?= all-gpu-cpu.env
+RESOURCE_CONFIG := configs/res/$(DEVICE)
+NPU_OVERRIDE := docker/docker-compose.npu.yaml
+USES_NPU := $(shell grep -Eq '^(DETECT_DEVICE|REID_DEVICE)=NPU$$' $(RESOURCE_CONFIG) 2>/dev/null && echo true || echo false)
+ifeq ($(USES_NPU),true)
+	COMPOSE_ALL := $(COMPOSE_ALL) -f $(NPU_OVERRIDE)
+endif
+
 # When stream-density override exists, layer it in
 CAMERAS_OVERRIDE := docker/docker-compose.cameras.yaml
 COMPOSE_ALL := $(if $(wildcard $(CAMERAS_OVERRIDE)),$(COMPOSE_ALL) -f $(CAMERAS_OVERRIDE),$(COMPOSE_ALL))
@@ -73,10 +85,6 @@ REGISTRY_LOWER := $(shell echo $(REGISTRY) | tr A-Z a-z)
 # Auto-shutdown timeout in minutes (0 = disabled)
 AUTO_STOP_MINUTES ?= 15
 
-# Device resource config: pass DEVICE=all-gpu-cpu.env, all-gpu.env, all-cpu.env, or all-npu-cpu.env
-DEVICE ?= all-npu-cpu.env
-RESOURCE_CONFIG := configs/res/$(DEVICE)
-
 # Validate DEVICE before doing anything
 .PHONY: validate-device
 validate-device:
@@ -84,6 +92,12 @@ validate-device:
 		echo "\033[1;31mERROR: Invalid DEVICE='$(DEVICE)'. File '$(RESOURCE_CONFIG)' not found.\033[0m"; \
 		echo "Valid options:"; \
 		ls -1 configs/res/*.env 2>/dev/null | xargs -I{} basename {} | sed 's/^/  - /'; \
+		exit 1; \
+	fi
+	@if [ "$(USES_NPU)" = "true" ] && [ ! -e "/dev/accel" ]; then \
+		echo "\033[1;31mERROR: DEVICE='$(DEVICE)' requires an Intel NPU, but /dev/accel was not found on this host.\033[0m"; \
+		echo "Use a non-NPU profile, for example: make up DEVICE=all-gpu-cpu.env"; \
+		echo "For CPU-only systems, use: make up DEVICE=all-cpu.env"; \
 		exit 1; \
 	fi
 

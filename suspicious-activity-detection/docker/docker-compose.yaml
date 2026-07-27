@@ -8,10 +8,6 @@ services:
       swlp-suscpicious-ui:
         condition: service_healthy
         required: false
-    devices:
-      - /dev/accel:/dev/accel
-    device_cgroup_rules:
-      - "c 261:* rmw"
     volumes:
       - ${MODEL_PATH:-./models}/detect_models:/home/pipeline-server/models/detect:ro
       - ${MODEL_PATH:-./models}/reid_models:/home/pipeline-server/models/reid:ro
