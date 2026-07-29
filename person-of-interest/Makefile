@@ -174,7 +174,8 @@ BENCHMARK_VENV := cd $(PERF_TOOLS_DIR) && \
 	pip3 install -q -e . && \
 	cd $(CURDIR)
 
-TAG ?= 2026.1.0
+TAG ?= latest
+export TAG
 REGISTRY_BENCHMARK ?= intel/retail-benchmark:$(TAG)
 
 .PHONY: fetch-benchmark
