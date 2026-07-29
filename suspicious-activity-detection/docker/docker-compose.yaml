@@ -48,6 +48,8 @@ services:
       ovms-vlm:
         condition: service_healthy
     environment:
+      DEPLOYMENT_MODE: ${DEPLOYMENT_MODE:-seaweedfs+mqtt}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
       SEAWEEDFS_ENDPOINT: ${SEAWEEDFS_ENDPOINT:-http://seaweedfs:8333}
       SEAWEEDFS_BUCKET: ${SEAWEEDFS_BUCKET:-behavioral-frames}
       MIN_FRAMES_FOR_DETECTION: ${BA_MIN_FRAMES:-3}
