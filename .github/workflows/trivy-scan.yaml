@@ -22,13 +22,9 @@ jobs:
       run: |
         pip install pip-tools
         cd suspicious-activity-detection
-        pip-compile behavioral-analysis/requirements.txt -o behavioral-analysis/requirements-pinned.txt --quiet
-        mv behavioral-analysis/requirements-pinned.txt behavioral-analysis/requirements.txt
-        pip-compile swlp-service/pyproject.toml -o swlp-service/requirements-pinned.txt --quiet
-        mv swlp-service/requirements-pinned.txt swlp-service/requirements.txt
-        pip-compile rule-engine/pyproject.toml -o rule-engine/requirements-pinned.txt --quiet
-        mv rule-engine/requirements-pinned.txt rule-engine/requirements.txt
-    
+        pip-compile ../edge-ai-libraries/microservices/behavioral-analysis/requirements.txt -o ../edge-ai-libraries/microservices/behavioral-analysis/requirements-pinned.txt --quiet
+        mv ../edge-ai-libraries/microservices/behavioral-analysis/requirements-pinned.txt ../edge-ai-libraries/microservices/behavioral-analysis/requirements.txt
+           
     - name: Run Trivy vulnerability scanner in fs mode
       uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1
       with:
