@@ -20,7 +20,10 @@ jobs:
 
     - name: Generate pinned requirements for Trivy
       run: |
-        echo "Hello"
+        pip install pip-tools
+        cd suspicious-activity-detection
+        pip-compile vss-recall-bridge/requirements.txt -o vss-recall-bridge/requirements-pinned.txt --quiet
+        mv vss-recall-bridge/requirements-pinned.txt vss-recall-bridge/requirements.txt
            
     - name: Run Trivy vulnerability scanner in fs mode
       uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1
