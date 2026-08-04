@@ -21,9 +21,9 @@ jobs:
     - name: Generate pinned requirements for Trivy
       run: |
         pip install pip-tools
-        cd suspicious-activity-detection
-        pip-compile ../edge-ai-libraries/microservices/behavioral-analysis/requirements.txt -o ../edge-ai-libraries/microservices/behavioral-analysis/requirements-pinned.txt --quiet
-        mv ../edge-ai-libraries/microservices/behavioral-analysis/requirements-pinned.txt ../edge-ai-libraries/microservices/behavioral-analysis/requirements.txt
+        cd edge-ai-libraries
+        pip-compile microservices/behavioral-analysis/requirements.txt -o microservices/behavioral-analysis/requirements-pinned.txt --quiet
+        mv microservices/behavioral-analysis/requirements-pinned.txt microservices/behavioral-analysis/requirements.txt
            
     - name: Run Trivy vulnerability scanner in fs mode
       uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1
