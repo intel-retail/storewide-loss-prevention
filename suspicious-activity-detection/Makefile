@@ -427,7 +427,7 @@ BENCHMARK_VENV := cd $(PERF_TOOLS_DIR) && \
 
 .PHONY: benchmark
 benchmark: ## Run a single-scene benchmark (1 scene, measure latency)
-	@$(MAKE) up ENABLE_UI=false
+	@$(MAKE) up ENABLE_UI=false AUTO_STOP_MINUTES=0
 	@echo "╔══════════════════════════════════════════════════════════════════╗"
 	@echo "║       SWLP Benchmark — Single Scene                             ║"
 	@echo "╚══════════════════════════════════════════════════════════════════╝"
@@ -436,7 +436,7 @@ benchmark: ## Run a single-scene benchmark (1 scene, measure latency)
 	@echo ""
 	mkdir -p $(RESULTS_PATH)
 	$(BENCHMARK_VENV) && \
-	python3 $(SWLP_STREAM_DENSITY) run $(CURDIR) \
+	RESOURCE_CONFIG=$(RESOURCE_CONFIG) python3 $(SWLP_STREAM_DENSITY) run $(CURDIR) \
 		--single_run \
 		--scenes 1 \
 		--target_latency_ms $(BENCHMARK_TARGET_LATENCY_MS) \
@@ -448,7 +448,7 @@ benchmark: ## Run a single-scene benchmark (1 scene, measure latency)
 
 .PHONY: benchmark-stream-density
 benchmark-stream-density: ## Iteratively increase scenes until latency threshold is reached
-	@$(MAKE) up ENABLE_UI=false
+	@$(MAKE) up ENABLE_UI=false AUTO_STOP_MINUTES=0
 	@echo "╔══════════════════════════════════════════════════════════════════╗"
 	@echo "║       SWLP Stream Density — Scene-Based Latency Scaling         ║"
 	@echo "╚══════════════════════════════════════════════════════════════════╝"
@@ -463,7 +463,7 @@ benchmark-stream-density: ## Iteratively increase scenes until latency threshold
 	@echo ""
 	mkdir -p $(RESULTS_PATH)
 	$(BENCHMARK_VENV) && \
-	python3 $(SWLP_STREAM_DENSITY) run $(CURDIR) \
+	RESOURCE_CONFIG=$(RESOURCE_CONFIG) python3 $(SWLP_STREAM_DENSITY) run $(CURDIR) \
 		--target_latency_ms $(BENCHMARK_TARGET_LATENCY_MS) \
 		--latency_metric $(BENCHMARK_LATENCY_METRIC) \
 		--scene_increment $(BENCHMARK_SCENE_INCREMENT) \
