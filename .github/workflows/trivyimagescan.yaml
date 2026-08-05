@@ -32,25 +32,22 @@ jobs:
             echo "VERSION=$VERSION" >> "$GITHUB_ENV"
             echo "Using VERSION=$VERSION"
             
-        - name: Build suspicious-activity-detection images
+        - name: Build suspicious-activity-detection vss-recall-bridge image
           run: |
             cd suspicious-activity-detection
-            make build-lp
+            docker build -t intel/swlp-vss-recall-bridge:${{ env.VERSION }} -f vss-recall-bridge/Dockerfile vss-recall-bridge/
 
-        - name: Run Trivy vulnerability scanner on swlp-service
+        - name: Build suspicious-activity-detection intel/swlp-suscpicious-ui image
+          run: |
+            cd suspicious-activity-detection
+            docker build -t intel/swlp-suscpicious-ui:${{ env.VERSION }} -f ui/Dockerfile ui/  
+
+        - name: Run Trivy vulnerability scanner on swlp-vss-recall-bridge
           uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1
           with:
-            image-ref: "intel/swlp-service:${{ env.VERSION }}"
+            image-ref: "intel/swlp-vss-recall-bridge:${{ env.VERSION }}"
             format: 'table'
-            output: 'trivy-results-swlp-service.txt'
-            severity: 'CRITICAL,HIGH'
-
-        - name: Run Trivy vulnerability scanner on swlp-behavioral-analysis
-          uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1
-          with:
-            image-ref: "intel/swlp-behavioral-analysis:${{ env.VERSION }}"
-            format: 'table'
-            output: 'trivy-results-swlp-behavioral-analysis.txt'
+            output: 'trivy-results-swlp-vss-recall-bridge.txt'
             severity: 'CRITICAL,HIGH'
 
         - name: Run Trivy vulnerability scanner on swlp-suscpicious-ui
@@ -66,6 +63,5 @@ jobs:
           with:
             name: trivy-suspicious-activity-detection-report
             path: |
-              trivy-results-swlp-service.txt
-              trivy-results-swlp-behavioral-analysis.txt
+              trivy-results-swlp-vss-recall-bridge.txt
               trivy-results-swlp-suscpicious-ui.txt
