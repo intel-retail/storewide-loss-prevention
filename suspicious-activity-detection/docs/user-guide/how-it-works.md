@@ -120,13 +120,22 @@ bucket: behavioral-frames
 
 The **Gradio UI** provides a web-based dashboard:
 
-- Live alert feed with severity, alert type, person, and zone.
-- Per-alert evidence frame gallery.
-- Active session table.
-- Service health and zone-count summary from the LP REST API.
+- Live alert feed with severity, alert type, person, and zone
+- Zone/Regions 
+- Person Zone Activity
+- Live camera feed
+- Alert Summary
 
-The UI is exposed on port 7860 by default and accessed via a standard web
-browser.
+**Suspicious activity alerts**: On the dashboard, the **Alerts** panel lists
+every suspicious activity detected in real time — including concealment,
+loitering, and repeated visits — along with the alert's severity, person,
+and zone.
+
+![Store-Wide Loss Prevention dashboard](./_assets/SWLP-SAD-UI.jpg)
+
+The highlighted **Alerts** section lists each detected suspicious activity —
+for example concealment, loitering, and repeated visits — along with its
+severity, person, and zone.
 
 ## Data and Control Flows
 
