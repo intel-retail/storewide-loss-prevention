@@ -120,9 +120,9 @@ bucket: behavioral-frames
 
 The **Gradio UI** provides a web-based dashboard:
 
-- Live alert feed with severity, alert type, person, and zone.
-- Zone/Regions created
-- Person Zone Activity table.
+- Live alert feed with severity, alert type, person, and zone
+- Zone/Regions 
+- Person Zone Activity
 - Live camera feed
 - Alert Summary
 
