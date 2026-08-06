@@ -126,11 +126,7 @@ The **Gradio UI** provides a web-based dashboard:
 - Live camera feed
 - Alert Summary
 
-The UI is exposed on port 7860 by default and accessed via a standard web
-browser.
-
-**Suspicious activity alerts**: open the Store-Wide Loss Prevention UI in
-your browser on port 7860. On the dashboard, the **Alerts** panel lists
+**Suspicious activity alerts**: On the dashboard, the **Alerts** panel lists
 every suspicious activity detected in real time — including concealment,
 loitering, and repeated visits — along with the alert's severity, person,
 and zone. Selecting an alert shows its evidence frame gallery captured at
