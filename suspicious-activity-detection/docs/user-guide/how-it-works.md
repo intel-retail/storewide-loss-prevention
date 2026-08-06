@@ -129,8 +129,7 @@ The **Gradio UI** provides a web-based dashboard:
 **Suspicious activity alerts**: On the dashboard, the **Alerts** panel lists
 every suspicious activity detected in real time — including concealment,
 loitering, and repeated visits — along with the alert's severity, person,
-and zone. Selecting an alert shows its evidence frame gallery captured at
-the time of detection.
+and zone.
 
 ![Store-Wide Loss Prevention dashboard](./_assets/SWLP-SAD-UI.jpg)
 
