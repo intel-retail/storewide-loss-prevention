@@ -63,7 +63,7 @@ Minimal example:
     "version": "2026.1.0",
     "controller_image": "intel/scenescape-controller",
     "manager_image": "intel/scenescape-manager",
-    "dlstreamer_version": "2026.1.0-ubuntu24"
+    "dlstreamer_version": "2026.2.0-ubuntu24-rc1"
   },
   "store": {
     "name": "Retail",

@@ -468,7 +468,10 @@ SCENESCAPE_API_URL=${SCENESCAPE_API_URL}
 SCENESCAPE_API_USER=${SCENESCAPE_API_USER}
 SCENESCAPE_API_PASSWORD=${SUPASS}
 
-# ---- Benchmark (from zone_config.json) ----
+# ---- Benchmark (from zone_config.json "benchmark" block) ----
+# To change these values, edit configs/zone_config.json -- NOT this file.
+# This section is regenerated from zone_config.json on every 'make init' /
+# 'make benchmark*' run, so manual edits here will be silently overwritten.
 BENCHMARK_TARGET_LATENCY_MS=${BENCHMARK_TARGET_LATENCY_MS}
 BENCHMARK_LATENCY_METRIC=${BENCHMARK_LATENCY_METRIC}
 BENCHMARK_SCENE_INCREMENT=${BENCHMARK_SCENE_INCREMENT}
