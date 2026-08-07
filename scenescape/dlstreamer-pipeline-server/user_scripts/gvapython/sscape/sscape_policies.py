@@ -82,6 +82,13 @@ def reidPolicy(pobj, item, fw, fh):
       'embedding_vector': base64.b64encode(v).decode('utf-8'),
       'model_name': tensor.get('model_name', '')
     }
+    # If classificationPolicy() recorded this same tensor as a semantic category
+    # (e.g. when the embedding is generically named "tensor"), drop it - it's
+    # not real classification/label data, just a leftover from the generic name.
+    if name == 'tensor':
+      md = pobj['metadata'].get('tensor')
+      if isinstance(md, dict) and md.get('label', '') == '' and md.get('model_name', '') == tensor.get('model_name', '') and 'confidence' not in md:
+        pobj['metadata'].pop('tensor', None)
     break
   return
 
