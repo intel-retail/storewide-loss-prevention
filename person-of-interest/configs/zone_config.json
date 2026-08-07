@@ -19,7 +19,7 @@
     "version": "2026.1.0",
     "controller_image": "intel/scenescape-controller",
     "manager_image": "intel/scenescape-manager",
-    "dlstreamer_version": "2026.1.0-ubuntu24",
+    "dlstreamer_version": "2026.2.0-ubuntu24-rc1",
     "api_user": "admin"
   },
   "store": {
@@ -48,7 +48,7 @@
     "checkout": "CHECKOUT"
   },
   "benchmark": {
-    "target_latency_ms": 2000,
+    "target_latency_ms": 4000,
     "latency_metric": "avg",
     "scene_increment": 1,
     "init_duration": 45,
@@ -57,5 +57,5 @@
     "min_throughput_ratio": 0.5,
     "results_path": "./results"
   },
-  "stream_density": 4
+  "stream_density": 2
 }

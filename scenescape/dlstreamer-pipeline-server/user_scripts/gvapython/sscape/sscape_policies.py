@@ -50,30 +50,46 @@ def detection3DPolicy(pobj, item, fw, fh):
 
 def reidPolicy(pobj, item, fw, fh):
   classificationPolicy(pobj, item, fw, fh)
+  # DLStreamer's gvainference output tensor is not reliably named after the
+  # model-proc's "attribute_name" (e.g. person_reid_embedding/face_reid_embedding) -
+  # in some DLStreamer versions (observed with 2026.2.0-ubuntu24-rc1) it is just
+  # generically named "tensor". So instead of matching strictly by name, also
+  # accept any non-detection/object_id/keypoint tensor that carries raw float
+  # vector "data" - that is the embedding output regardless of its name.
   for tensor in item.get('tensors', [{}]):
-    name = tensor.get('name','')
-    if name and ('reid' in name or 'embedding' in name):
-      reid_vector = tensor.get('data', [])
-      # Handle variable-length re-id vectors from different models
-      if not reid_vector:
-        continue
-      vector_len = len(reid_vector)
-      # Pack vector with its actual dimensions
-      format_string = f"{vector_len}f"
-      try:
-        v = struct.pack(format_string, *reid_vector)
-      except struct.error as e:
-        import sys
-        print(f"Failed to pack reid vector of length {vector_len}: {e}", file=sys.stderr)
-        continue
-      # Move reid under metadata key
-      if 'metadata' not in pobj:
-        pobj['metadata'] = {}
-      pobj['metadata']['reid'] = {
-        'embedding_vector': base64.b64encode(v).decode('utf-8'),
-        'model_name': tensor.get('model_name', '')
-      }
-      break
+    name = tensor.get('name', '')
+    if name in ('detection', 'object_id') or tensor.get('format') == 'keypoints':
+      continue
+    reid_vector = tensor.get('data', [])
+    if not reid_vector:
+      continue
+    name_matches = bool(name) and ('reid' in name or 'embedding' in name)
+    if not (name_matches or name == 'tensor' or not name):
+      continue
+    vector_len = len(reid_vector)
+    # Pack vector with its actual dimensions
+    format_string = f"{vector_len}f"
+    try:
+      v = struct.pack(format_string, *reid_vector)
+    except struct.error as e:
+      import sys
+      print(f"Failed to pack reid vector of length {vector_len}: {e}", file=sys.stderr)
+      continue
+    # Move reid under metadata key
+    if 'metadata' not in pobj:
+      pobj['metadata'] = {}
+    pobj['metadata']['reid'] = {
+      'embedding_vector': base64.b64encode(v).decode('utf-8'),
+      'model_name': tensor.get('model_name', '')
+    }
+    # If classificationPolicy() recorded this same tensor as a semantic category
+    # (e.g. when the embedding is generically named "tensor"), drop it - it's
+    # not real classification/label data, just a leftover from the generic name.
+    if name == 'tensor':
+      md = pobj['metadata'].get('tensor')
+      if isinstance(md, dict) and md.get('label', '') == '' and md.get('model_name', '') == tensor.get('model_name', '') and 'confidence' not in md:
+        pobj['metadata'].pop('tensor', None)
+    break
   return
 
 def classificationPolicy(pobj, item, fw, fh):

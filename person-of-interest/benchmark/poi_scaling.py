@@ -72,7 +72,9 @@ def read_base_config(app_dir: str) -> dict:
     cameras = cfg.get("cameras", [])
     if cameras:
         camera = cameras[0].get("name", "Camera_01")
-        video = cameras[0].get("video_file", "Camera_01.mp4")
+        # zone_config.json's camera entries use the "video" key; "video_file"
+        # is kept as a fallback for older/alternate config layouts.
+        video = cameras[0].get("video", cameras[0].get("video_file", "Camera_01.mp4"))
     else:
         camera = cfg.get("camera_name", "Camera_01")
         video = cfg.get("video_file", "Camera_01.mp4")
@@ -234,7 +236,7 @@ def generate_cameras_override(app_dir: str, num_scenes: int) -> None:
             f.write(f'    restart: "no"\n\n')
 
             f.write(f"  {video_svc}:\n")
-            f.write(f"    image: docker.io/intel/dlstreamer-pipeline-server:${{DLSTREAMER_VERSION:-2026.1.0-20260331-weekly-ubuntu24}}\n")
+            f.write(f"    image: docker.io/intel/dlstreamer-pipeline-server:${{DLSTREAMER_VERSION:-2026.2.0-ubuntu24-rc1}}\n")
             f.write(f"    networks:\n      storewide-lp:\n")
             f.write(f"    tty: true\n")
             f.write(f"    entrypoint: [\"./run.sh\"]\n")

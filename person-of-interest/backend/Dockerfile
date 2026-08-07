@@ -23,7 +23,10 @@ RUN apt-get update && \
 COPY --from=builder /install /usr/local
 
 # Install performance-tools for metrics logging
-RUN pip install --no-cache-dir git+https://github.com/sainijit/performance-tools.git@poi-stream-density#subdirectory=benchmark-scripts
+# NOTE: pinned to @main for now (testing). Before production, pin to the exact
+# commit/tag matching the performance-tools submodule to avoid version drift
+# between this pip-installed copy and the submodule used by Makefile targets.
+RUN pip install --no-cache-dir git+https://github.com/intel-retail/performance-tools.git@main#subdirectory=benchmark-scripts
 
 WORKDIR /app
 
