@@ -212,7 +212,7 @@ class VssClient:
             bucket = data_store.get("bucket")
             if bucket:
                 video_url = (
-                    f"{self._dataprep_base_url}/v1/dataprep/videos/download"
+                    f"{self._dataprep_base_url}/v1/dataprep/media/download"
                     f"?video_id={video_id}&bucket_name={bucket}"
                 )
         if not video_url:
