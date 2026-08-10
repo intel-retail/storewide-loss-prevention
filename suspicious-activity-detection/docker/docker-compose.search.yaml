@@ -127,7 +127,7 @@ services:
       - ov-models:${EMBEDDING_OV_MODELS_DIR:-/app/ov_models}
 
   vdms-dataprep:
-    image: ${REGISTRY:-}vdms-dataprep:${TAG:-latest}
+    image: ${REGISTRY:-}multimodal-dataprep:${TAG:-latest}
     hostname: vdms-dataprep
     environment:
       no_proxy: ${no_proxy:-},vdms-vector-db,multimodal-embedding-serving,minio-service,localhost
@@ -136,37 +136,48 @@ services:
       NO_PROXY: ${no_proxy:-},vdms-vector-db,multimodal-embedding-serving,minio-service,localhost
       HTTP_PROXY: ${http_proxy:-}
       HTTPS_PROXY: ${https_proxy:-}
-      APP_HOST: vdms-dataprep
-      VDMS_VDB_HOST: vdms-vector-db
-      VDMS_VDB_PORT: 55555
-      MINIO_ENDPOINT: minio-service:80
-      MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:-minioadmin}
-      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-minioadmin}
-      MINIO_SECURE: "false"
-      DEFAULT_BUCKET_NAME: ${DEFAULT_BUCKET_NAME:-vdms-bucket}
-      DB_COLLECTION: ${VS_INDEX_NAME:-video_frame_embeddings}
-      MULTIMODAL_EMBEDDING_ENDPOINT: http://multimodal-embedding-serving:8000/embeddings
-      MULTIMODAL_EMBEDDING_MODEL_NAME: ${EMBEDDING_MODEL_NAME}
-      EMBEDDING_PROCESSING_MODE: ${EMBEDDING_PROCESSING_MODE:-sdk}
-      SDK_USE_OPENVINO: ${SDK_USE_OPENVINO:-true}
-      VDMS_DATAPREP_DEVICE: ${VDMS_DATAPREP_DEVICE:-CPU}
-      OV_MODELS_DIR: ${OV_MODELS_DIR:-/app/ov_models}
-      EMBEDDING_BATCH_SIZE: ${EMBEDDING_BATCH_SIZE:-32}
-      MAX_PARALLEL_WORKERS: ${MAX_PARALLEL_WORKERS:-}
-      OV_PERFORMANCE_MODE: ${OV_PERFORMANCE_MODE:-THROUGHPUT}
-      FRAME_INTERVAL: ${FRAME_INTERVAL:-15}
-      ENABLE_OBJECT_DETECTION: ${ENABLE_OBJECT_DETECTION:-true}
-      DETECTION_CONFIDENCE: ${DETECTION_CONFIDENCE:-0.85}
-      FRAMES_TEMP_DIR: ${FRAMES_TEMP_DIR:-/tmp/dataprep}
-      DETECTION_MODEL_DIR: ${YOLOX_MODELS_MOUNT_PATH:-/app/models/yolox}
-      ROI_CONSOLIDATION_ENABLED: ${ROI_CONSOLIDATION_ENABLED:-false}
-      ROI_CONSOLIDATION_IOU_THRESHOLD: ${ROI_CONSOLIDATION_IOU_THRESHOLD:-0.2}
-      ROI_CONSOLIDATION_CLASS_AWARE: ${ROI_CONSOLIDATION_CLASS_AWARE:-false}
-      ROI_CONSOLIDATION_CONTEXT_SCALE: ${ROI_CONSOLIDATION_CONTEXT_SCALE:-0.2}
-      LOG_LEVEL: ${VDMS_DATAPREP_LOG_LEVEL:-INFO}
-      ALLOW_ORIGINS: ${ALLOW_ORIGINS:-*}
-      ALLOW_METHODS: ${ALLOW_METHODS:-*}
-      ALLOW_HEADERS: ${ALLOW_HEADERS:-*}
+      # NOTE: multimodal-dataprep (2026.2.0+) reads settings with env_prefix
+      # "MM_DATAPREP_" (pydantic-settings); un-prefixed vars are ignored.
+      MM_DATAPREP_APP_HOST: vdms-dataprep
+      # Pluggable backend selection (vector DB + object storage)
+      MM_DATAPREP_VECTORDB_BACKEND: ${VECTORDB_BACKEND:-vdms}
+      MM_DATAPREP_STORAGE_BACKEND: minio
+      # VDMS Vector Database settings
+      MM_DATAPREP_VDMS_VDB_HOST: vdms-vector-db
+      MM_DATAPREP_VDMS_VDB_PORT: 55555
+      # MinIO settings
+      MM_DATAPREP_MINIO_ENDPOINT: minio-service:80
+      MM_DATAPREP_MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:-minioadmin}
+      MM_DATAPREP_MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-minioadmin}
+      MM_DATAPREP_MINIO_SECURE: "false"
+      MM_DATAPREP_DEFAULT_BUCKET_NAME: ${DEFAULT_BUCKET_NAME:-vdms-bucket}
+      # Database collection
+      MM_DATAPREP_DB_COLLECTION: ${VS_INDEX_NAME:-video_frame_embeddings}
+      # Embedding model selection (in-process SDK embedding)
+      MM_DATAPREP_EMBEDDING_MODEL_NAME: ${EMBEDDING_MODEL_NAME}
+      MM_DATAPREP_OV_PERFORMANCE_MODE: ${OV_PERFORMANCE_MODE:-THROUGHPUT}
+      MM_DATAPREP_USE_OPENVINO: ${SDK_USE_OPENVINO:-true}
+      MM_DATAPREP_EMBEDDING_DEVICE: ${VDMS_DATAPREP_DEVICE:-CPU}
+      MM_DATAPREP_OV_MODELS_DIR: ${OV_MODELS_DIR:-/app/ov_models}
+      MM_DATAPREP_EMBEDDING_BATCH_SIZE: ${EMBEDDING_BATCH_SIZE:-32}
+      MM_DATAPREP_MAX_PARALLEL_WORKERS: ${MAX_PARALLEL_WORKERS:-}
+      # Frame processing settings
+      MM_DATAPREP_FRAME_INTERVAL: ${FRAME_INTERVAL:-15}
+      MM_DATAPREP_ENABLE_OBJECT_DETECTION: ${ENABLE_OBJECT_DETECTION:-true}
+      MM_DATAPREP_DETECTION_CONFIDENCE: ${DETECTION_CONFIDENCE:-0.85}
+      MM_DATAPREP_FRAMES_TEMP_DIR: ${FRAMES_TEMP_DIR:-/tmp/dataprep}
+      MM_DATAPREP_DETECTION_MODEL_DIR: ${YOLOX_MODELS_MOUNT_PATH:-/app/models/yolox}
+      MM_DATAPREP_DETECTION_DEVICE: ${DATAPREP_DETECTION_DEVICE:-CPU}
+      # ROI consolidation settings
+      MM_DATAPREP_ROI_CONSOLIDATION_ENABLED: ${ROI_CONSOLIDATION_ENABLED:-false}
+      MM_DATAPREP_ROI_CONSOLIDATION_IOU_THRESHOLD: ${ROI_CONSOLIDATION_IOU_THRESHOLD:-0.2}
+      MM_DATAPREP_ROI_CONSOLIDATION_CLASS_AWARE: ${ROI_CONSOLIDATION_CLASS_AWARE:-false}
+      MM_DATAPREP_ROI_CONSOLIDATION_CONTEXT_SCALE: ${ROI_CONSOLIDATION_CONTEXT_SCALE:-0.2}
+      # Application configuration
+      MM_DATAPREP_LOG_LEVEL: ${VDMS_DATAPREP_LOG_LEVEL:-INFO}
+      MM_DATAPREP_ALLOW_ORIGINS: ${ALLOW_ORIGINS:-*}
+      MM_DATAPREP_ALLOW_METHODS: ${ALLOW_METHODS:-*}
+      MM_DATAPREP_ALLOW_HEADERS: ${ALLOW_HEADERS:-*}
     ulimits:
       nofile:
         soft: 32768
@@ -208,20 +219,21 @@ services:
     ports:
       - "${VS_HOST_PORT:-7890}:8000"
     environment:
-      no_proxy: ${no_proxy:-},multimodal-embedding-serving,vdms-dataprep,minio-service,vdms-vector-db,pipeline-manager,localhost
+      no_proxy: ${no_proxy:-},multimodal-embedding-serving,vdms-dataprep,minio-service,vdms-vector-db,vector-retriever,pipeline-manager,localhost
       http_proxy: ${http_proxy:-}
       https_proxy: ${https_proxy:-}
-      NO_PROXY: ${no_proxy:-},multimodal-embedding-serving,vdms-dataprep,minio-service,vdms-vector-db,pipeline-manager,localhost
+      NO_PROXY: ${no_proxy:-},multimodal-embedding-serving,vdms-dataprep,minio-service,vdms-vector-db,vector-retriever,pipeline-manager,localhost
       HTTP_PROXY: ${http_proxy:-}
       HTTPS_PROXY: ${https_proxy:-}
       # video-search reads a custom `no_proxy_env` setting (src/utils/common.py)
       # to decide whether to bypass the proxy for the embedding service call.
-      no_proxy_env: ${no_proxy:-},multimodal-embedding-serving,vdms-dataprep,minio-service,vdms-vector-db,pipeline-manager,localhost
-      VDMS_VDB_HOST: vdms-vector-db
-      VDMS_VDB_PORT: 55555
+      no_proxy_env: ${no_proxy:-},multimodal-embedding-serving,vdms-dataprep,minio-service,vdms-vector-db,vector-retriever,pipeline-manager,localhost
       EMBEDDINGS_ENDPOINT: http://multimodal-embedding-serving:8000/embeddings
       EMBEDDINGS_MODEL_NAME: ${EMBEDDING_MODEL_NAME}
       INDEX_NAME: ${VS_INDEX_NAME:-video_frame_embeddings}
+      # All vector similarity search is delegated to the standalone
+      # vector-retriever microservice (2026.2.0+); search-ms holds no VDB client.
+      RETRIEVER_ENDPOINT: ${VS_RETRIEVER_ENDPOINT:-http://vector-retriever:8000/query}
       WATCH_DIRECTORY: /tmp/watcher-dir
       DEBOUNCE_TIME: ${VS_DEBOUNCE_TIME:-10}
       DELETE_PROCESSED_FILES: ${VS_DELETE_PROCESSED_FILES:-false}
@@ -243,9 +255,53 @@ services:
         condition: service_started
       multimodal-embedding-serving:
         condition: service_healthy
+      vector-retriever:
+        condition: service_started
     restart: unless-stopped
     volumes:
       - vss-watcher-dir:/tmp/watcher-dir
+    networks:
+      - vs_network
+
+  # ---------------------------- Vector Retriever ----------------------------
+  # Standalone vector similarity search service (2026.2.0+). video-search
+  # delegates ALL retrieval here via RETRIEVER_ENDPOINT. The VDMS backend flavor
+  # is baked into the image (vector-retriever-vdms).
+  vector-retriever:
+    image: ${REGISTRY:-}vector-retriever-${RETRIEVER_BACKEND:-vdms}:${TAG:-latest}
+    hostname: vector-retriever
+    ipc: host
+    ports:
+      - "${VECTOR_RETRIEVER_HOST_PORT:-6008}:8000"
+    environment:
+      no_proxy: ${no_proxy:-},multimodal-embedding-serving,vdms-vector-db,localhost
+      NO_PROXY: ${no_proxy:-},multimodal-embedding-serving,vdms-vector-db,localhost
+      http_proxy: ${http_proxy:-}
+      https_proxy: ${https_proxy:-}
+      RETRIEVER_BACKEND: ${RETRIEVER_BACKEND:-vdms}
+      LOG_LEVEL: ${VECTOR_RETRIEVER_LOG_LEVEL:-INFO}
+      INDEX_NAME: ${VS_INDEX_NAME:-video_frame_embeddings}
+      EMBEDDINGS_ENDPOINT: http://multimodal-embedding-serving:8000/embeddings
+      EMBEDDING_MODEL_NAME: ${EMBEDDING_MODEL_NAME}
+      DEFAULT_TOP_K: ${AGGREGATION_INITIAL_K:-20}
+      MAX_TOP_K: ${VECTOR_RETRIEVER_MAX_TOP_K:-1000}
+      # VDMS backend settings
+      VDMS_VDB_HOST: vdms-vector-db
+      VDMS_VDB_PORT: 55555
+      SEARCH_ENGINE: ${SEARCH_ENGINE:-FaissFlat}
+      DISTANCE_STRATEGY: ${DISTANCE_STRATEGY:-IP}
+    depends_on:
+      multimodal-embedding-serving:
+        condition: service_healthy
+      vdms-vector-db:
+        condition: service_started
+    healthcheck:
+      test: ["CMD-SHELL", "python3 -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/ready')\""]
+      interval: 15s
+      timeout: 10s
+      retries: 30
+      start_period: 20s
+    restart: unless-stopped
     networks:
       - vs_network
 
