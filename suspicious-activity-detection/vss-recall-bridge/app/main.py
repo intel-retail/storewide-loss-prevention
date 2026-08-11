@@ -21,6 +21,7 @@ logger = logging.getLogger(__name__)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     settings = get_settings()
+    app.state.settings = settings
     cameras = load_cameras(
         settings.scene_config,
         settings.rtsp_base_url,

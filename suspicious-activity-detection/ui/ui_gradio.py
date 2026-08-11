@@ -781,7 +781,8 @@ function renderResults(results){var grid=$('grid'),empty=$('empty');
   ph.onclick=function(){loadClip(h.video_id,card,ph,h.segment_start);};
   var tags=(h.tags||[]).map(function(t){return '<span class="tag">'+t+'</span>';}).join('');
   var b=document.createElement('div');b.className='b';
-  b.innerHTML='<div><span class="score">'+(h.score||0).toFixed(3)+'</span><strong>'+fmtTime(h.capture_time)+'</strong></div>'+
+  var strength=(h.max_frame_score!=null?h.max_frame_score:h.score)||0;
+  b.innerHTML='<div><span class="score">'+strength.toFixed(3)+'</span><strong>'+fmtTime(h.capture_time)+'</strong></div>'+
    '<div class="meta">video: '+h.video_id+'</div>'+
    '<div class="meta">segment: '+(h.segment_start||0).toFixed(1)+'s \\u2013 '+(h.segment_end||0).toFixed(1)+'s</div>'+
    '<div class="tags">'+tags+'</div>';

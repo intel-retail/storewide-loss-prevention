@@ -423,6 +423,7 @@ services:
       SCENE_CONFIG: configs/scene-config.yaml
       CLIPS_DIR: /clips
       WINDOW_PAD_SECONDS: ${RECALL_WINDOW_PAD_SECONDS:-60}
+      RECALL_MIN_FRAME_SCORE: ${RECALL_MIN_FRAME_SCORE:-0.24}
       SEARCH_TIMEZONE: ${TZ:-UTC}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
       http_proxy: ${http_proxy:-}
