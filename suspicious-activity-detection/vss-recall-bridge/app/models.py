@@ -37,7 +37,13 @@ class RecallHit(BaseModel):
     capture_time: datetime | None = None
     segment_start: float  # in-video seconds
     segment_end: float
-    score: float
+    score: float  # query-relative normalized score (top hit is always ~1.0)
+    # Near-absolute CLIP similarity; the only signal that tells a real match from
+    # "best of a bad batch". Used to gate out no-match queries.
+    max_frame_score: float | None = None
+    raw_score: float | None = None
+    raw_score_min: float | None = None
+    raw_score_max: float | None = None
     video_url: str
 
 

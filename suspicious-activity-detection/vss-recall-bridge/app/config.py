@@ -33,6 +33,10 @@ class Settings(BaseSettings):
     default_segment_seconds: int = 60
     search_timezone: str = "UTC"
     http_timeout_seconds: float = 30.0
+    # Absolute floor on a hit's max_frame_score (CLIP similarity). Hits below this
+    # are dropped so no-match queries return empty instead of a normalized 1.0.
+    # Model/content sensitive - retune when EMBEDDING_MODEL_NAME changes. 0 disables.
+    recall_min_frame_score: float = 0.24
     # Stop uploading after this many clips per camera (0 = unlimited). Handy for
     # capping ingest while testing; leave 0 in production.
     max_upload_clips: int = 0
