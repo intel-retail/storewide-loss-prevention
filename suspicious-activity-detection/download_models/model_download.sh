@@ -601,29 +601,29 @@ VLM_DONE=0
 DETECT_DONE=0
 REID_DONE=0
 YOLO_DONE=0
+VLM_RC=0
+DETECT_RC=0
+REID_RC=0
+YOLO_RC=0
 VLM_LINES=0
 DETECT_LINES=0
 REID_LINES=0
 YOLO_LINES=0
 while true; do
     if [ ${VLM_DONE} -eq 0 ] && ! kill -0 ${VLM_PID} 2>/dev/null; then
-        wait ${VLM_PID}
-        VLM_RC=$?
+        wait ${VLM_PID} || VLM_RC=$?
         VLM_DONE=1
     fi
     if [ ${DETECT_DONE} -eq 0 ] && ! kill -0 ${DETECT_PID} 2>/dev/null; then
-        wait ${DETECT_PID}
-        DETECT_RC=$?
+        wait ${DETECT_PID} || DETECT_RC=$?
         DETECT_DONE=1
     fi
     if [ ${REID_DONE} -eq 0 ] && ! kill -0 ${REID_PID} 2>/dev/null; then
-        wait ${REID_PID}
-        REID_RC=$?
+        wait ${REID_PID} || REID_RC=$?
         REID_DONE=1
     fi
     if [ ${YOLO_DONE} -eq 0 ] && ! kill -0 ${YOLO_PID} 2>/dev/null; then
-        wait ${YOLO_PID}
-        YOLO_RC=$?
+        wait ${YOLO_PID} || YOLO_RC=$?
         YOLO_DONE=1
     fi
 
