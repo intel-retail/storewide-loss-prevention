@@ -80,7 +80,7 @@ services:
 
   # ---------- Scene Understanding Service ----------
   scene-understanding-service:
-    image: ${SUS_IMAGE:-intel/scene-understanding-service:${TAG:-latest}}
+    image: intel/scene-understanding-service:${TAG:-latest}}
     build:
       context: ../edge-ai-libraries/microservices/scene-understanding-service
       dockerfile: Dockerfile
@@ -89,7 +89,7 @@ services:
     networks:
       - storewide-lp
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8082/api/v1/lp/status')"]
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8082/api/v1/sus/status')"]
       interval: 10s
       timeout: 5s
       retries: 10
