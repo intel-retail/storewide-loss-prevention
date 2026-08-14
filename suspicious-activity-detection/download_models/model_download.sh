@@ -172,6 +172,12 @@ ensure_python_env() {
         _fetch_export_tool "export_model.py" "${SCRIPT_DIR}/export_model.py"
         _fetch_export_tool "requirements.txt" "${SCRIPT_DIR}/export_requirements.txt"
         echo "  ✓ Export tools downloaded"
+        
+        # Patch export_requirements.txt to use available OpenVINO versions
+        # OVMS releases/2026/0 branch uses rc3 versions that don't exist on PyPI
+        sed -i 's/openvino-tokenizers==2026\.0\.0rc3/openvino-tokenizers==2026.3.0.0/g' "${SCRIPT_DIR}/export_requirements.txt"
+        sed -i 's/openvino==2026\.0\.0rc3/openvino==2026.3.0/g' "${SCRIPT_DIR}/export_requirements.txt"
+        echo "  ✓ Patched OpenVINO package versions (2026.0.0rc3 → 2026.3.0)"
     fi
 
     if [ ! -d "${SCRIPT_DIR}/venv" ] || [ ! -f "${SCRIPT_DIR}/venv/bin/pip" ]; then
