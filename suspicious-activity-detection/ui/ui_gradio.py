@@ -859,7 +859,7 @@ def recall_clip(video_id: str, request: Request):
             timeout=120,
         )
     except Exception as exc:
-        print(f"[RECALL] Clip proxy failed for '{video_id}': {exc}", flush=True)
+        print(f"[RECALL] Clip proxy failed: {exc}", flush=True)
         return JSONResponse({"error": "Recall clip service unavailable"}, status_code=502)
     if r.status_code not in (200, 206):
         return Response(content=r.content, status_code=r.status_code, media_type="application/json")
