@@ -80,7 +80,7 @@ services:
 
   # ---------- Scene Understanding Service ----------
   scene-understanding-service:
-    image: intel/scene-understanding-service:${TAG:-latest}}
+    image: intel/scene-understanding-service:${TAG}
     build:
       context: ../edge-ai-libraries/microservices/scene-understanding-service
       dockerfile: Dockerfile
