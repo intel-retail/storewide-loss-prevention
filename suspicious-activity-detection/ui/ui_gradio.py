@@ -19,9 +19,9 @@ import uvicorn
 
 # Use Docker service name for container-to-container communication
 LP_BASE_URL = os.environ.get("LP_BASE_URL", "http://storewide-loss-prevention:8082")
-ZONES_API = f"{LP_BASE_URL}/api/v1/lp/zones"
-SESSIONS_API = f"{LP_BASE_URL}/api/v1/lp/sessions?include_pending=true"
-ALERTS_API = f"{LP_BASE_URL}/api/v1/lp/alerts"
+ZONES_API = f"{LP_BASE_URL}/api/v1/sus/zones"
+SESSIONS_API = f"{LP_BASE_URL}/api/v1/sus/sessions?include_pending=true"
+ALERTS_API = f"{LP_BASE_URL}/api/v1/sus/alerts"
 ZONE_CONFIG = os.environ.get("ZONE_CONFIG", "/app/zone_config.json")
 
 # VLM-Recall bridge (investigator search).
@@ -692,6 +692,9 @@ button:hover{background:#005a9e;}button:disabled{opacity:.5;cursor:not-allowed;}
 .hit .b{padding:10px 12px;font-size:12px;}
 .hit .b .meta{color:#666;margin:2px 0;word-break:break-all;}
 .score{float:right;font-weight:700;color:#1a9e4b;}
+.score .lbl{font-weight:600;color:#8a94a6;font-size:11px;}
+.score.strong{color:#1a9e4b;}
+.score.moderate{color:#c78a12;}
 .tags{display:flex;flex-wrap:wrap;gap:5px;margin-top:7px;}
 .tag{background:#eef3fb;border:1px solid #d4e0f2;color:#21527d;font-size:11px;padding:2px 8px;border-radius:12px;}
 .empty{color:#999;font-size:14px;padding:40px 0;text-align:center;font-style:italic;}
@@ -782,7 +785,9 @@ function renderResults(results){var grid=$('grid'),empty=$('empty');
   ph.onclick=function(){loadClip(h.video_id,card,ph,h.segment_start);};
   var tags=(h.tags||[]).map(function(t){return '<span class="tag">'+t+'</span>';}).join('');
   var b=document.createElement('div');b.className='b';
-  b.innerHTML='<div><span class="score">'+(h.score||0).toFixed(3)+'</span><strong>'+fmtTime(h.capture_time)+'</strong></div>'+
+  var strength=(h.max_frame_score!=null?h.max_frame_score:h.score)||0;
+  var strengthCls=strength>=0.30?'strong':'moderate';
+  b.innerHTML='<div><span class="score '+strengthCls+'"><span class="lbl">Match </span>'+strength.toFixed(3)+'</span><strong>'+fmtTime(h.capture_time)+'</strong></div>'+
    '<div class="meta">video: '+h.video_id+'</div>'+
    '<div class="meta">segment: '+(h.segment_start||0).toFixed(1)+'s \\u2013 '+(h.segment_end||0).toFixed(1)+'s</div>'+
    '<div class="tags">'+tags+'</div>';
