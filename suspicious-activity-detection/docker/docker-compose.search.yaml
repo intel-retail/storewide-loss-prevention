@@ -86,7 +86,7 @@ services:
       - vs_network
 
   multimodal-embedding-serving:
-    image: ${REGISTRY:-}multimodal-embedding-serving:${TAG:-latest}
+    image: ${REGISTRY:-}multimodal-embedding-serving:${TAG}
     container_name: multimodal-embedding-serving
     ports:
       - "${EMBEDDING_SERVER_PORT:-9777}:8000"
@@ -127,7 +127,7 @@ services:
       - ov-models:${EMBEDDING_OV_MODELS_DIR:-/app/ov_models}
 
   vdms-dataprep:
-    image: ${REGISTRY:-}multimodal-dataprep:${TAG:-latest}
+    image: ${REGISTRY:-}multimodal-dataprep:${TAG}
     hostname: vdms-dataprep
     environment:
       no_proxy: ${no_proxy:-},vdms-vector-db,multimodal-embedding-serving,minio-service,localhost
@@ -214,7 +214,7 @@ services:
 
   # ------------------------------- Search MS -------------------------------
   video-search:
-    image: ${REGISTRY:-}video-search:${TAG:-latest}
+    image: ${REGISTRY:-}video-search:${TAG}
     ipc: host
     ports:
       - "${VS_HOST_PORT:-7890}:8000"
@@ -268,7 +268,7 @@ services:
   # delegates ALL retrieval here via RETRIEVER_ENDPOINT. The VDMS backend flavor
   # is baked into the image (vector-retriever-vdms).
   vector-retriever:
-    image: ${REGISTRY:-}vector-retriever-${RETRIEVER_BACKEND:-vdms}:${TAG:-latest}
+    image: ${REGISTRY:-}vector-retriever-${RETRIEVER_BACKEND:-vdms}:${TAG}
     hostname: vector-retriever
     ipc: host
     ports:
@@ -307,7 +307,7 @@ services:
 
   # ---------------------------- Pipeline Manager ----------------------------
   pipeline-manager:
-    image: ${REGISTRY:-}pipeline-manager:${TAG:-latest}
+    image: ${REGISTRY:-}pipeline-manager:${TAG}
     ports:
       - "${PM_HOST_PORT:-3001}:3000"
     ipc: host
