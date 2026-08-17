@@ -337,7 +337,8 @@ def get_scene_name():
             return f"{scene_name} (x{density})"
         return scene_name
     except Exception as e:
-        return f"Unknown ({e})"
+        print(f"[UI] Failed to read scene config: {e}", flush=True)
+        return "Unknown"
 
 # Cached data to avoid blanking tables on transient API failures
 _cached_zones = pd.DataFrame(columns=["Zone ID", "Name", "Type"])
@@ -816,7 +817,8 @@ def recall_health():
         r = requests.get(f"{RECALL_BASE_URL}/health", timeout=5)
         return JSONResponse(r.json(), status_code=r.status_code)
     except Exception as exc:
-        return JSONResponse({"status": "unreachable", "detail": str(exc)}, status_code=502)
+        print(f"[RECALL] Health check failed: {exc}", flush=True)
+        return JSONResponse({"status": "unreachable", "detail": "Recall bridge unreachable"}, status_code=502)
 
 
 @app.post("/api/recall/search")
@@ -829,7 +831,8 @@ def recall_search(payload: dict):
             timeout=120,
         )
     except Exception as exc:
-        return JSONResponse({"error": str(exc)}, status_code=502)
+        print(f"[RECALL] Search proxy failed: {exc}", flush=True)
+        return JSONResponse({"error": "Recall search service unavailable"}, status_code=502)
     return Response(content=r.content, status_code=r.status_code, media_type="application/json")
 
 
@@ -851,7 +854,8 @@ def recall_clip(video_id: str, request: Request):
             timeout=120,
         )
     except Exception as exc:
-        return JSONResponse({"error": str(exc)}, status_code=502)
+        print(f"[RECALL] Clip proxy failed for '{video_id}': {exc}", flush=True)
+        return JSONResponse({"error": "Recall clip service unavailable"}, status_code=502)
     if r.status_code not in (200, 206):
         return Response(content=r.content, status_code=r.status_code, media_type="application/json")
     passthrough = {}
