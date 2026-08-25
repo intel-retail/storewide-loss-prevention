@@ -235,6 +235,45 @@ services:
     restart: always
     pids_limit: 1000
 
+  # ---- Scenescape Analytics (region / tripwire / sensor events) ----
+  # As of SceneScape 2026.2.0 the controller no longer publishes region or
+  # tripwire analytics; this dedicated service consumes scene-data and
+  # publishes scenescape/data/region and scenescape/event/region messages
+  # that the scene-understanding-service relies on for zone entry/dwell.
+  analytics:
+    image: ${SCENESCAPE_REGISTRY-intel/}${SCENESCAPE_ANALYTICS_IMAGE:-intel/scenescape-analytics}:${SCENESCAPE_VERSION:-latest}
+    init: true
+    user: "${UID:-1000}:${GID:-1000}"
+    networks:
+      storewide-lp:
+    depends_on:
+      web:
+        condition: service_healthy
+      broker:
+        condition: service_started
+      ntpserv:
+        condition: service_started
+      scene-import:
+        condition: service_completed_successfully
+    environment:
+      no_proxy: ${no_proxy},.scenescape.intel.com
+      NO_PROXY: ${NO_PROXY},.scenescape.intel.com
+      VISIBILITY_TOPIC: ${VISIBILITY:-regulated}
+    command: >
+      --restauth /run/secrets/controller.auth
+      --brokerauth /run/secrets/controller.auth
+      --broker broker.scenescape.intel.com
+      --visibility_topic ${VISIBILITY:-regulated}
+    volumes:
+      - vol-media:/home/scenescape/SceneScape/media
+      - ${SECRETSDIR}/django:/run/secrets/django
+    secrets:
+      - source: root-cert
+        target: certs/scenescape-ca.pem
+      - controller.auth
+    restart: always
+    pids_limit: 1000
+
   # ---- VDMS (Visual Data Management System for ReID) ----
   vdms:
     image: intellabs/vdms:v2.12.0
