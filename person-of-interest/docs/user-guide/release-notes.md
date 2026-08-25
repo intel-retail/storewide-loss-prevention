@@ -1,9 +1,27 @@
 # Release Notes
 
+- [Version 2026.2.0](#version-20260)
 - [Version 1.1.0](#version-110)
 - [Version 1.0.0](#version-100)
 
 ## Current Release
+
+### Version 2026.2.0
+
+**Release Date**: August 2026
+
+**New**:
+
+- **Image tag alignment**: All container images (`poi-backend`, `poi-ui`,
+  `alert-agent-service`, `retail-benchmark`, DL Streamer pipeline server) now
+  default to the `2026.2.0` release tag instead of the prior `2026.1.0` release
+- **Alert Service documentation fix**: Corrected docs to point to the actual
+  browsable Alert Service endpoints (`/docs`, `/api/v1/health`) instead of the
+  bare service root, which returned 404
+- **Documentation corrections**: Fixed the documented default device profile
+  (GPU, matching the `Makefile` default) and clarified that sample videos
+  must be placed manually in `scenescape/sample_data/` (no automatic download
+  exists)
 
 ### Version 1.1.0
 

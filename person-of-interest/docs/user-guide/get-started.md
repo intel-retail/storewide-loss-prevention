@@ -14,7 +14,7 @@ environment meets the recommended hardware and software prerequisites.
 > directory before running the commands in this guide.
 
 ```bash
-git clone https://github.com/intel-retail/storewide-loss-prevention.git
+git clone -b v2026.2.0-rc2 https://github.com/intel-retail/storewide-loss-prevention.git
 cd storewide-loss-prevention/person-of-interest
 ```
 
@@ -60,10 +60,10 @@ Minimal example:
   "models": "person-detection-retail-0013,face-detection-retail-0004,face-reidentification-retail-0095",
   "scenescape": {
     "registry": "",
-    "version": "2026.1.0",
+    "version": "2026.2.0-rc2",
     "controller_image": "intel/scenescape-controller",
     "manager_image": "intel/scenescape-manager",
-    "dlstreamer_version": "2026.2.0-ubuntu24-rc1"
+    "dlstreamer_version": "2026.2.0-ubuntu24-rc2"
   },
   "store": {
     "name": "Retail",
@@ -125,7 +125,7 @@ export HOST_IP=<IP>
 # Edit the configuration file with your camera and scene details
 nano configs/zone_config.json
 
-# Initialize environment with default device profile (CPU)
+# Initialize environment with default device profile (GPU)
 make init
 
 # Or select a specific device profile:
@@ -140,9 +140,9 @@ inference device, pre-process backend, model precision, and throughput options.
 
 | Profile | Decode | Detection | Re-ID | Precision | Command |
 |---------|--------|-----------|-------|-----------|---------|
-| `all-cpu.env` (default) | CPU (`avdec_h264`) | CPU | CPU | FP32 | `make init DEVICE=all-cpu.env` |
+| `all-cpu.env` | CPU (`avdec_h264`) | CPU | CPU | FP32 | `make init DEVICE=all-cpu.env` |
 | `all-gpu-cpu.env` | GPU (`vah264dec`) | GPU | CPU | FP16 | `make init DEVICE=all-gpu-cpu.env` |
-| `all-gpu.env` | GPU (`vah264dec`) | GPU | GPU | FP16 | `make init DEVICE=all-gpu.env` |
+| `all-gpu.env` (default) | GPU (`vah264dec`) | GPU | GPU | FP16 | `make init DEVICE=all-gpu.env` |
 | `all-npu-cpu.env` | GPU (`vah264dec`) | NPU | CPU | FP16-INT8 | `make init DEVICE=all-npu-cpu.env` |
 | `all-npu.env` | GPU (`vah264dec`) | NPU | NPU | FP16-INT8 | `make init DEVICE=all-npu.env` |
 
@@ -167,8 +167,8 @@ inference device, pre-process backend, model precision, and throughput options.
 ## 5. Pull or Build Images
 
 Pre-built container images are available on Docker Hub. The `docker-compose.yml`
-references them directly (`intel/poi-backend:2026.2.0-rc1` and
-`intel/poi-ui:2026.2.0-rc1`), so `make up` will pull them automatically if they
+references them directly (`intel/poi-backend:2026.2.0-rc2` and
+`intel/poi-ui:2026.2.0-rc2`), so `make up` will pull them automatically if they
 are not already present locally.
 
 To explicitly pull before starting:
@@ -247,7 +247,7 @@ This launches the following containers:
 | `poi-backend`        | `poi-backend`                | 8000  |
 | `poi-ui`             | `poi-ui`                     | 3000  |
 | `poi-redis`          | `redis:8.6.2`                | 6379  |
-| `poi-alert-service`  | `intel/alert-agent-service:2026.2.0-rc1`  | 8001  |
+| `poi-alert-service`  | `intel/alert-agent-service:2026.2.0-rc2`  | 8001  |
 
 > **Note:** Use `make up` for subsequent starts after the initial setup. Scenescape
 > is started automatically by the `up` target.
