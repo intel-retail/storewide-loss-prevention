@@ -13,6 +13,19 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "${SCRIPT_DIR}")"
 MODELS_DIR="${PROJECT_ROOT}/models"
 
+# Pin the HuggingFace cache to a project-local, writable directory so the VLM
+# export never depends on the invoking user's $HOME (which may be unwritable,
+# e.g. /home/fst in CI). Prevents PermissionError on ~/.cache/huggingface.
+# Honor an inherited HF_HOME only if it is actually writable; otherwise fall back.
+LOCAL_HF_HOME="${SCRIPT_DIR}/.hf_cache"
+_hf_writable() { mkdir -p "$1" 2>/dev/null && [ -w "$1" ]; }
+if [ -n "${HF_HOME:-}" ] && _hf_writable "${HF_HOME}"; then
+    echo "  Using inherited HF_HOME=${HF_HOME}"
+else
+    export HF_HOME="${LOCAL_HF_HOME}"
+fi
+mkdir -p "${HF_HOME}"
+
 ###############################################
 # CONFIGURATION — load AI-model settings from configs/.env.example
 # (single source of truth for VLM_*/TARGET_DEVICE/YOLO_*).
@@ -172,6 +185,12 @@ ensure_python_env() {
         _fetch_export_tool "export_model.py" "${SCRIPT_DIR}/export_model.py"
         _fetch_export_tool "requirements.txt" "${SCRIPT_DIR}/export_requirements.txt"
         echo "  ✓ Export tools downloaded"
+        
+        # Patch export_requirements.txt to use available OpenVINO versions
+        # OVMS releases/2026/0 branch uses rc3 versions that don't exist on PyPI
+        sed -i 's/openvino-tokenizers==2026\.0\.0rc3/openvino-tokenizers==2026.3.0.0/g' "${SCRIPT_DIR}/export_requirements.txt"
+        sed -i 's/openvino==2026\.0\.0rc3/openvino==2026.3.0/g' "${SCRIPT_DIR}/export_requirements.txt"
+        echo "  ✓ Patched OpenVINO package versions (2026.0.0rc3 → 2026.3.0)"
     fi
 
     if [ ! -d "${SCRIPT_DIR}/venv" ] || [ ! -f "${SCRIPT_DIR}/venv/bin/pip" ]; then
@@ -601,29 +620,29 @@ VLM_DONE=0
 DETECT_DONE=0
 REID_DONE=0
 YOLO_DONE=0
+VLM_RC=0
+DETECT_RC=0
+REID_RC=0
+YOLO_RC=0
 VLM_LINES=0
 DETECT_LINES=0
 REID_LINES=0
 YOLO_LINES=0
 while true; do
     if [ ${VLM_DONE} -eq 0 ] && ! kill -0 ${VLM_PID} 2>/dev/null; then
-        wait ${VLM_PID}
-        VLM_RC=$?
+        wait ${VLM_PID} || VLM_RC=$?
         VLM_DONE=1
     fi
     if [ ${DETECT_DONE} -eq 0 ] && ! kill -0 ${DETECT_PID} 2>/dev/null; then
-        wait ${DETECT_PID}
-        DETECT_RC=$?
+        wait ${DETECT_PID} || DETECT_RC=$?
         DETECT_DONE=1
     fi
     if [ ${REID_DONE} -eq 0 ] && ! kill -0 ${REID_PID} 2>/dev/null; then
-        wait ${REID_PID}
-        REID_RC=$?
+        wait ${REID_PID} || REID_RC=$?
         REID_DONE=1
     fi
     if [ ${YOLO_DONE} -eq 0 ] && ! kill -0 ${YOLO_PID} 2>/dev/null; then
-        wait ${YOLO_PID}
-        YOLO_RC=$?
+        wait ${YOLO_PID} || YOLO_RC=$?
         YOLO_DONE=1
     fi
 

@@ -2,12 +2,18 @@ name: Update Submodule
 on:
   repository_dispatch:
     types: [dispatch-event]
+permissions:
+  contents: write
+  pull-requests: write
 env:
   BRANCH_NAME: perf-tool-${{ github.run_number }}
   PR_REVIEWERS: "sumanaga,avinash-palleti"  # Replace with actual GitHub usernames
 jobs:
   update-submodule:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4

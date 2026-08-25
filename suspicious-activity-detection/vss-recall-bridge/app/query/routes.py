@@ -23,12 +23,23 @@ def build_tag_query(cameras: list[str] | None) -> str | None:
     return ",".join(cameras)
 
 
+def _opt_float(value: object) -> float | None:
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
 def to_hit(meta: dict) -> RecallHit:
     """Map a raw VSS hit metadata dict to a RecallHit (straight field copy)."""
 
     tags = meta.get("tags")
     if isinstance(tags, str):
         tags = [t for t in tags.split(",") if t]
+
+    breakdown = meta.get("score_breakdown") or {}
 
     return RecallHit(
         video_id=meta.get("video_id") or meta.get("videoId") or "",
@@ -37,6 +48,10 @@ def to_hit(meta: dict) -> RecallHit:
         segment_start=float(meta.get("segment_start", 0) or 0),
         segment_end=float(meta.get("segment_end", 0) or 0),
         score=float(meta.get("relevance_score", meta.get("score", 0)) or 0),
+        max_frame_score=_opt_float(breakdown.get("max_frame_score")),
+        raw_score=_opt_float(breakdown.get("raw_score")),
+        raw_score_min=_opt_float(breakdown.get("raw_score_min")),
+        raw_score_max=_opt_float(breakdown.get("raw_score_max")),
         video_url=meta.get("video_url") or meta.get("videoUrl") or "",
     )
 
@@ -75,6 +90,18 @@ async def search(req: RecallSearchRequest, request: Request) -> RecallSearchResp
         ]
 
     results = [to_hit(m) for m in hits]
+
+    # The normalized score is query-relative (top hit is always ~1.0), so a query
+    # for something absent still returns "matches". Gate on the near-absolute
+    # max_frame_score to drop non-matching hits; if all fall below the floor the
+    # UI legitimately shows "No matches found".
+    floor = request.app.state.settings.recall_min_frame_score
+    if floor > 0:
+        results = [
+            h for h in results
+            if h.max_frame_score is None or h.max_frame_score >= floor
+        ]
+
     results.sort(key=lambda h: h.score, reverse=True)
 
     # VSS returns one hit per matching segment, so a video can appear several
