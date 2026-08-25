@@ -41,3 +41,6 @@ person-of-interest/backend/**/__pycache__/
 # Vendored edge-ai-libraries checkout (not tracked here)
 edge-ai-libraries/
 performance-tools/
+
+# Local HuggingFace cache used by the VLM model export
+suspicious-activity-detection/download_models/.hf_cache/
