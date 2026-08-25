@@ -620,20 +620,23 @@ up:
 		echo "$(BLUE)=== Clearing stale FAISS index (fresh deployment) ===$(NC)"; \
 		rm -f data/faiss/poi.index data/faiss/id_map.json; \
 	fi
-	@# HOST_IP is required for WebRTC ICE candidates (camera streams in the UI)
-	@HOST_IP_VAL="$$(grep -E '^HOST_IP=.+' docker/.env 2>/dev/null | cut -d= -f2-)"; \
+	@# HOST_IP is required for WebRTC ICE candidates (camera streams in the UI).
+	@# Accept it from the current shell/environment first (so `export HOST_IP=...
+	@# && make up` works on the very first run), falling back to whatever is
+	@# already persisted in docker/.env from a previous `make init`/`up`.
+	@HOST_IP_VAL="$${HOST_IP:-$$(grep -E '^HOST_IP=.+' docker/.env 2>/dev/null | cut -d= -f2-)}"; \
 	if [ -z "$$HOST_IP_VAL" ]; then \
 		echo ""; \
-		echo "$(RED)ERROR: HOST_IP is not set in docker/.env$(NC)"; \
+		echo "$(RED)ERROR: HOST_IP is not set.$(NC)"; \
 		echo ""; \
 		echo "  HOST_IP is required for WebRTC camera streams to work in the UI."; \
-		echo "  Set it before running make init:"; \
+		echo "  Set it before running make up:"; \
 		echo ""; \
-		echo "    export HOST_IP=\$$(ip route get 1 | awk '{print \$$7; exit}') && make init"; \
+		echo "    export HOST_IP=\$$(ip route get 1 | awk '{print \$$7; exit}') && make up"; \
 		echo ""; \
 		echo "  Or for a specific IP:"; \
 		echo ""; \
-		echo "    export HOST_IP=192.168.1.100 && make init"; \
+		echo "    export HOST_IP=192.168.1.100 && make up"; \
 		echo ""; \
 		exit 1; \
 	fi

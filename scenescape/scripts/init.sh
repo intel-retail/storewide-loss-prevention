@@ -395,6 +395,18 @@ CONTROLLER_AUTH=$(cat "${SECRETS_DIR}/controller.auth" 2>/dev/null || echo "")
 USER_UID=$(id -u)
 USER_GID=$(id -g)
 
+# Preserve a previously-detected HOST_IP if the current shell doesn't export
+# one, so re-running init.sh (e.g. via `make up`/`make demo` without HOST_IP
+# exported) doesn't silently blank out WebRTC connectivity that was working
+# before. HOST_IP is required for WebRTC ICE candidates in the Live Alerts UI.
+if [ -z "${HOST_IP:-}" ] && [ -f "${ENV_FILE}" ]; then
+    EXISTING_HOST_IP="$(grep -E '^HOST_IP=.+' "${ENV_FILE}" 2>/dev/null | cut -d= -f2-)"
+    if [ -n "${EXISTING_HOST_IP}" ]; then
+        HOST_IP="${EXISTING_HOST_IP}"
+        echo -e "${YELLOW}  HOST_IP not set in environment — reusing previously configured value: ${HOST_IP}${NC}"
+    fi
+fi
+
 # If secrets were freshly generated, remove stale DB volumes so PostgreSQL
 # reinitializes with the new password.  Only remove volumes belonging to the
 # storewide-lp compose project (set in scenescape/docker-compose.yaml).
