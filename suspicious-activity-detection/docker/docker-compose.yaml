@@ -80,7 +80,7 @@ services:
 
   # ---------- Scene Understanding Service ----------
   scene-understanding-service:
-    image: ${SUS_IMAGE:-intel/scene-understanding-service:${TAG:-latest}}
+    image: intel/scene-understanding-service:${TAG}
     build:
       context: ../edge-ai-libraries/microservices/scene-understanding-service
       dockerfile: Dockerfile
@@ -89,7 +89,7 @@ services:
     networks:
       - storewide-lp
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8082/api/v1/lp/status')"]
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8082/api/v1/sus/status')"]
       interval: 10s
       timeout: 5s
       retries: 10
@@ -114,6 +114,9 @@ services:
       # MQTT
       MQTT_HOST: ${MQTT_HOST:-broker.scenescape.intel.com}
       MQTT_PORT: ${MQTT_PORT:-1883}
+      # SeaweedFS (for frame storage)
+      SEAWEEDFS_ENDPOINT: ${SEAWEEDFS_ENDPOINT:-http://seaweedfs:8333}
+      SEAWEEDFS_BUCKET: ${SEAWEEDFS_BUCKET:-behavioral-frames}
       # BA integration contract: topics shared with behavioral-analysis.
       # Must match the values set on the behavioral-analysis service.
       BA_REQUEST_TOPIC: ${BA_REQUEST_TOPIC:-ba/requests}
@@ -125,7 +128,6 @@ services:
       BEHAVIORAL_ANALYSIS_URL: ${BEHAVIORAL_ANALYSIS_URL:-http://behavioral-analysis:8080}
       ALERT_SERVICE_URL: ${ALERT_SERVICE_URL:-http://alert-service:8000}
       ANALYSIS_FPS: ${ANALYSIS_FPS:-1}
-      ENABLE_UI: ${ENABLE_UI:-true}
       USECASE_1: ${USECASE_1:-Scene-Understanding-Service}
       CONTAINER_RESULTS_PATH: /app/results/swlp
     volumes:
