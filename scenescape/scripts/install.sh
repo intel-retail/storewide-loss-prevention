@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 # Install script for Storewide Loss Prevention.
-# Generates secrets, downloads sample videos, and prepares the environment.
+# Generates secrets and prepares the environment.
 #
 # Usage:
 #   ./scenescape/scripts/install.sh [HOST_IP]
@@ -45,5 +45,5 @@ echo "  Secrets:  ${SECRETS_DIR}/"
 echo "  HOST_IP:  ${HOST_IP}"
 echo ""
 echo "Next steps:"
-echo "  ./scenescape/scripts/init.sh            # download videos & generate .env"
+echo "  ./scenescape/scripts/init.sh            # generate .env (place sample videos in scenescape/sample_data/ first)"
 echo "  make demo            # start full stack"

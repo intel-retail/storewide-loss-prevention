@@ -123,18 +123,21 @@ print(f'SEAWEEDFS_S3_PORT=\"{svc.get(\"seaweedfs_s3_port\", 8333)}\"')
 print(f'SEAWEEDFS_MASTER_PORT=\"{svc.get(\"seaweedfs_master_port\", 9333)}\"')
 print(f'SEAWEEDFS_VOLUME_PORT=\"{svc.get(\"seaweedfs_volume_port\", 8080)}\"')
 
-# Benchmark
-bm = cfg.get('benchmark', {})
-print(f'BENCHMARK_TARGET_LATENCY_MS=\"{bm.get(\"target_latency_ms\", 2000)}\"')
-print(f'BENCHMARK_LATENCY_METRIC=\"{bm.get(\"latency_metric\", \"avg\")}\"')
-print(f'BENCHMARK_SCENE_INCREMENT=\"{bm.get(\"scene_increment\", 1)}\"')
-print(f'BENCHMARK_INIT_DURATION=\"{bm.get(\"init_duration\", 90)}\"')
-print(f'BENCHMARK_STABILISE_DURATION=\"{bm.get(\"stabilise_duration\", 30)}\"')
-print(f'BENCHMARK_DURATION=\"{bm.get(\"duration\", 120)}\"')
-print(f'BENCHMARK_MAX_ITERATIONS=\"{bm.get(\"max_iterations\", 50)}\"')
-print(f'BENCHMARK_MAX_ALERT_WAIT=\"{bm.get(\"max_alert_wait\", 180)}\"')
-print(f'BENCHMARK_MIN_THROUGHPUT_RATIO=\"{bm.get(\"min_throughput_ratio\", 0.5)}\"')
-print(f'RESULTS_PATH=\"{bm.get(\"results_path\", \"./results\")}\"')
+# Benchmark tuning knobs are no longer sourced from zone_config.json — they
+# live directly in the app-level .env / .env.example (single source of truth).
+# These prints only provide first-run seed defaults for docker/.env; see the
+# app-level '.env' seeding block further below for the values actually used
+# by 'make benchmark*'.
+print(f'BENCHMARK_TARGET_LATENCY_MS=\"4000\"')
+print(f'BENCHMARK_LATENCY_METRIC=\"avg\"')
+print(f'BENCHMARK_SCENE_INCREMENT=\"1\"')
+print(f'BENCHMARK_INIT_DURATION=\"45\"')
+print(f'BENCHMARK_STABILISE_DURATION=\"30\"')
+print(f'BENCHMARK_DURATION=\"120\"')
+print(f'BENCHMARK_MAX_ITERATIONS=\"50\"')
+print(f'BENCHMARK_MAX_ALERT_WAIT=\"180\"')
+print(f'BENCHMARK_MIN_THROUGHPUT_RATIO=\"0.5\"')
+print(f'RESULTS_PATH=\"./results\"')
 " 2>/dev/null)"
 
 # Apply defaults for required fields
@@ -392,6 +395,18 @@ CONTROLLER_AUTH=$(cat "${SECRETS_DIR}/controller.auth" 2>/dev/null || echo "")
 USER_UID=$(id -u)
 USER_GID=$(id -g)
 
+# Preserve a previously-detected HOST_IP if the current shell doesn't export
+# one, so re-running init.sh (e.g. via `make up`/`make demo` without HOST_IP
+# exported) doesn't silently blank out WebRTC connectivity that was working
+# before. HOST_IP is required for WebRTC ICE candidates in the Live Alerts UI.
+if [ -z "${HOST_IP:-}" ] && [ -f "${ENV_FILE}" ]; then
+    EXISTING_HOST_IP="$(grep -E '^HOST_IP=.+' "${ENV_FILE}" 2>/dev/null | cut -d= -f2-)"
+    if [ -n "${EXISTING_HOST_IP}" ]; then
+        HOST_IP="${EXISTING_HOST_IP}"
+        echo -e "${YELLOW}  HOST_IP not set in environment — reusing previously configured value: ${HOST_IP}${NC}"
+    fi
+fi
+
 # If secrets were freshly generated, remove stale DB volumes so PostgreSQL
 # reinitializes with the new password.  Only remove volumes belonging to the
 # storewide-lp compose project (set in scenescape/docker-compose.yaml).
@@ -525,32 +540,34 @@ HOST_UID=$(id -u)
 HOST_GID=$(id -g)
 EOF
 
-# Keep app-level .env benchmark knobs synced only for POI.
+# Seed benchmark knobs into the app-level .env for POI only, on first run.
+# Unlike the rest of this script, this is a SEED-IF-MISSING operation, not a
+# sync: the app .env is the single, persistent source of truth for benchmark
+# tuning (target latency, durations, etc.) once it exists. Re-running `make
+# init` must never silently stomp values the user has edited in .env.
 if [ "${APP_NAME}" = "person-of-interest" ]; then
     mkdir -p "$(dirname "${APP_ENV_FILE}")"
     touch "${APP_ENV_FILE}"
 
-    upsert_env_var() {
+    seed_env_var_if_missing() {
         local file="$1"
         local key="$2"
         local value="$3"
-        if grep -qE "^${key}=" "${file}"; then
-            sed -i "s|^${key}=.*|${key}=${value}|" "${file}"
-        else
+        if ! grep -qE "^${key}=" "${file}"; then
             printf "%s=%s\n" "${key}" "${value}" >> "${file}"
         fi
     }
 
-    upsert_env_var "${APP_ENV_FILE}" "BENCHMARK_TARGET_LATENCY_MS" "${BENCHMARK_TARGET_LATENCY_MS}"
-    upsert_env_var "${APP_ENV_FILE}" "BENCHMARK_LATENCY_METRIC" "${BENCHMARK_LATENCY_METRIC}"
-    upsert_env_var "${APP_ENV_FILE}" "BENCHMARK_SCENE_INCREMENT" "${BENCHMARK_SCENE_INCREMENT}"
-    upsert_env_var "${APP_ENV_FILE}" "BENCHMARK_INIT_DURATION" "${BENCHMARK_INIT_DURATION}"
-    upsert_env_var "${APP_ENV_FILE}" "BENCHMARK_STABILISE_DURATION" "${BENCHMARK_STABILISE_DURATION}"
-    upsert_env_var "${APP_ENV_FILE}" "BENCHMARK_DURATION" "${BENCHMARK_DURATION}"
-    upsert_env_var "${APP_ENV_FILE}" "BENCHMARK_MAX_ITERATIONS" "${BENCHMARK_MAX_ITERATIONS}"
-    upsert_env_var "${APP_ENV_FILE}" "BENCHMARK_MAX_ALERT_WAIT" "${BENCHMARK_MAX_ALERT_WAIT}"
-    upsert_env_var "${APP_ENV_FILE}" "BENCHMARK_MIN_THROUGHPUT_RATIO" "${BENCHMARK_MIN_THROUGHPUT_RATIO}"
-    upsert_env_var "${APP_ENV_FILE}" "RESULTS_PATH" "${RESULTS_PATH}"
+    seed_env_var_if_missing "${APP_ENV_FILE}" "BENCHMARK_TARGET_LATENCY_MS" "${BENCHMARK_TARGET_LATENCY_MS}"
+    seed_env_var_if_missing "${APP_ENV_FILE}" "BENCHMARK_LATENCY_METRIC" "${BENCHMARK_LATENCY_METRIC}"
+    seed_env_var_if_missing "${APP_ENV_FILE}" "BENCHMARK_SCENE_INCREMENT" "${BENCHMARK_SCENE_INCREMENT}"
+    seed_env_var_if_missing "${APP_ENV_FILE}" "BENCHMARK_INIT_DURATION" "${BENCHMARK_INIT_DURATION}"
+    seed_env_var_if_missing "${APP_ENV_FILE}" "BENCHMARK_STABILISE_DURATION" "${BENCHMARK_STABILISE_DURATION}"
+    seed_env_var_if_missing "${APP_ENV_FILE}" "BENCHMARK_DURATION" "${BENCHMARK_DURATION}"
+    seed_env_var_if_missing "${APP_ENV_FILE}" "BENCHMARK_MAX_ITERATIONS" "${BENCHMARK_MAX_ITERATIONS}"
+    seed_env_var_if_missing "${APP_ENV_FILE}" "BENCHMARK_MAX_ALERT_WAIT" "${BENCHMARK_MAX_ALERT_WAIT}"
+    seed_env_var_if_missing "${APP_ENV_FILE}" "BENCHMARK_MIN_THROUGHPUT_RATIO" "${BENCHMARK_MIN_THROUGHPUT_RATIO}"
+    seed_env_var_if_missing "${APP_ENV_FILE}" "RESULTS_PATH" "${RESULTS_PATH}"
 fi
 
 echo ""

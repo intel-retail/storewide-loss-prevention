@@ -43,7 +43,7 @@ init-sample-data:
 		echo "Sample data volume initialized."; \
 	else \
 		echo "WARNING: No video files (.ts/.mp4) in $(SAMPLE_DATA_DIR)/"; \
-		echo "Run ./scenescape/scripts/init.sh to download sample videos."; \
+		echo "Place sample video files (.ts/.mp4) in $(SAMPLE_DATA_DIR)/ before running make init."; \
 	fi
 
 # ---- Download Models ----
