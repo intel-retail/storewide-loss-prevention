@@ -3,9 +3,42 @@
 - [Version 1.1.0](#version-110)
 - [Version 1.0.0](#version-100)
 
-## Current Release
+## Version 1.2.0
 
-### Version 1.1.0
+**Release Date**: September 2026
+
+**New**:
+
+- **Video search & recall**: Investigators can now search recorded activity in
+  natural language and instantly pull up the matching video clips from a new
+  Recall view in the dashboard, making it far easier to review an incident
+  after an alert fires.
+- **Unified dashboard**: Live alerts, the store zone map, and video recall are
+  now brought together in a single dashboard, so operators no longer switch
+  between separate screens.
+- **Broader hardware support**: The stack can now run across CPU, GPU, and NPU
+  configurations, letting deployments match available hardware without changing
+  the application.
+
+**Changed**:
+
+- **Upgraded to Scenescape 2026.2.0**, keeping the app aligned with the latest
+  supported scene-analytics platform. Zone-based detection and alerting behave
+  as before for end users.
+- More reliable first-run setup, including improved model-download handling.
+
+**Fixed**:
+
+- Various stability and accuracy fixes, including corrections to search results
+  and alert delivery, for a smoother day-to-day experience.
+
+**Known Limitations**:
+
+- Deeper behavioral (VLM) analysis can take a few seconds to tens of seconds
+  under heavy load, so some enriched results may appear shortly after the
+  initial alert.
+
+## Version 1.1.0
 
 **Release Date**: May 2026
 
@@ -55,7 +88,7 @@
 - Fixed rule engine variable substitution not applying environment overrides
 - Fixed Gradio UI health check failing on startup race condition
 
-### Version 1.0.0
+## Version 1.0.0
 
 **Release Date**: April 2026
 

@@ -52,7 +52,14 @@ init:
 	fi
 	@echo "  HOST_IP=$(HOST_IP) (used for WebRTC ICE candidates)"
 	@$(MAKE) -C $(SCENESCAPE_DIR) APP_DIR=$(CURDIR) RESOURCE_CONFIG=$(RESOURCE_CONFIG) init download-models init-sample-data init-volumes
-	@cp -f .env.example .env
+	@# .env is the single, persistent source of truth for POI app config
+	@# (including benchmark tuning). Only bootstrap it from .env.example on
+	@# first run — never overwrite a user's existing .env on subsequent
+	@# `make init` runs.
+	@if [ ! -f .env ]; then \
+		cp .env.example .env; \
+		echo "  Created .env from .env.example (first run)"; \
+	fi
 	@# Pre-create bind-mounted directories as the host user so poi-backend
 	@# (which runs as HOST_UID:HOST_GID) can write uploads and results.
 	@mkdir -p data/uploads data/faiss results
@@ -131,14 +138,16 @@ PERF_TOOLS_DIR := ../performance-tools/benchmark-scripts
 SAD_STREAM_DENSITY := $(PERF_TOOLS_DIR)/sad_stream_density.py
 POI_STREAM_DENSITY := $(PERF_TOOLS_DIR)/poi_stream_density.py
 
-# Load benchmark vars from docker/.env (if it exists) so values like
-# BENCHMARK_TARGET_LATENCY_MS, BENCHMARK_INIT_DURATION etc. are picked up.
-# Only BENCHMARK_* lines are extracted to avoid parsing issues with other values.
-ifneq (,$(wildcard docker/.env))
-$(foreach line,$(shell grep '^BENCHMARK_' docker/.env 2>/dev/null),$(eval $(line)))
+# Load benchmark vars from the app-level .env (single source of truth; see
+# .env.example) so values like BENCHMARK_TARGET_LATENCY_MS, BENCHMARK_INIT_DURATION
+# etc. are picked up. Only BENCHMARK_* lines are extracted to avoid parsing
+# issues with other values. NOTE: this reads .env (not docker/.env, which is
+# an auto-generated Scenescape-internal file rewritten on every `make init`).
+ifneq (,$(wildcard .env))
+$(foreach line,$(shell grep '^BENCHMARK_' .env 2>/dev/null),$(eval $(line)))
 endif
 
-# Benchmark configuration (override via env or docker/.env)
+# Benchmark configuration (override via env, CLI, or .env — see .env.example)
 BENCHMARK_TARGET_LATENCY_MS ?= 30000
 BENCHMARK_LATENCY_METRIC ?= avg
 BENCHMARK_SCENE_INCREMENT ?= 1
@@ -441,14 +450,26 @@ clean:
 	@docker exec poi-redis redis-cli FLUSHALL 2>/dev/null || true
 	@# Remove FAISS indexes inside the container (best-effort)
 	@docker exec poi-backend rm -f /data/faiss/poi.index /data/faiss/id_map.json 2>/dev/null || true
-	@# Stop POI containers first (without -v to avoid shared network conflict)
-	-$(COMPOSE_POI) down 2>/dev/null || true
+	@# Tear down POI stack (including any benchmark/stream-density scaling overrides), removing
+	@# its volumes and network so nothing lingers between runs.
+	-$(COMPOSE_POI) --profile benchmark down -v --remove-orphans 2>/dev/null || true
+	@if [ -f $(CAMERAS_OVERRIDE) ]; then \
+		docker compose --env-file docker/.env -f docker/docker-compose.yaml -f $(CAMERAS_OVERRIDE) down -v --remove-orphans 2>/dev/null || true; \
+		rm -f $(CAMERAS_OVERRIDE); \
+	fi
 	@# Now attempt full teardown with volumes (may warn about shared network — that's OK)
-	-$(COMPOSE_SCENESCAPE) down -v 2>/dev/null || true
-	-$(COMPOSE_LP) down -v 2>/dev/null || true
+	-$(COMPOSE_SCENESCAPE) down -v --remove-orphans 2>/dev/null || true
+	-$(COMPOSE_LP) down -v --remove-orphans 2>/dev/null || true
+	@# Remove fixed-name volumes created outside Compose lifecycle (docker volume create), and
+	@# any per-scene stream-density volumes generated during benchmark scaling.
+	-@docker volume rm storewide-lp_vol-sample-data storewide-lp_vol-media storewide-lp_vol-models \
+		storewide-lp_vol-db storewide-lp_vol-migrations 2>/dev/null || true
+	-@docker volume ls -q --filter "name=storewide-lp_vol-dlstreamer-pipeline-root-" | xargs -r docker volume rm 2>/dev/null || true
+	@# Remove shared networks left behind once all containers using them are gone
+	-@docker network rm storewide-lp storewide-lp_poi-net person-of-interest_poi-net 2>/dev/null || true
 	@# Clean local data dirs as final fallback
 	rm -rf data/faiss/* data/uploads/*
-	@echo "$(GREEN)=== Clean complete. Redis flushed, FAISS removed, containers stopped. ===$(NC)"
+	@echo "$(GREEN)=== Clean complete. Redis flushed, FAISS removed, containers/volumes/networks removed. ===$(NC)"
 
 .PHONY: clean-secrets
 clean-secrets:
@@ -459,12 +480,17 @@ clean-secrets:
 
 .PHONY: clean-images
 clean-images:
+	@# Sweep every versioned image this project builds/pulls, not just a fixed :latest list,
+	@# so images from prior releases (e.g. rc1 -> rc2 bumps) don't accumulate indefinitely.
+	-@docker images --filter "reference=intel/poi-backend*" --filter "reference=intel/poi-ui*" \
+		--filter "reference=intel/alert-agent-service*" --filter "reference=intel/retail-benchmark*" \
+		--filter "reference=docker.io/intel/dlstreamer-pipeline-server*" -q | sort -u | xargs -r docker rmi -f 2>/dev/null || true
 	-docker rmi swlp-service:latest behavioral-analysis:latest gradio-ui:latest 2>/dev/null || true
 	-docker rmi scenescape-manager:latest scenescape-controller:latest 2>/dev/null || true
 
 .PHONY: clean-all
 clean-all: clean clean-secrets clean-images
-	rm -rf $(SAMPLE_DATA_DIR)/*.ts
+	rm -rf $(SCENESCAPE_DIR)/sample_data/*.ts
 
 # ---- Help ----
 
@@ -518,7 +544,8 @@ help:
 	@echo "  Prerequisites:"
 	@echo "    - Docker with Compose v2"
 	@echo "    - openssl, python3, curl"
-	@echo "    - Internet access (to download sample videos)"
+	@echo "    - Internet access (to pull container images)"
+	@echo "    - Sample video files placed in scenescape/sample_data/ (not auto-downloaded)"
 	@echo ""
 	@echo "  POI System:"
 	@echo "    make build           - Build POI backend + UI images"
@@ -593,20 +620,23 @@ up:
 		echo "$(BLUE)=== Clearing stale FAISS index (fresh deployment) ===$(NC)"; \
 		rm -f data/faiss/poi.index data/faiss/id_map.json; \
 	fi
-	@# HOST_IP is required for WebRTC ICE candidates (camera streams in the UI)
-	@HOST_IP_VAL="$$(grep -E '^HOST_IP=.+' docker/.env 2>/dev/null | cut -d= -f2-)"; \
+	@# HOST_IP is required for WebRTC ICE candidates (camera streams in the UI).
+	@# Accept it from the current shell/environment first (so `export HOST_IP=...
+	@# && make up` works on the very first run), falling back to whatever is
+	@# already persisted in docker/.env from a previous `make init`/`up`.
+	@HOST_IP_VAL="$${HOST_IP:-$$(grep -E '^HOST_IP=.+' docker/.env 2>/dev/null | cut -d= -f2-)}"; \
 	if [ -z "$$HOST_IP_VAL" ]; then \
 		echo ""; \
-		echo "$(RED)ERROR: HOST_IP is not set in docker/.env$(NC)"; \
+		echo "$(RED)ERROR: HOST_IP is not set.$(NC)"; \
 		echo ""; \
 		echo "  HOST_IP is required for WebRTC camera streams to work in the UI."; \
-		echo "  Set it before running make init:"; \
+		echo "  Set it before running make up:"; \
 		echo ""; \
-		echo "    export HOST_IP=\$$(ip route get 1 | awk '{print \$$7; exit}') && make init"; \
+		echo "    export HOST_IP=\$$(ip route get 1 | awk '{print \$$7; exit}') && make up"; \
 		echo ""; \
 		echo "  Or for a specific IP:"; \
 		echo ""; \
-		echo "    export HOST_IP=192.168.1.100 && make init"; \
+		echo "    export HOST_IP=192.168.1.100 && make up"; \
 		echo ""; \
 		exit 1; \
 	fi
@@ -662,6 +692,14 @@ up:
 down:
 	-$(COMPOSE_POI) --profile benchmark down
 	-$(COMPOSE_SCENESCAPE) down
+	@# Also tear down any stream-density scaling overrides (extra scenes/cameras) so their
+	@# containers/volumes/network don't linger after a benchmark run.
+	@if [ -f $(CAMERAS_OVERRIDE) ]; then \
+		docker compose --project-directory . --env-file docker/.env -f $(SCENESCAPE_DIR)/docker-compose.yaml -f docker-compose.scenescape-overrides.yml -f docker-compose.yml -f $(CAMERAS_OVERRIDE) down -v --remove-orphans 2>/dev/null || true; \
+		rm -f $(CAMERAS_OVERRIDE); \
+	fi
+	-@docker volume ls -q --filter "name=storewide-lp_vol-dlstreamer-pipeline-root-" | xargs -r docker volume rm 2>/dev/null || true
+	-@docker network rm storewide-lp storewide-lp_poi-net person-of-interest_poi-net 2>/dev/null || true
 
 .PHONY: logs
 logs:

@@ -11,7 +11,8 @@ After deployment, access the system at:
 
 - **POI UI**: [http://localhost:3000](http://localhost:3000)
 - **Backend API Docs**: [http://localhost:8000/docs](http://localhost:8000/docs)
-- **Alert Service**: [http://localhost:8001](http://localhost:8001)
+- **Alert Service API Docs**: [http://localhost:8001/docs](http://localhost:8001/docs)
+- **Alert Service Health Check**: [http://localhost:8001/api/v1/health](http://localhost:8001/api/v1/health)
 
 ### Important Notes
 

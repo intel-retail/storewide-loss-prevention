@@ -236,7 +236,7 @@ def generate_cameras_override(app_dir: str, num_scenes: int) -> None:
             f.write(f'    restart: "no"\n\n')
 
             f.write(f"  {video_svc}:\n")
-            f.write(f"    image: docker.io/intel/dlstreamer-pipeline-server:${{DLSTREAMER_VERSION:-2026.2.0-ubuntu24-rc1}}\n")
+            f.write(f"    image: docker.io/intel/dlstreamer-pipeline-server:${{DLSTREAMER_VERSION:-2026.2.0-ubuntu24-rc2}}\n")
             f.write(f"    networks:\n      storewide-lp:\n")
             f.write(f"    tty: true\n")
             f.write(f"    entrypoint: [\"./run.sh\"]\n")
