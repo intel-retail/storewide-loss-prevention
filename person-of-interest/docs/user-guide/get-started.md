@@ -14,7 +14,7 @@ environment meets the recommended hardware and software prerequisites.
 > directory before running the commands in this guide.
 
 ```bash
-git clone -b main https://github.com/intel-retail/storewide-loss-prevention.git
+git clone -b <release-or-tag> --single-branch https://github.com/intel-retail/storewide-loss-prevention.git # e.g. 2026.1.0
 cd storewide-loss-prevention/person-of-interest
 ```
 
