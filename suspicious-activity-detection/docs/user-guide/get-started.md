@@ -17,7 +17,7 @@ If you have not already cloned the repository that contains this workload, do
 so now:
 
 ```bash
-git clone https://github.com/intel-retail/storewide-loss-prevention.git
+git clone -b <release-or-tag> --single-branch https://github.com/intel-retail/storewide-loss-prevention.git # e.g. 2026.1.0
 cd storewide-loss-prevention/suspicious-activity-detection
 ```
 
