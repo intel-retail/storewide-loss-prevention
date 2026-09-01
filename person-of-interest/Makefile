@@ -132,6 +132,22 @@ download-models:
 	@bash $(SCENESCAPE_DIR)/scripts/download_models.sh --precisions FP32,FP16,FP16-INT8
 	@bash scripts/download_clip_reid.sh
 
+# ---- Sample Video ----
+
+SAMPLE_DATA_DIR := $(SCENESCAPE_DIR)/sample_data
+CLASSROOM_VIDEO_URL := https://github.com/intel-iot-devkit/sample-videos/raw/master/classroom.mp4
+FACE_DEMO_VIDEO_URL := https://github.com/intel-iot-devkit/sample-videos/raw/master/face-demographics-walking-and-pause.mp4
+
+.PHONY: download-sample-video
+download-sample-video:
+	@echo "Downloading sample videos..."
+	@mkdir -p $(SAMPLE_DATA_DIR)
+	@echo "[1/2] Downloading classroom.mp4 → Camera_01.mp4..."
+	@curl -L --progress-bar "$(CLASSROOM_VIDEO_URL)" -o "$(SAMPLE_DATA_DIR)/Camera_01.mp4"
+	@echo "[2/2] Downloading face-demographics-walking-and-pause.mp4 → Camera_02.mp4..."
+	@curl -L --progress-bar "$(FACE_DEMO_VIDEO_URL)" -o "$(SAMPLE_DATA_DIR)/Camera_02.mp4"
+	@echo "Sample videos saved to $(SAMPLE_DATA_DIR)/"
+
 # ---- Stream Density & Benchmarking ----
 
 PERF_TOOLS_DIR := ../performance-tools/benchmark-scripts
@@ -501,7 +517,8 @@ help:
 	@echo "  Full Stack (Scenescape + LP, using pre-built images):"
 	@echo "    make run-scenescape  - Single command: init + models + start"
 	@echo "    make demo            - Initialize and start everything"
-	@echo "    make download-models - Download OpenVINO AI models"
+	@echo "    make download-models         - Download OpenVINO AI models"
+	@echo "    make download-sample-video   - Download sample videos (classroom→Camera_01, face-demographics→Camera_02)"
 	@echo "    make export-scene    - Export scene config from running Scenescape"
 	@echo "    make lp-down         - Stop all LP services"
 	@echo "    make down-scenescape - Stop Scenescape only"
@@ -545,7 +562,7 @@ help:
 	@echo "    - Docker with Compose v2"
 	@echo "    - openssl, python3, curl"
 	@echo "    - Internet access (to pull container images)"
-	@echo "    - Sample video files placed in scenescape/sample_data/ (not auto-downloaded)"
+	@echo "    - Sample video files: run 'make download-sample-video' to fetch classroom.mp4 (Camera_01) and face-demographics (Camera_02)"
 	@echo ""
 	@echo "  POI System:"
 	@echo "    make build           - Build POI backend + UI images"

@@ -36,11 +36,15 @@ Before starting, ensure these files are in place:
 | `configs/res/*.env` | Device resource configs for DL Streamer pipeline (GPU, CPU, NPU profiles) |
 | `configs/pipeline-config.json` | DL Streamer pipeline template (rendered per camera by `init.sh`) |
 | `../scenescape/webserver/conference-room.zip` | Scene map + zone definitions imported into Scenescape |
-| `../scenescape/sample_data/Camera_01.mp4` | Sample video used by the camera replay |
+| `../scenescape/sample_data/Camera_01.mp4` | Sample video for camera 1 (classroom) — downloaded by `make download-sample-video` |
+| `../scenescape/sample_data/Camera_02.mp4` | Sample video for camera 2 (face demographics) — downloaded by `make download-sample-video` |
+| `sample_data/poi_1.png` | Reference image for benchmark POI enrollment |
+| `sample_data/poi_2.png` | Additional reference image for benchmark POI enrollment |
 
 > **Note:** The video file names must match the `video` entries in
 > `configs/zone_config.json` (for example, `Camera_01.mp4` corresponds to
-> camera `Camera_01`).
+> camera `Camera_01`). Run `make download-sample-video` to fetch both videos
+> automatically before starting the application.
 
 ### `zone_config.json` Reference
 
@@ -202,7 +206,27 @@ This downloads `face-detection-retail-0004`, `face-reidentification-retail-0095`
 FP16, and FP16-INT8 precisions. It also exports `clip-reid-market1501` (body re-ID)
 in both FP32 and FP16.
 
-## 7. Launch the Application
+## 7. Download Sample Videos
+
+Download the sample videos used by the camera replay streams. This fetches two
+videos from the Intel IoT DevKit sample-videos repository and places them as
+`Camera_01.mp4` and `Camera_02.mp4` in `../scenescape/sample_data/`:
+
+```bash
+make download-sample-video
+```
+
+| Destination | Source Video |
+|-------------|-------------|
+| `scenescape/sample_data/Camera_01.mp4` | `classroom.mp4` |
+| `scenescape/sample_data/Camera_02.mp4` | `face-demographics-walking-and-pause.mp4` |
+
+> **Note:** Both videos are required before starting the application. The
+> FFmpeg replay containers (`lp-cams`, `lp-cams-2`) loop these files and
+> publish them as RTSP streams. If the files are missing, the camera
+> containers will fail to start.
+
+## 8. Launch the Application
 
 ```bash
 make up
@@ -252,20 +276,20 @@ This launches the following containers:
 > **Note:** Use `make up` for subsequent starts after the initial setup. Scenescape
 > is started automatically by the `up` target.
 
-## 8. View Logs
+## 9. View Logs
 
 ```bash
 make logs
 ```
 
-## 9. Stop Services
+## 10. Stop Services
 
 ```bash
 # Stop everything
 make down
 ```
 
-## 10. Access the Interface
+## 11. Access the Interface
 
 Once running:
 
