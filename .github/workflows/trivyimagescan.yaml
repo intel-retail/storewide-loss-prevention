@@ -37,10 +37,10 @@ jobs:
             cd suspicious-activity-detection
             docker build -t intel/swlp-vss-recall-bridge:${{ env.VERSION }} -f vss-recall-bridge/Dockerfile vss-recall-bridge/
 
-        - name: Build suspicious-activity-detection intel/swlp-suscpicious-ui image
+        - name: Build suspicious-activity-detection intel/swlp-suspicious-ui image
           run: |
             cd suspicious-activity-detection
-            docker build -t intel/swlp-suscpicious-ui:${{ env.VERSION }} -f ui/Dockerfile ui/  
+            docker build -t intel/swlp-suspicious-ui:${{ env.VERSION }} -f ui/Dockerfile ui/  
 
         - name: Run Trivy vulnerability scanner on swlp-vss-recall-bridge
           uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1
@@ -50,12 +50,12 @@ jobs:
             output: 'trivy-results-swlp-vss-recall-bridge.txt'
             severity: 'CRITICAL,HIGH'
 
-        - name: Run Trivy vulnerability scanner on swlp-suscpicious-ui
+        - name: Run Trivy vulnerability scanner on swlp-suspicious-ui
           uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1
           with:
-            image-ref: "intel/swlp-suscpicious-ui:${{ env.VERSION }}"
+            image-ref: "intel/swlp-suspicious-ui:${{ env.VERSION }}"
             format: 'table'
-            output: 'trivy-results-swlp-suscpicious-ui.txt'
+            output: 'trivy-results-swlp-suspicious-ui.txt'
             severity: 'CRITICAL,HIGH'
             
         - name: Upload Trivy scan results
@@ -64,4 +64,4 @@ jobs:
             name: trivy-suspicious-activity-detection-report
             path: |
               trivy-results-swlp-vss-recall-bridge.txt
-              trivy-results-swlp-suscpicious-ui.txt
+              trivy-results-swlp-suspicious-ui.txt

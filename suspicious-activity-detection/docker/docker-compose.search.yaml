@@ -440,7 +440,7 @@ services:
 
   # ---------- Investigator UI (recall search console) ----------
   # Behind the `recall-ui` profile: only started for standalone `make run-search`.
-  # In `make up` the unified dashboard UI (swlp-suscpicious-ui) serves /recall, so
+  # In `make up` the unified dashboard UI (swlp-suspicious-ui) serves /recall, so
   # this duplicate is skipped.
   swlp-recall-ui:
     profiles:
@@ -448,7 +448,7 @@ services:
     build:
       context: ui
       dockerfile: Dockerfile
-    image: intel/swlp-suscpicious-ui:${TAG:-latest}
+    image: intel/swlp-suspicious-ui:${TAG:-latest}
     ports:
       - "${RECALL_UI_PORT:-7860}:7860"
     networks:

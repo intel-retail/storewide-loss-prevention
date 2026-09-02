@@ -122,7 +122,7 @@ init time using the selected profile.
 
 ### Disable the Gradio UI
 
-The Gradio dashboard (`swlp-suscpicious-ui`) is enabled by default. To run
+The Gradio dashboard (`swlp-suspicious-ui`) is enabled by default. To run
 the stack **without** the UI container (for example, headless deployments or
 resource-constrained systems), pass `ENABLE_UI=false`:
 
@@ -134,7 +134,7 @@ make up ENABLE_UI=false
 make up ENABLE_UI=true
 ```
 
-When the UI is disabled, the `swlp-suscpicious-ui` container is not built or
+When the UI is disabled, the `swlp-suspicious-ui` container is not built or
 started, and the Gradio dashboard at `http://localhost:7860` is unavailable.
 All other services (Scenescape, swlp-service, Behavioral Analysis, OVMS, etc.)
 continue to run normally.

@@ -42,7 +42,7 @@ services:
   # here: the segmenter waits for the RTSP source to become resolvable and
   # listening before launching ffmpeg, so the startup DNS race is handled at
   # runtime. A compose-level dependency would also create a cycle
-  # (lp-cams -> swlp-suscpicious-ui -> vss-recall-bridge -> lp-cams).
+  # (lp-cams -> swlp-suspicious-ui -> vss-recall-bridge -> lp-cams).
 
   # The search stack starts in PARALLEL with SceneScape + suspicious-activity in
   # the combined stack — it is intentionally NOT gated behind
@@ -57,7 +57,7 @@ services:
   # starts early (it no longer waits for the search backend), so this does not
   # delay the dashboard. Only `make up` loads this override; standalone runs are
   # unaffected. `depends_on` maps merge with the base (scene-understanding-service).
-  swlp-suscpicious-ui:
+  swlp-suspicious-ui:
     depends_on:
       vss-recall-bridge:
         condition: service_healthy
