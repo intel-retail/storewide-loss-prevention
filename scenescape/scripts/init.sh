@@ -103,6 +103,7 @@ print(f'SCENESCAPE_REGISTRY=\"{ss.get(\"registry\", \"\")}\"')
 print(f'SCENESCAPE_VERSION=\"{ss.get(\"version\", \"latest\")}\"')
 print(f'SCENESCAPE_CONTROLLER_IMAGE=\"{ss.get(\"controller_image\", \"intel/scenescape-controller\")}\"')
 print(f'SCENESCAPE_MANAGER_IMAGE=\"{ss.get(\"manager_image\", \"intel/scenescape-manager\")}\"')
+print(f'SCENESCAPE_ANALYTICS_IMAGE=\"{ss.get(\"analytics_image\", \"intel/scenescape-analytics\")}\"')
 print(f'DLSTREAMER_VERSION=\"{ss.get(\"dlstreamer_version\", \"2026.1.0-20260331-weekly-ubuntu24\")}\"')
 print(f'SCENESCAPE_API_USER=\"{ss.get(\"api_user\", \"admin\")}\"')
 
@@ -462,6 +463,7 @@ SCENESCAPE_REGISTRY=${SCENESCAPE_REGISTRY}
 SCENESCAPE_VERSION=${SCENESCAPE_VERSION}
 SCENESCAPE_CONTROLLER_IMAGE=${SCENESCAPE_CONTROLLER_IMAGE}
 SCENESCAPE_MANAGER_IMAGE=${SCENESCAPE_MANAGER_IMAGE}
+SCENESCAPE_ANALYTICS_IMAGE=${SCENESCAPE_ANALYTICS_IMAGE}
 DLSTREAMER_VERSION=${DLSTREAMER_VERSION}
 
 # ---- Store (from zone_config.json) ----
