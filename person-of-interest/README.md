@@ -5,7 +5,7 @@ The POI Re-identification system is a real-time retail loss-prevention applicati
 ## Quick Start
 
 ```bash
-git clone -b <release-or-tag> --single-branch https://github.com/intel-retail/storewide-loss-prevention.git # e.g. 2026.1.0
+git clone -b release-2026.2.0 --single-branch https://github.com/intel-retail/storewide-loss-prevention.git
 cd storewide-loss-prevention/person-of-interest
 
 # Initialize submodules

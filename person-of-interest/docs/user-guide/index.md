@@ -2,10 +2,10 @@
 
 <!--hide_directive
 <div class="component_card_widget">
-  <a class="icon_github" href="https://github.com/intel-retail/storewide-loss-prevention/tree/main/person-of-interest">
+  <a class="icon_github" href="https://github.com/intel-retail/storewide-loss-prevention/tree/release-2026.2.0/person-of-interest">
      GitHub project
   </a>
-  <a class="icon_document" href="https://github.com/intel-retail/storewide-loss-prevention/blob/main/person-of-interest/README.md">
+  <a class="icon_document" href="https://github.com/intel-retail/storewide-loss-prevention/blob/release-2026.2.0/person-of-interest/README.md">
      Readme
   </a>
 </div>
