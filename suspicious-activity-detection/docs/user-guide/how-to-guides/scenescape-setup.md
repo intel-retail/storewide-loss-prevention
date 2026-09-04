@@ -188,7 +188,7 @@ sample data and models, creates Docker volumes, and starts all services
 including Scenescape infrastructure and the LP detection pipeline.
 
 The app-level Docker Compose overlay
-([docker/docker-compose.yaml](https://github.com/intel-retail/storewide-loss-prevention/blob/main/suspicious-activity-detection/docker/docker-compose.yaml)) mounts
+([docker/docker-compose.yaml](https://github.com/intel-retail/storewide-loss-prevention/blob/release-2026.2.0/suspicious-activity-detection/docker/docker-compose.yaml)) mounts
 the detection and re-identification models into the DLStreamer container:
 
 ```yaml
