@@ -21,7 +21,13 @@ COMPOSE_ALL := docker compose --project-directory . --env-file docker/.env -f $(
 DEVICE ?= all-gpu-cpu.env
 RESOURCE_CONFIG := configs/res/$(DEVICE)
 NPU_OVERRIDE := docker/docker-compose.npu.yaml
-USES_NPU := $(shell grep -Eq '^(DETECT_DEVICE|REID_DEVICE)=NPU$$' $(RESOURCE_CONFIG) 2>/dev/null && echo true || echo false)
+# A profile "uses" the NPU when detection or re-identification targets NPU.
+# Tolerate surrounding whitespace / trailing CR (CRLF-edited env files) so a
+# real NPU profile is never silently missed.
+USES_NPU := $(shell grep -Eq '^(DETECT_DEVICE|REID_DEVICE)[[:space:]]*=[[:space:]]*NPU[[:space:]]*$$' $(RESOURCE_CONFIG) 2>/dev/null && echo true || echo false)
+# The real NPU device node is /dev/accel/accel0 (/dev/accel itself is a
+# directory, so it can exist without a working NPU).
+NPU_PRESENT := $(shell ls /dev/accel/accel* >/dev/null 2>&1 && echo true || echo false)
 ifeq ($(USES_NPU),true)
 	COMPOSE_ALL := $(COMPOSE_ALL) -f $(NPU_OVERRIDE)
 endif
@@ -94,8 +100,8 @@ validate-device:
 		ls -1 configs/res/*.env 2>/dev/null | xargs -I{} basename {} | sed 's/^/  - /'; \
 		exit 1; \
 	fi
-	@if [ "$(USES_NPU)" = "true" ] && [ ! -e "/dev/accel" ]; then \
-		echo "\033[1;31mERROR: DEVICE='$(DEVICE)' requires an Intel NPU, but /dev/accel was not found on this host.\033[0m"; \
+	@if [ "$(USES_NPU)" = "true" ] && [ "$(NPU_PRESENT)" != "true" ]; then \
+		echo "\033[1;31mERROR: DEVICE='$(DEVICE)' requires an Intel NPU, but no NPU device node (/dev/accel/accel0) was found on this host.\033[0m"; \
 		echo "Use a non-NPU profile, for example: make up DEVICE=all-gpu-cpu.env"; \
 		echo "For CPU-only systems, use: make up DEVICE=all-cpu.env"; \
 		exit 1; \
@@ -160,7 +166,7 @@ up: validate-device gen-zone-config
 		echo "Building LP images..."; \
 		BUILD_SERVICES="scene-understanding-service behavioral-analysis"; \
 		if [ "$(ENABLE_UI_LOWER)" = "true" ]; then \
-			BUILD_SERVICES="$$BUILD_SERVICES swlp-suscpicious-ui"; \
+			BUILD_SERVICES="$$BUILD_SERVICES swlp-suspicious-ui"; \
 		fi; \
 		$(COMPOSE_ALL) build $$BUILD_SERVICES; \
 	fi
@@ -281,13 +287,13 @@ status:
 run-lp:
 ifeq ($(REGISTRY_LOWER),true)
 	@echo "Pulling LP images from $(REGISTRY_URL)..."
-	DOCKER_REGISTRY=$(REGISTRY_URL) $(COMPOSE_ALL) pull  behavioral-analysis swlp-suscpicious-ui
+	DOCKER_REGISTRY=$(REGISTRY_URL) $(COMPOSE_ALL) pull  behavioral-analysis swlp-suspicious-ui
 else
 	@echo "Building LP images..."
-	$(COMPOSE_ALL) build  behavioral-analysis swlp-suscpicious-ui
+	$(COMPOSE_ALL) build  behavioral-analysis swlp-suspicious-ui
 endif
 	@echo "Starting LP services only (SceneScape must be running)..."
-	$(COMPOSE_ALL) up -d  behavioral-analysis swlp-suscpicious-ui
+	$(COMPOSE_ALL) up -d  behavioral-analysis swlp-suspicious-ui
 
 .PHONY: down-lp
 down-lp:
@@ -335,7 +341,7 @@ run-search:
 	@echo "To stop: make down"
 
 # Backend-only search stack (no swlp-recall-ui). Used by `make up`, where the
-# unified dashboard UI (swlp-suscpicious-ui) serves /recall. The recall bridge is
+# unified dashboard UI (swlp-suspicious-ui) serves /recall. The recall bridge is
 # attached to the LP network (with its service alias) so the dashboard UI can
 # reach it by name within the combined stack.
 LP_NETWORK ?= storewide-lp_storewide-lp
@@ -513,10 +519,10 @@ build:
 	$(COMPOSE_SCENESCAPE) build
 
 .PHONY: build-lp
-build-lp: ## Build LP container images (swlp-service, behavioral-analysis, swlp-suscpicious-ui)
+build-lp: ## Build LP container images (swlp-service, behavioral-analysis, swlp-suspicious-ui)
 	docker build -t intel/swlp-behavioral-analysis:$(TAG) -f behavioral-analysis/Dockerfile behavioral-analysis/
 	docker build -t intel/swlp-service:$(TAG) -f swlp-service/Dockerfile .
-	docker build -t intel/swlp-suscpicious-ui:$(TAG) -f ui/Dockerfile ui/
+	docker build -t intel/swlp-suspicious-ui:$(TAG) -f ui/Dockerfile ui/
 
 # ---- Cleanup ----
 

@@ -5,7 +5,7 @@ services:
   # ---------- DLStreamer override: app-specific model mounts + startup ordering ----------
   lp-video:
     depends_on:
-      swlp-suscpicious-ui:
+      swlp-suspicious-ui:
         condition: service_healthy
         required: false
     volumes:
@@ -14,7 +14,7 @@ services:
 
   lp-cams:
     depends_on:
-      swlp-suscpicious-ui:
+      swlp-suspicious-ui:
         condition: service_healthy
         required: false
 
@@ -139,13 +139,13 @@ services:
     restart: unless-stopped
 
   # ---------- Gradio UI Service ----------
-  swlp-suscpicious-ui:
+  swlp-suspicious-ui:
     profiles:
       - ui
     build:
       context: ui
       dockerfile: Dockerfile
-    image: intel/swlp-suscpicious-ui:${TAG}
+    image: intel/swlp-suspicious-ui:${TAG}
     ports:
       - "7860:7860"
     networks:
