@@ -21,9 +21,9 @@ where a queried person appeared across all cameras and time ranges.
 The **POI Re-identification** system leverages OpenVINO™ face detection and
 re-identification models integrated with Scenescape spatial computing to deliver
 real-time biometric person matching in multi-camera retail environments. By processing
-256-dimensional face embeddings at the edge using FAISS vector search, the system enables
-sub-second POI detection with minimal latency while maintaining data privacy — all biometric
-processing stays local.
+256-dimensional face embeddings at the edge using Facebook AI Similarity Search (FAISS) vector
+search, the system enables sub-second POI detection with minimal latency while maintaining
+data privacy — all biometric processing stays local.
 
 ### Example Use Cases
 
@@ -56,65 +56,11 @@ and how it integrates with Scenescape and DL Streamer pipelines.
 
 ### System Architecture
 
-```
-┌──────────────────────────────────────────────────────────────────────────────┐
-│                        Scenescape Platform                                   │
-│                                                                              │
-│  ┌─────────────┐    ┌──────────────────────────────────────────┐             │
-│  │  IP Cameras  │───▶│ DL Streamer Pipeline Server                │          │
-│  │  (RTSP)      │    │  ├─ person-detection-retail-0013         │            │
-│  └─────────────┘    │  ├─ face-detection-retail-0004           │             │
-│                     │  ├─ face-reidentification-retail-0095    │             │
-│                     │  ├─ person-reidentification-retail-0277  │             │
-│                     │  └─ gvatrack (short-term-imageless)      │             │
-│                     └────────────────┬─────────────────────────┘             │
-│                                      │ MQTT                                  │
-│  ┌─────────────────┐                 │                                       │
-│  │ Scene Controller │────────────────┤  scenescape/regulated/scene/+         │
-│  │ (UUID tracking)  │                │                                       │
-│  └─────────────────┘                 ├─ scenescape/data/camera/+             │
-│                                      │                                       │
-│  ┌─────────────────┐                 │                                       │
-│  │ MQTT Broker      │◀───────────────┘                                       │
-│  │ (Mosquitto)      │                                                        │
-│  └────────┬─────────┘                                                        │
-└───────────┼──────────────────────────────────────────────────────────────────┘
-            │
-            │ MQTT (TLS optional)
-            ▼
-┌───────────────────────────────────────────────────────────────────────────────┐
-│                         POI Re-identification System                         │
-│                                                                              │
-│  ┌────────────────────────────────────────────────────────────────────┐       │
-│  │                    poi-backend (FastAPI, :8000)                     │       │
-│  │                                                                    │       │
-│  │  ┌──────────────────┐  ┌─────────────────┐  ┌──────────────────┐  │       │
-│  │  │ MQTTConsumer      │  │ MatchingService  │  │ DetectionIndex   │  │       │
-│  │  │ (face detections) │─▶│ (Cache-Aside)    │  │ (all faces, 7d)  │  │       │
-│  │  └──────────────────┘  └────────┬─────────┘  └───────┬──────────┘  │       │
-│  │                                 │                     │             │       │
-│  │  ┌──────────────────┐  ┌───────▼──────────┐  ┌──────▼───────────┐  │       │
-│  │  │ RegionConsumer    │  │ POI FAISS Index   │  │ ExitPromoter     │  │       │
-│  │  │ (zone entry/exit) │  │ (enrolled POIs)   │  │ Thread (30s)     │  │       │
-│  │  └──────────────────┘  └──────────────────┘  └──────────────────┘  │       │
-│  │                                                                    │       │
-│  │  ┌──────────────────┐  ┌─────────────────┐  ┌──────────────────┐  │       │
-│  │  │ AlertService      │  │ OpenVINO         │  │ Search API       │  │       │
-│  │  │ (observer, dedup) │  │ (enrollment)     │  │ (offline query)  │  │       │
-│  │  └────────┬──────────┘  └─────────────────┘  └──────────────────┘  │       │
-│  └───────────┼────────────────────────────────────────────────────────┘       │
-│              │ HTTP                                                           │
-│  ┌───────────▼────────┐  ┌─────────────────┐  ┌──────────────────┐           │
-│  │ poi-alert-service   │  │ poi-redis        │  │ poi-ui (React)   │           │
-│  │ (:8001)             │  │ (:6379)          │  │ (:3000 → nginx)  │           │
-│  │ WebSocket → UI      │  │ state + cache    │  │ operator console │           │
-│  └─────────────────────┘  └─────────────────┘  └──────────────────┘           │
-└───────────────────────────────────────────────────────────────────────────────┘
-```
+![System Architecture](./_assets/person-of-interest-architecture.svg)
 
 ### Data Flow: Online (Real-Time POI Detection)
 
-```
+```text
 Camera → DL Streamer → MQTT → MQTTConsumer → FAISS POI Search → AlertService → UI
                                   │
                                   ├─ Store detection embedding + full-body frame in DetectionIndex
@@ -136,13 +82,13 @@ Camera → DL Streamer → MQTT → MQTTConsumer → FAISS POI Search → AlertS
 
 ### Data Flow: Offline (Historical Search)
 
-```
-User uploads image → OpenVINO → Detection FAISS (search_k=2000) → Filter + Batch Metadata
+```text
+User uploads image → OpenVINO™ → Detection FAISS (search_k=2000) → Filter + Batch Metadata
     → Group by track → Attach entry/exit frames + zone dwells → Return timeline
 ```
 
 1. User uploads a face image via the **Search API**.
-2. OpenVINO generates a 256-d query embedding (same model as DL Streamer).
+2. OpenVINO™ generates a 256-d query embedding (same model as DL Streamer).
 3. The Detection FAISS index (all faces seen in the last 7 days) is searched with a wide
    `search_k` to ensure cross-camera recall (the same person may score very differently
    across cameras due to viewing angle).
@@ -184,7 +130,7 @@ User uploads image → OpenVINO → Detection FAISS (search_k=2000) → Filter +
 
 - **Scenescape + DL Streamer**:
   Upstream inference pipeline providing person detection, face detection, and face
-  re-identification via MQTT. DL Streamer runs the OpenVINO models; Scenescape provides
+  re-identification via MQTT. DL Streamer runs the OpenVINO™ models; Scenescape provides
   spatial scene management, region tracking, and multi-camera UUID coordination.
 
 ### Key Features
