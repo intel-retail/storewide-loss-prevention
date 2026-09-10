@@ -552,7 +552,10 @@ if not export_dir.exists() and not target_dir.exists():
     print(f"  Exporting to OpenVINO FP32 ...")
     orig = os.getcwd()
     os.chdir(str(models_dir))
-    YOLO(str(model_pt)).export(format="openvino", half=False)
+    # nms=True bakes end-to-end NMS into the model so its output is the
+    # post-NMS (1, 300, 57) tensor that behavioral-analysis' pose
+    # postprocessor expects; a plain export emits raw (1, 56, 8400).
+    YOLO(str(model_pt)).export(format="openvino", half=False, nms=True)
     os.chdir(orig)
     print(f"  ✓ FP32 export: {export_dir}")
 
