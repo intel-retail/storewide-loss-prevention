@@ -252,8 +252,8 @@ configuration. They are read by `init.sh` and written to `docker/.env`.
 | Variable | Description | Default |
 |----------|-------------|---------|
 | `SCENESCAPE_REGISTRY` | Private registry prefix for Scenescape images. Leave empty for local images. Set to a registry URL (e.g., `myregistry.com/scenescape/`) when pulling from a private registry. | *(empty)* |
-| `SCENESCAPE_VERSION` | Image tag for Scenescape containers (controller, manager). Must match the Scenescape release deployed alongside this application. | `v2026.1.0-rc1` |
-| `DLSTREAMER_VERSION` | Intel DL Streamer image tag for video analytics pipelines. | `2026.1.0-ubuntu24-rc1.1` |
+| `SCENESCAPE_VERSION` | Image tag for Scenescape containers (controller, manager). Must match the Scenescape release deployed alongside this application. | `v2026.2.0` |
+| `DLSTREAMER_VERSION` | Intel DL Streamer image tag for video analytics pipelines. | `2026.2.0-ubuntu24` |
 
 ### Host / Proxy
 

@@ -52,8 +52,8 @@ def reidPolicy(pobj, item, fw, fh):
   classificationPolicy(pobj, item, fw, fh)
   # DLStreamer's gvainference output tensor is not reliably named after the
   # model-proc's "attribute_name" (e.g. person_reid_embedding/face_reid_embedding) -
-  # in some DLStreamer versions (observed with 2026.2.0-ubuntu24-rc1) it is just
-  # generically named "tensor". So instead of matching strictly by name, also
+  # in some DLStreamer versions it is just generically named "tensor". So
+  # instead of matching strictly by name, also
   # accept any non-detection/object_id/keypoint tensor that carries raw float
   # vector "data" - that is the embedding output regardless of its name.
   for tensor in item.get('tensors', [{}]):
