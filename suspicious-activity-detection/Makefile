@@ -7,7 +7,7 @@
 # No Scenescape source checkout required.
 # Scenescape-specific targets are in scenescape/Makefile.
 
-TAG ?= 2026.2.0-rc2
+TAG ?= 2026.2.0
 REGISTRY ?= true
 
 SCENESCAPE_DIR := ../scenescape
@@ -383,7 +383,7 @@ PERF_TOOLS_DOCKER_DIR := ../performance-tools/docker
 SWLP_STREAM_DENSITY := $(PERF_TOOLS_DIR)/swlp_stream_density.py
 
 # Benchmark image configuration
-BENCHMARK_IMAGE ?= retail-benchmark:2026.1.0-rc1
+BENCHMARK_IMAGE ?= retail-benchmark:2026.2.0
 REGISTRY_BENCHMARK ?= intel/retail-benchmark:$(TAG)
 
 .PHONY: fetch-benchmark
