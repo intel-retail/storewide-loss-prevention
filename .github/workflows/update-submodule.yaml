@@ -7,6 +7,7 @@ permissions:
   pull-requests: write
 env:
   BRANCH_NAME: perf-tool-${{ github.run_number }}
+  GIT_LFS_SKIP_SMUDGE: "1"
   PR_REVIEWERS: "sumanaga,avinash-palleti"  # Replace with actual GitHub usernames
 jobs:
   update-submodule:
@@ -20,7 +21,7 @@ jobs:
         with:
           token: ${{ secrets.SSO_TOKEN }}
           submodules: recursive
-          lfs: true
+          fetch-depth: 0
       - name: Authorize Git
         run: |
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
@@ -28,6 +29,7 @@ jobs:
           git checkout -b $BRANCH_NAME
       - name: Update submodule
         run: |
+          git submodule sync --recursive
           git submodule update  --init --recursive --remote -f
         env:
           GITHUB_TOKEN: ${{ secrets.SSO_TOKEN }}
