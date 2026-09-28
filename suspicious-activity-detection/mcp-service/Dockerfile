@@ -17,7 +17,7 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 
 RUN git clone --depth 1 --branch "$SDK_REF" "$SDK_REPO" /tmp/eal \
-    && pip install --no-cache-dir "/tmp/eal/libraries/mcp-service-sdk[mcp]" \
+    && pip install --no-cache-dir "/tmp/eal/frameworks/mcp-service-sdk[mcp]" \
     && pip install --no-cache-dir "paho-mqtt>=1.6,<3" \
     && rm -rf /tmp/eal
 
