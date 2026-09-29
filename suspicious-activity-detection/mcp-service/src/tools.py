@@ -71,7 +71,11 @@ def ingest_alert(
 # Descriptions come from the docstrings; parameter docs from Annotated Field.
 @svc.read_tool("Get_all_activities")
 def Get_all_activities() -> list[Activity]:
-    """List every recorded suspicious-activity event, oldest first."""
+    """List every recorded suspicious-activity event, oldest first.
+
+    Includes kitchen food-safety violations (event_name 'food_safety_violation'):
+    dropped-and-returned food and objects picked up / grasped from the floor.
+    """
     return queries.all_activities(svc.log)
 
 
@@ -104,7 +108,13 @@ def Get_activity_by_zone_timestamp(
 def Search_retrospective_frames(
     query: Annotated[
         str | None,
-        Field(description="Optional text filter, e.g. 'floor food area'."),
+        Field(description=(
+            "Optional LITERAL keyword filter: every word must appear verbatim in the "
+            "event text (event_name, use_case, zone, pose, description). Pass a single "
+            "distinctive keyword or omit it; a natural-language sentence usually matches "
+            "nothing. For dropped / picked-up-from-floor food safety, filter with "
+            "event_name='food_safety_violation' and use_case='kitchen' instead of text."
+        )),
     ] = None,
     start_time: Annotated[
         str | None,
@@ -125,7 +135,12 @@ def Search_retrospective_frames(
         str | None, Field(description="Optional use case filter: retail or kitchen.")
     ] = None,
 ) -> list[Activity]:
-    """Search logged SAD events and return any frame references already attached to them."""
+    """Search logged SAD events and return any frame references already attached to them.
+
+    Prefer the structured filters (zone, event_name, use_case, time range) over the
+    free-text query; the query is a literal keyword AND-match, so full sentences
+    typically return nothing even when relevant events exist.
+    """
     start_ms, end_ms = queries.parse_time_range(start_time, end_time, _settings.store_timezone)
     return queries.retrospective_frame_search(
         svc.log,

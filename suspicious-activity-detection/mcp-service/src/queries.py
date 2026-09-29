@@ -26,15 +26,24 @@ _STOPWORDS = {
     "any",
     "anything",
     "are",
+    "event",
+    "events",
     "for",
     "found",
+    "from",
     "how",
+    "include",
+    "including",
     "into",
+    "involving",
+    "off",
     "often",
+    "onto",
     "put",
     "record",
     "records",
     "related",
+    "search",
     "show",
     "station",
     "stations",
@@ -44,7 +53,9 @@ _STOPWORDS = {
 }
 
 _FOOD_SAFETY_ALIASES = (
-    "food safety violation dropped drop floor item items food area put back returned return prep kitchen"
+    "food safety violation dropped drop floor item items food area put back returned return prep kitchen "
+    "object objects pick picked picking picks grasp grasped grasps grasping "
+    "lift lifted lifts lifting hand hands reach reaches rise rises down near up"
 )
 
 
