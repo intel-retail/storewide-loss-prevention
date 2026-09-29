@@ -46,6 +46,7 @@ def ingest_alert(
     frame: str = "",
     station: str = "",
     shift: str = "unknown",
+    ts_ms: int | None = None,
 ) -> None:
     """Pipeline hand-off: the SAD MQTT consumer calls this to publish a violation."""
     _ingest_alert(
@@ -62,6 +63,7 @@ def ingest_alert(
         frame,
         station,
         shift,
+        ts_ms,
     )
 
 
@@ -84,14 +86,17 @@ def Get_activity_by_zone(
 @svc.read_tool("Get_activity_by_zone_timestamp")
 def Get_activity_by_zone_timestamp(
     zone: Annotated[str, Field(description="Zone name to filter by.")],
-    start_ms: Annotated[
-        int | None, Field(description="Inclusive lower bound, epoch milliseconds.")
+    start_time: Annotated[
+        str | None,
+        Field(description=f"Inclusive ISO datetime; local values use {_settings.store_timezone}."),
     ] = None,
-    end_ms: Annotated[
-        int | None, Field(description="Inclusive upper bound, epoch milliseconds.")
+    end_time: Annotated[
+        str | None,
+        Field(description=f"Inclusive ISO datetime; local values use {_settings.store_timezone}."),
     ] = None,
 ) -> list[Activity]:
-    """List suspicious-activity events for a zone within an epoch-ms time range."""
+    """List zone events in an ISO-8601 time range using the store's configured timezone."""
+    start_ms, end_ms = queries.parse_time_range(start_time, end_time, _settings.store_timezone)
     return queries.activity_by_zone_timestamp(svc.log, zone, start_ms, end_ms)
 
 
@@ -101,11 +106,13 @@ def Search_retrospective_frames(
         str | None,
         Field(description="Optional text filter, e.g. 'floor food area'."),
     ] = None,
-    start_ms: Annotated[
-        int | None, Field(description="Inclusive lower bound, epoch milliseconds.")
+    start_time: Annotated[
+        str | None,
+        Field(description=f"Inclusive ISO datetime; local values use {_settings.store_timezone}."),
     ] = None,
-    end_ms: Annotated[
-        int | None, Field(description="Inclusive upper bound, epoch milliseconds.")
+    end_time: Annotated[
+        str | None,
+        Field(description=f"Inclusive ISO datetime; local values use {_settings.store_timezone}."),
     ] = None,
     zone: Annotated[
         str | None, Field(description="Optional zone filter, e.g. 'kitchen-prep'.")
@@ -118,7 +125,8 @@ def Search_retrospective_frames(
         str | None, Field(description="Optional use case filter: retail or kitchen.")
     ] = None,
 ) -> list[Activity]:
-    """Search SAD history, including SeaweedFS frame references, for retrospective review."""
+    """Search logged SAD events and return any frame references already attached to them."""
+    start_ms, end_ms = queries.parse_time_range(start_time, end_time, _settings.store_timezone)
     return queries.retrospective_frame_search(
         svc.log,
         query=query,
@@ -132,11 +140,13 @@ def Search_retrospective_frames(
 
 @svc.read_tool("Get_trend_counts")
 def Get_trend_counts(
-    start_ms: Annotated[
-        int | None, Field(description="Inclusive lower bound, epoch milliseconds.")
+    start_time: Annotated[
+        str | None,
+        Field(description=f"Inclusive ISO datetime; local values use {_settings.store_timezone}."),
     ] = None,
-    end_ms: Annotated[
-        int | None, Field(description="Inclusive upper bound, epoch milliseconds.")
+    end_time: Annotated[
+        str | None,
+        Field(description=f"Inclusive ISO datetime; local values use {_settings.store_timezone}."),
     ] = None,
     event_name: Annotated[
         str | None,
@@ -147,12 +157,48 @@ def Get_trend_counts(
     ] = None,
 ) -> list[TrendCount]:
     """Count matching SAD events by station and shift."""
+    start_ms, end_ms = queries.parse_time_range(start_time, end_time, _settings.store_timezone)
     return queries.trend_counts(
         svc.log,
         start_ms=start_ms,
         end_ms=end_ms,
         event_name=event_name,
         use_case=use_case,
+    )
+
+
+@svc.read_tool("Get_event_count")
+def Get_event_count(
+    start_time: Annotated[
+        str | None,
+        Field(description=f"Inclusive ISO datetime; local values use {_settings.store_timezone}."),
+    ] = None,
+    end_time: Annotated[
+        str | None,
+        Field(description=f"Inclusive ISO datetime; local values use {_settings.store_timezone}."),
+    ] = None,
+    zone: Annotated[str | None, Field(description="Optional zone, e.g. kitchen-prep.")] = None,
+    event_name: Annotated[
+        str | None, Field(description="Optional event name, e.g. food_safety_violation.")
+    ] = None,
+    use_case: Annotated[
+        str | None, Field(description="Optional use case: retail or kitchen.")
+    ] = None,
+    minimum_severity: Annotated[
+        str | None,
+        Field(description="Optional severity threshold: low, medium, high, or critical. High includes high and critical."),
+    ] = None,
+) -> int:
+    """Return a compact count of events matching the supplied filters."""
+    start_ms, end_ms = queries.parse_time_range(start_time, end_time, _settings.store_timezone)
+    return queries.event_count(
+        svc.log,
+        start_ms=start_ms,
+        end_ms=end_ms,
+        zone=zone,
+        event_name=event_name,
+        use_case=use_case,
+        minimum_severity=minimum_severity,
     )
 
 

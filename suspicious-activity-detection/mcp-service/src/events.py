@@ -40,6 +40,7 @@ def ingest_alert(
     frame: str = "",
     station: str = "",
     shift: str = "unknown",
+    ts_ms: int | None = None,
 ) -> Any:
     return svc.emit(
         EVENT_TYPE,
@@ -57,4 +58,5 @@ def ingest_alert(
             "shift": shift,
         },
         ref_id=ref_id,  # MQTT message id -> idempotent replay
+        ts_ms=ts_ms,
     )

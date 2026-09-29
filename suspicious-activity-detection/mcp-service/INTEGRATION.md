@@ -103,7 +103,7 @@ tools are disabled for the food-safety sensor contract.
 | Capability | This service |
 |---|---|
 | **describe** | Advertises the `report_suspicious_activity` event schema + all read tools with descriptions. |
-| **read tools** | `Get_all_activities`, `Get_activity_by_zone`, `Get_activity_by_zone_timestamp`, `Search_retrospective_frames`, `Get_trend_counts`, `Get_all_zones`. |
+| **read tools** | `Get_all_activities`, `Get_activity_by_zone`, `Get_activity_by_zone_timestamp`, `Search_retrospective_frames`, `Get_trend_counts`, `Get_event_count`, `Get_all_zones`. |
 | **subscribe** | Disabled by default (`SAD_EXPOSE_SUBSCRIBE=false`). |
 | **act tools** | None at runtime. Kitchen zone/rule setup is configuration under `configs/usecase/kitchen/`. |
 
@@ -113,9 +113,16 @@ tools are disabled for the food-safety sensor contract.
 |---|---|---|
 | `Get_all_activities` | — | `list[Activity]` — every recorded activity |
 | `Get_activity_by_zone` | `zone` | activities in that zone |
-| `Get_activity_by_zone_timestamp` | `zone`, `start_ms?`, `end_ms?` | zone activities in an epoch-ms range |
-| `Search_retrospective_frames` | `query?`, `start_ms?`, `end_ms?`, `zone?`, `event_name?`, `use_case?` | matching events with SeaweedFS frame references |
-| `Get_trend_counts` | `start_ms?`, `end_ms?`, `event_name?`, `use_case?` | counts grouped by station and shift |
+| `Get_activity_by_zone_timestamp` | `zone`, `start_time?`, `end_time?` | zone activities in an ISO-8601 range; local times use `SAD_TIMEZONE` |
+| `Search_retrospective_frames` | `query?`, `start_time?`, `end_time?`, `zone?`, `event_name?`, `use_case?` | matching event records and any attached frame references |
+| `Get_trend_counts` | `start_time?`, `end_time?`, `event_name?`, `use_case?` | counts grouped by station and shift |
+| `Get_event_count` | `start_time?`, `end_time?`, `zone?`, `event_name?`, `use_case?`, `minimum_severity?` | compact count; `minimum_severity=high` includes high and critical |
+
+Time values use ISO-8601 strings, for example `2026-09-29T13:00:00`. Naive
+values are interpreted in the configured `SAD_TIMEZONE`; timestamps with an
+explicit UTC offset are honored as supplied. The SQLite backend applies the time
+range before its result limit, so older history cannot hide newer matches. The
+JSONL backend preserves correctness but must scan its append-only file.
 | `Get_all_zones` | — | distinct zones with activity |
 
 Descriptions come from the function **docstrings**; parameter docs from
@@ -188,6 +195,10 @@ Key properties:
 - **Log first.** The event is persisted to the service's own durable log *before*
   any delivery — so nothing is dropped and the whole run is replayable for
   benchmarking/debugging.
+- **Source event time.** When the MQTT alert includes a timestamp, the MCP
+  envelope preserves it as `ts_ms`, so agent queries and the Automatic Alerts
+  UI refer to the same event time. Missing/invalid source timestamps fall back
+  to ingestion time.
 - **Idempotent.** `ref_id` = the MQTT message id; a redelivered message is stored
   once, never double-counted.
 - **Fan-out sinks** (chosen by config in `mcp-service-sdk`):
@@ -280,6 +291,7 @@ Details:
 | `MCP_HOST` | `0.0.0.0` | Bind host for HTTP transports. |
 | `MCP_PORT` | `9000` | Bind port for HTTP transports. |
 | `SAD_EXPOSE_SUBSCRIBE` | `false` | Keep callback subscription disabled for the read-only sensor contract. |
+| `SAD_TIMEZONE` | `Asia/Kolkata` | IANA timezone used to interpret ISO datetimes without an explicit offset. |
 | `SAD_DELIVERY` | `off` | `off` or `webhook`; when `webhook`, events are pushed after durable-log append. |
 | `SAD_WEBHOOK_URL` | — | Hub/webhook endpoint used when `SAD_DELIVERY=webhook`. |
 | `SEED_DEMO` | `false` | Optional local demo history seeding; production/default startup uses real events only. |

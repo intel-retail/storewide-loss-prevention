@@ -235,6 +235,7 @@ services:
       SAD_WEBHOOK_URL: ${SAD_WEBHOOK_URL:-}
       SAD_EXPOSE_SUBSCRIBE: "true"
       SAD_ZONE_CONFIG_PATH: /app/zone_config.json
+      SAD_TIMEZONE: ${SAD_TIMEZONE:-Asia/Kolkata}
       SAD_MQTT_INGEST_ENABLED: ${SAD_MQTT_INGEST_ENABLED:-true}
       SAD_MQTT_HOST: ${MQTT_HOST:-broker.scenescape.intel.com}
       SAD_MQTT_PORT: ${MQTT_PORT:-1883}

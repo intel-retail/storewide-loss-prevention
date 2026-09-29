@@ -10,6 +10,7 @@ class Activity(TypedDict):
 
     ref_id: str
     ts_ms: int
+    timestamp: str
     event_name: str
     use_case: str
     zone: str

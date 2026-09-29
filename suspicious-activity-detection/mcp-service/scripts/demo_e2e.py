@@ -32,10 +32,8 @@ def main() -> None:
     print("Get_activity_by_zone(kitchen-prep):",
           len(svc._read_tools["Get_activity_by_zone"].fn("kitchen-prep")))
 
-    acts = svc._read_tools["Get_all_activities"].fn()
-    lo = min(a["ts_ms"] for a in acts)
-    print("Get_activity_by_zone_timestamp(kitchen-prep, from lo):",
-          len(svc._read_tools["Get_activity_by_zone_timestamp"].fn("kitchen-prep", start_ms=lo)))
+    print("Get_activity_by_zone_timestamp(kitchen-prep):",
+          len(svc._read_tools["Get_activity_by_zone_timestamp"].fn("kitchen-prep")))
     print("Search_retrospective_frames(floor/kitchen):",
           len(svc._read_tools["Search_retrospective_frames"].fn(query="floor", use_case="kitchen")))
     print("Get_trend_counts(kitchen):",

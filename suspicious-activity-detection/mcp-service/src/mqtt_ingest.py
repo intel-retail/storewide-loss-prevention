@@ -7,6 +7,7 @@ import json
 import threading
 import time
 from collections.abc import Callable
+from datetime import datetime, timezone
 from typing import Any
 
 from config import Settings
@@ -44,7 +45,22 @@ def _stable_ref_id(topic: str, alert: dict[str, Any], metadata: dict[str, Any]) 
     return f"mqtt-{digest}"
 
 
-def normalize_alert(topic: str, alert: dict[str, Any], use_case: str) -> dict[str, str]:
+def _source_timestamp_ms(alert: dict[str, Any], metadata: dict[str, Any], payload: dict[str, Any]) -> int | None:
+    value = alert.get("timestamp") or metadata.get("timestamp") or payload.get("timestamp")
+    if value in (None, ""):
+        return None
+    try:
+        if isinstance(value, (int, float)):
+            return int(value * 1000) if value < 100_000_000_000 else int(value)
+        parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return int(parsed.timestamp() * 1000)
+    except (OverflowError, TypeError, ValueError):
+        return None
+
+
+def normalize_alert(topic: str, alert: dict[str, Any], use_case: str) -> dict[str, Any]:
     metadata = _as_dict(alert.get("metadata"))
     payload = _as_dict(alert.get("payload"))
     evidence = _as_dict(payload.get("evidence"))
@@ -78,6 +94,7 @@ def normalize_alert(topic: str, alert: dict[str, Any], use_case: str) -> dict[st
         "frame": _first(alert.get("frame"), payload.get("frame"), payload.get("frame_uri"), evidence.get("frame"), evidence.get("uri")),
         "station": _first(metadata.get("station"), payload.get("station"), zone),
         "shift": _first(metadata.get("shift"), payload.get("shift"), default="unknown"),
+        "ts_ms": _source_timestamp_ms(alert, metadata, payload),
     }
 
 

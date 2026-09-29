@@ -40,7 +40,42 @@ def test_normalize_kitchen_food_safety_alert():
         "frame": "",
         "station": "kitchen-prep",
         "shift": "unknown",
+        "ts_ms": None,
     }
+
+
+def test_normalize_preserves_alert_source_timestamp():
+    event = normalize_alert(
+        "alerts/food_safety_violation",
+        {
+            "timestamp": "2026-09-29T09:28:00Z",
+            "alert_type": "FOOD_SAFETY_VIOLATION",
+            "metadata": {"zone_name": "kitchen-prep"},
+            "payload": {"event_type": "food_safety_violation"},
+        },
+        use_case="kitchen",
+    )
+
+    assert event["ts_ms"] == 1790674080000
+
+
+def test_normalize_accepts_epoch_seconds_and_ignores_invalid_timestamp():
+    base_alert = {
+        "alert_type": "LOITERING",
+        "metadata": {"zone_id": "aisle1"},
+        "payload": {},
+    }
+
+    assert normalize_alert(
+        "alerts/loitering",
+        {**base_alert, "timestamp": 1790674080},
+        use_case="retail",
+    )["ts_ms"] == 1790674080000
+    assert normalize_alert(
+        "alerts/loitering",
+        {**base_alert, "timestamp": "not-a-time"},
+        use_case="retail",
+    )["ts_ms"] is None
 
 
 def test_normalize_retail_alert_without_alert_id_gets_stable_ref():

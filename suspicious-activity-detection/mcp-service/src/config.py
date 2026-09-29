@@ -25,6 +25,7 @@ class Settings:
     expose_subscribe: bool
     zone_config_path: str
     use_case: str
+    store_timezone: str
     mqtt_ingest_enabled: bool
     mqtt_host: str
     mqtt_port: int
@@ -68,6 +69,7 @@ def get_settings() -> Settings:
         expose_subscribe=os.getenv("SAD_EXPOSE_SUBSCRIBE", "false").lower() == "true",
         zone_config_path=os.getenv("SAD_ZONE_CONFIG_PATH", "/app/zone_config.json"),
         use_case=os.getenv("USE_CASE", "retail"),
+        store_timezone=os.getenv("SAD_TIMEZONE", "Asia/Kolkata"),
         mqtt_ingest_enabled=os.getenv("SAD_MQTT_INGEST_ENABLED", "true").lower() == "true",
         mqtt_host=os.getenv("SAD_MQTT_HOST", os.getenv("MQTT_HOST", "broker.scenescape.intel.com")),
         mqtt_port=int(os.getenv("SAD_MQTT_PORT", os.getenv("MQTT_PORT", "1883"))),

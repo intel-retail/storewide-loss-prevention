@@ -13,7 +13,7 @@ ARG SDK_REF=mcp
 WORKDIR /app
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends git \
+    && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends git tzdata \
     && rm -rf /var/lib/apt/lists/*
 
 RUN git clone --depth 1 --branch "$SDK_REF" "$SDK_REPO" /tmp/eal \
