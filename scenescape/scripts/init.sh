@@ -249,6 +249,19 @@ if [ -f "${ENV_EXAMPLE}" ]; then
     echo "  Loaded VLM-recall settings from ${ENV_EXAMPLE}"
 fi
 
+# ---- Source SAD MCP settings from configs/.env.example ----
+SAD_KEYS_REGEX='^(SAD_EVENT_HUB_URL|SAD_EVENT_DELIVERY|SAD_EVENT_HUB_MIN_SEVERITY|SAD_SEAWEEDFS_ALERTS_BUCKET|SAD_TIMEZONE|SAD_MQTT_INGEST_ENABLED)='
+if [ -f "${ENV_EXAMPLE}" ]; then
+    SAD_ENV_TMP="$(mktemp)"
+    grep -E "${SAD_KEYS_REGEX}" "${ENV_EXAMPLE}" > "${SAD_ENV_TMP}" || true
+    set -a
+    # shellcheck disable=SC1090
+    . "${SAD_ENV_TMP}"
+    set +a
+    rm -f "${SAD_ENV_TMP}"
+    echo "  Loaded SAD MCP settings from ${ENV_EXAMPLE}"
+fi
+
 # Source device resource config (all-gpu-cpu.env, all-gpu.env, or all-cpu.env)
 RESOURCE_CONFIG="${RESOURCE_CONFIG:-configs/res/all-gpu-cpu.env}"
 RESOURCE_CONFIG_PATH="${APP_DIR}/${RESOURCE_CONFIG}"
@@ -536,6 +549,14 @@ RECALL_BRIDGE_PORT=${RECALL_BRIDGE_PORT:-8090}
 RECALL_UI_PORT=${RECALL_UI_PORT:-7861}
 RECALL_SEGMENT_SECONDS=${RECALL_SEGMENT_SECONDS:-60}
 RECALL_MAX_UPLOAD_CLIPS=${RECALL_MAX_UPLOAD_CLIPS:-0}
+
+# ---- SAD MCP service (from configs/.env.example) ----
+SAD_EVENT_HUB_URL=${SAD_EVENT_HUB_URL:-}
+SAD_EVENT_DELIVERY=${SAD_EVENT_DELIVERY:-on}
+SAD_EVENT_HUB_MIN_SEVERITY=${SAD_EVENT_HUB_MIN_SEVERITY:-critical}
+SAD_SEAWEEDFS_ALERTS_BUCKET=${SAD_SEAWEEDFS_ALERTS_BUCKET:-alerts}
+SAD_TIMEZONE=${SAD_TIMEZONE:-Asia/Kolkata}
+SAD_MQTT_INGEST_ENABLED=${SAD_MQTT_INGEST_ENABLED:-true}
 
 # ---- Host user identity (for Docker bind-mount file ownership) ----
 HOST_UID=$(id -u)

@@ -17,7 +17,7 @@ from events import EVENT_TYPE
 from models import Activity, TrendCount
 
 _MAX = 10_000
-_SEVERITY_RANK = {"low": 1, "medium": 2, "high": 3, "critical": 4}
+SEVERITY_RANK = {"low": 1, "medium": 2, "high": 3, "critical": 4}
 _STORE_TIMEZONE = os.getenv("SAD_TIMEZONE", "Asia/Kolkata")
 
 _STOPWORDS = {
@@ -216,6 +216,7 @@ def trend_counts(
     end_ms: int | None = None,
     event_name: str | None = None,
     use_case: str | None = None,
+    zone: str | None = None,
     limit: int = _MAX,
 ) -> list[TrendCount]:
     """Count matching events by station and shift."""
@@ -225,6 +226,8 @@ def trend_counts(
         if event_name and a.get("event_name") != event_name:
             continue
         if use_case and a.get("use_case") != use_case:
+            continue
+        if zone and a.get("zone") != zone:
             continue
         key = (a.get("station") or a.get("zone") or "unknown", a.get("shift") or "unknown")
         buckets[key] = buckets.get(key, 0) + 1
@@ -248,7 +251,7 @@ def event_count(
     limit: int = _MAX,
 ) -> int:
     """Count matching events; a minimum severity includes all higher ranks."""
-    minimum_rank = _SEVERITY_RANK.get(minimum_severity.lower()) if minimum_severity else None
+    minimum_rank = SEVERITY_RANK.get(minimum_severity.lower()) if minimum_severity else None
     count = 0
     for activity in _iter_activities(log, start_ms, end_ms):
         if zone and activity.get("zone") != zone:
@@ -258,7 +261,7 @@ def event_count(
         if use_case and activity.get("use_case") != use_case:
             continue
         if minimum_rank is not None:
-            rank = _SEVERITY_RANK.get(str(activity.get("severity", "")).lower(), 0)
+            rank = SEVERITY_RANK.get(str(activity.get("severity", "")).lower(), 0)
             if rank < minimum_rank:
                 continue
         count += 1

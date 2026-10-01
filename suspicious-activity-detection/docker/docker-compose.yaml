@@ -231,6 +231,8 @@ services:
       STORE_ID: ${STORE_ID:-store_001}
       SAD_LOG_PATH: /data/sad_log.sqlite
       SAD_EVENT_HUB_URL: ${SAD_EVENT_HUB_URL:-}
+      SAD_EVENT_DELIVERY: ${SAD_EVENT_DELIVERY:-on}
+      SAD_EVENT_HUB_MIN_SEVERITY: ${SAD_EVENT_HUB_MIN_SEVERITY:-critical}
       SAD_SEAWEEDFS_ALERTS_BUCKET: ${SAD_SEAWEEDFS_ALERTS_BUCKET:-alerts}
       SAD_ZONE_CONFIG_PATH: /app/zone_config.json
       SAD_TIMEZONE: ${SAD_TIMEZONE:-Asia/Kolkata}

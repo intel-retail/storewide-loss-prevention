@@ -160,6 +160,15 @@ def test_trend_counts():
     ]
 
 
+def test_trend_counts_scoped_to_zone():
+    log = _new_log()
+    _seed(log)
+    assert queries.trend_counts(log, zone="kitchen-prep") == [
+        {"station": "prep", "shift": "lunch", "count": 2}
+    ]
+    assert queries.trend_counts(log, zone="no-such-zone") == []
+
+
 def test_event_count_high_includes_critical_and_filters_scope():
     log = _new_log()
     _seed(log)

@@ -12,7 +12,12 @@ def test_ingest_persists_before_hub_push_and_suppresses_duplicate(monkeypatch):
     monkeypatch.setattr(
         tools,
         "_settings",
-        replace(tools._settings, event_hub_url="http://event-hub/events"),
+        replace(
+            tools._settings,
+            event_hub_url="http://event-hub/events",
+            event_delivery_enabled=True,
+            event_hub_min_severity="critical",
+        ),
     )
     dispatches = []
 
@@ -41,3 +46,39 @@ def test_ingest_persists_before_hub_push_and_suppresses_duplicate(monkeypatch):
 
     assert len(dispatches) == 1
     assert dispatches[0][0:2] == ("http://event-hub/events", "alert-1")
+
+
+def _ingest_with(monkeypatch, severity: str, **settings_overrides) -> list:
+    event_store = DurableEventStore(":memory:", "suspicious_activity", "store_001")
+    monkeypatch.setattr(tools, "store", event_store)
+    settings = {
+        "event_hub_url": "http://event-hub/events",
+        "event_delivery_enabled": True,
+        "event_hub_min_severity": "critical",
+        **settings_overrides,
+    }
+    monkeypatch.setattr(tools, "_settings", replace(tools._settings, **settings))
+    dispatches = []
+    monkeypatch.setattr(tools, "push_event_to_hub", lambda url, event: dispatches.append(event.ref_id))
+    tools.ingest_alert(
+        zone="kitchen-prep",
+        pose="floor_to_food_area",
+        severity=severity,
+        camera_id="camera-1",
+        object_id="person-1",
+        description="Item picked from the floor",
+        ref_id=f"alert-{severity}",
+        event_name="food_safety_violation",
+        use_case="kitchen",
+        ts_ms=12345,
+    )
+    return dispatches
+
+
+def test_below_minimum_severity_is_logged_but_not_delivered(monkeypatch):
+    assert _ingest_with(monkeypatch, "medium") == []
+    assert _ingest_with(monkeypatch, "critical") == ["alert-critical"]
+
+
+def test_delivery_off_suppresses_hub_push_for_benchmark_runs(monkeypatch):
+    assert _ingest_with(monkeypatch, "critical", event_delivery_enabled=False) == []

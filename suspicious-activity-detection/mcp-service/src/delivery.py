@@ -2,20 +2,40 @@
 
 from __future__ import annotations
 
+import json
 import time
 import urllib.error
 import urllib.request
+from datetime import datetime, timezone
 
 from events import EventEnvelope
+
+
+def to_hub_event(event: EventEnvelope) -> dict:
+    """Map the SAD envelope onto the agent inbox's event shape.
+
+    `store_id` stays inside `data`; at the top level the inbox compares it
+    against its own restaurant id and rejects the event on any mismatch.
+    """
+    occurred_at = datetime.fromtimestamp(event.ts_ms / 1000, tz=timezone.utc)
+    return {
+        "event_id": event.ref_id,
+        "event_type": event.event_type,
+        "occurred_at": occurred_at.isoformat().replace("+00:00", "Z"),
+        "data": {
+            **event.payload,
+            "ref_id": event.ref_id,
+            "service": event.service,
+            "store_id": event.store_id,
+            "ts_ms": event.ts_ms,
+        },
+    }
 
 
 def _post(hub_url: str, event: EventEnvelope, timeout_s: float) -> bool:
     request = urllib.request.Request(
         hub_url,
-        data=json.dumps({
-            "type": "mcp_event",
-            "event": json.loads(event.to_json()),
-        }).encode("utf-8"),
+        data=json.dumps(to_hub_event(event)).encode("utf-8"),
         headers={"Content-Type": "application/json"},
         method="POST",
     )

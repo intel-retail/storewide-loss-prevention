@@ -20,6 +20,8 @@ class Settings:
     port: int
     log_path: str
     event_hub_url: str | None
+    event_delivery_enabled: bool
+    event_hub_min_severity: str
     seaweedfs_endpoint: str
     seaweedfs_alerts_bucket: str
     zone_config_path: str
@@ -61,6 +63,9 @@ def get_settings() -> Settings:
         port=int(os.getenv("MCP_PORT", "9000")),
         log_path=log_path,
         event_hub_url=os.getenv("SAD_EVENT_HUB_URL"),
+        # "off" is the clean-benchmark setting: no outbound delivery at all.
+        event_delivery_enabled=os.getenv("SAD_EVENT_DELIVERY", "on").lower() != "off",
+        event_hub_min_severity=os.getenv("SAD_EVENT_HUB_MIN_SEVERITY", "critical").lower(),
         seaweedfs_endpoint=os.getenv("SEAWEEDFS_ENDPOINT", "http://seaweedfs:8333"),
         seaweedfs_alerts_bucket=os.getenv("SAD_SEAWEEDFS_ALERTS_BUCKET", "alerts"),
         zone_config_path=os.getenv("SAD_ZONE_CONFIG_PATH", "/app/zone_config.json"),

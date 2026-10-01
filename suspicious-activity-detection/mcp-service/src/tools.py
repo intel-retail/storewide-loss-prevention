@@ -13,6 +13,7 @@ from delivery import push_event_to_hub
 from events import EVENT_TYPE, SCHEMA, EventEnvelope, ingest_alert as make_alert_event
 from frame_store import SeaweedFrameStore
 from models import Activity, TrendCount
+from queries import SEVERITY_RANK
 from store import DurableEventStore
 
 _settings = get_settings()
@@ -26,6 +27,15 @@ frame_store = SeaweedFrameStore(
     _settings.seaweedfs_endpoint,
     bucket=_settings.seaweedfs_alerts_bucket,
 )
+
+
+def _should_deliver(event: EventEnvelope) -> bool:
+    """Only violations reach the agent inbox; every event stays queryable."""
+    if not _settings.event_delivery_enabled:
+        return False
+    minimum = SEVERITY_RANK.get(_settings.event_hub_min_severity, 0)
+    severity = str(event.payload.get("severity", "")).lower()
+    return SEVERITY_RANK.get(severity, 0) >= minimum
 
 
 def ingest_alert(
@@ -61,7 +71,7 @@ def ingest_alert(
         ts_ms,
     )
     _, inserted = store.append_once(event)
-    if inserted:
+    if inserted and _should_deliver(event):
         push_event_to_hub(_settings.event_hub_url, event)
 
 
@@ -189,6 +199,9 @@ def Get_trend_counts(
     use_case: Annotated[
         str | None, Field(description="Optional use case: retail or kitchen.")
     ] = None,
+    zone: Annotated[
+        str | None, Field(description="Optional zone, e.g. 'kitchen-prep'.")
+    ] = None,
 ) -> list[TrendCount]:
     """Count matching SAD events by station and shift."""
     start_ms, end_ms = queries.parse_time_range(start_time, end_time, _settings.store_timezone)
@@ -198,6 +211,7 @@ def Get_trend_counts(
         end_ms=end_ms,
         event_name=event_name,
         use_case=use_case,
+        zone=zone,
     )
 
 
