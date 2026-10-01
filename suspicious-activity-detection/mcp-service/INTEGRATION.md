@@ -1,12 +1,11 @@
 # SAD MCP Service — Integration Guide
 
-How the **Suspicious Activity Detection (SAD) MCP service** is built on the generic
-`mcp-service-sdk` library, how it exposes tools to the Central QSR Agent, and how
-events fan out from the SAD pipeline to the agent.
+The **Suspicious Activity Detection (SAD) MCP service** uses FastMCP for
+standard MCP discovery, tool validation, and Streamable HTTP transport. SAD
+owns its SQLite event log, MQTT ingestion, and callback delivery.
 
 - **Service name:** `suspicious_activity`
-- **Built on:** `mcp-service-sdk` from `edge-ai-libraries/libraries/mcp-service-sdk`
-- **MCP SDK:** official `mcp` (2.x, `MCPServer`)
+- **MCP framework:** FastMCP 2.x
 - **Location:** `storewide-loss-prevention/suspicious-activity-detection/mcp-service`
 
 ---
@@ -26,17 +25,19 @@ The service supports both current SAD scenarios:
   trigger `floor_to_food_area`, and VLM confirmation that an item was picked from
   the floor and placed back in the food area.
 
-The service writes **only domain code** — its event schema, query helpers, and
-tool declarations. Everything else (durable log, event delivery/fan-out,
-telemetry, MCP scaffolding) is inherited from `mcp-service-sdk`.
+The service directly declares normal FastMCP tools. Its SQLite store preserves
+the event envelope, idempotency, ordered history, and replay; its delivery
+module handles optional registered callbacks. There is no SDK-specific tool
+decorator or protocol layer.
 
 ---
 
-## 2. How it connects to the generic `mcp-service-sdk`
+## 2. FastMCP server and service-owned infrastructure
 
-`mcp-service-sdk` is a **library**, not a running server. This service imports it,
-creates one `ServiceServer`, registers its tools, and runs it — that instance *is*
-the MCP server the agent connects to.
+FastMCP implements the MCP protocol and exposes the service's Python functions
+as standard MCP tools. SAD separately owns the production behavior around those
+tools: event persistence, MQTT ingestion, time-window queries, replay, and
+optional callback delivery.
 
 ```mermaid
 flowchart TB
@@ -48,35 +49,30 @@ flowchart TB
         CONFIG["config.py<br/>env settings"]
         MAIN["main.py<br/>entrypoint"]
     end
-    subgraph BASE["mcp-service-sdk (imported library)"]
-        SS["ServiceServer"]
-        LOG["SQLiteLog (durable log)"]
-        DEL["Delivery (fan-out)"]
-        POL["PolicyGate"]
-        TEL["Telemetry"]
-        MCP["MCP scaffolding<br/>describe + read tools"]
+    subgraph SAD_RUNTIME["SAD service runtime"]
+      MCP["FastMCP<br/>standard tools/list + tools/call"]
+      LOG["SAD-owned SQLite store"]
+      DEL["SAD callback dispatcher"]
     end
     AGENT["Central QSR Agent<br/>(Hermes — MCP client)"]
 
-    TOOLS -->|register read tools| SS
+    TOOLS -->|@mcp.tool| MCP
     TOOLS --> QUERIES --> LOG
-    EVENTS -->|svc.emit| SS
-    MAIN -->|svc.run| SS
-    SS --- LOG & DEL & POL & TEL & MCP
-    MCP <-->|describe, read| AGENT
-    POL -->|gated act| AGENT
+    EVENTS -->|build envelope| LOG
+    MAIN -->|mcp.run| MCP
+    LOG --> DEL
+    MCP <-->|tools/list, tools/call| AGENT
 ```
 
-**Dependency wiring** (`pyproject.toml`):
+  `describe` is an application-level tool for event schemas and service metadata.
+  FastMCP and every compatible client still use standard `tools/list` and
+  `tools/call`; clients do not have to call `describe` first.
+
+  **Dependencies** (`pyproject.toml`):
 
 ```toml
-dependencies = [
-  "mcp-service-sdk[mcp] @ git+https://github.com/sachinkaushik/edge-ai-libraries.git@mcp#subdirectory=libraries/mcp-service-sdk",
-]
+dependencies = ["fastmcp>=2.14,<3", "paho-mqtt>=1.6,<3"]
 ```
-
-The `[mcp]` extra pulls in the official MCP SDK. Pin this to a tag or commit in
-`edge-ai-libraries` for reproducible builds.
 
 ---
 
@@ -84,12 +80,15 @@ The `[mcp]` extra pulls in the official MCP SDK. Pin this to a tag or commit in
 
 | File | Responsibility |
 |---|---|
-| `src/tools.py` | **The MCP tools** — creates `svc = ServiceServer(...)`, declares read tools, disables subscribe by default, and exposes `ingest_alert`. Edit this to add/change tools. |
+| `src/tools.py` | **The MCP tools** — creates the FastMCP instance and declares tools using FastMCP's `@mcp.tool`. |
 | `src/queries.py` | Internal pure query logic over the durable log. Not exposed to the agent. |
-| `src/events.py` | Event type name + payload schema + `ingest_alert` (the pipeline hand-off seam). |
+| `src/events.py` | Event type, payload schema, and standard event envelope. |
+| `src/store.py` | SAD-owned SQLite log, compatible with the previous event table, plus persistent subscriptions. |
+| `src/delivery.py` | Condition matching and retrying HTTP callback delivery. |
 | `src/models.py` | `Activity` `TypedDict` — structured output type. |
 | `src/config.py` | Env-driven settings (store id, transport, host, port). |
-| `src/main.py` | Entrypoint / console script (`sad-mcp`). |
+| `src/main.py` | Entrypoint: starts MQTT ingestion and FastMCP. |
+| `scripts/replay_events.py` | Replays stored event envelopes; `--deliver` simulates callback delivery. |
 | `scripts/demo_e2e.py` | End-to-end demo (no MCP client needed). |
 | `tests/test_queries.py` | Unit tests for the query helpers. |
 

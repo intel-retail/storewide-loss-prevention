@@ -3,4 +3,5 @@ Name: sad-mcp
 Version: 0.1.0
 Summary: Suspicious Activity Detection MCP service for the Central QSR Agent.
 Requires-Python: >=3.11
-Requires-Dist: mcp-service-sdk[mcp] @ git+https://github.com/sachinkaushik/edge-ai-libraries.git@mcp#subdirectory=libraries/mcp-service-sdk
+Requires-Dist: fastmcp<3,>=2.14
+Requires-Dist: paho-mqtt<3,>=1.6

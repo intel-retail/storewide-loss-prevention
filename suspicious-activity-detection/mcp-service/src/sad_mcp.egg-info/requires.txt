@@ -1,1 +1,2 @@
-mcp-service-sdk[mcp] @ git+https://github.com/sachinkaushik/edge-ai-libraries.git@mcp#subdirectory=libraries/mcp-service-sdk
+fastmcp<3,>=2.14
+paho-mqtt<3,>=1.6

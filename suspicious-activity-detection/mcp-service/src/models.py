@@ -20,6 +20,7 @@ class Activity(TypedDict):
     object_id: str
     description: str
     frame: str
+    frame_refs: list[str]
     station: str
     shift: str
 

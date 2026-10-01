@@ -1,36 +1,31 @@
-"""Wires the ServiceServer: registers the event type and read tools.
-
-Runtime actions are intentionally not exposed; kitchen zone/rule setup is
-configuration under configs/usecase/kitchen/.
-"""
+"""FastMCP tools and SAD event-ingestion entry point."""
 
 from __future__ import annotations
 
 from typing import Annotated
 
-from mcp_service_sdk import ServiceConfig, ServiceServer
+from fastmcp import FastMCP
 from pydantic import Field
 
 import queries
 from config import configured_zones, get_settings
-from events import EVENT_TYPE, SCHEMA
-from events import ingest_alert as _ingest_alert
+from delivery import push_event_to_hub
+from events import EVENT_TYPE, SCHEMA, EventEnvelope, ingest_alert as make_alert_event
+from frame_store import SeaweedFrameStore
 from models import Activity, TrendCount
+from store import DurableEventStore
 
 _settings = get_settings()
-
-svc = ServiceServer.from_config(
-    ServiceConfig(
-        service="suspicious_activity",
-        store_id=_settings.store_id,
-        log_backend=_settings.log_backend,
-        log_path=_settings.log_path,
-        delivery=_settings.delivery,
-        webhook_url=_settings.webhook_url,
-        expose_subscribe=_settings.expose_subscribe,
-    )
+store = DurableEventStore(
+    _settings.log_path,
+    service="suspicious_activity",
+    store_id=_settings.store_id,
 )
-svc.register_event_type(EVENT_TYPE, schema=SCHEMA)
+mcp = FastMCP("suspicious_activity")
+frame_store = SeaweedFrameStore(
+    _settings.seaweedfs_endpoint,
+    bucket=_settings.seaweedfs_alerts_bucket,
+)
 
 
 def ingest_alert(
@@ -48,9 +43,9 @@ def ingest_alert(
     shift: str = "unknown",
     ts_ms: int | None = None,
 ) -> None:
-    """Pipeline hand-off: the SAD MQTT consumer calls this to publish a violation."""
-    _ingest_alert(
-        svc,
+    """Persist an alert before attempting configured event-hub delivery."""
+    event = make_alert_event(
+        _settings.store_id,
         zone,
         pose,
         severity,
@@ -65,29 +60,51 @@ def ingest_alert(
         shift,
         ts_ms,
     )
+    _, inserted = store.append_once(event)
+    if inserted:
+        push_event_to_hub(_settings.event_hub_url, event)
 
 
-# -- read tools -----------------------------------------------------------
-# Descriptions come from the docstrings; parameter docs from Annotated Field.
-@svc.read_tool("Get_all_activities")
+@mcp.tool(annotations={"readOnlyHint": True})
+def describe() -> dict:
+    """Describe the SAD service identity, event schema, and read tools."""
+    return {
+        "service": "suspicious_activity",
+        "store_id": _settings.store_id,
+        "event_types": {EVENT_TYPE: SCHEMA},
+        "read_tools": [
+            "Get_all_activities",
+            "Get_activity_by_zone",
+            "Get_activity_by_zone_timestamp",
+            "Search_retrospective_frames",
+            "Get_trend_counts",
+            "Get_event_count",
+            "Get_all_zones",
+        ],
+        "act_tools": [],
+        "event_delivery": "one-way hub push" if _settings.event_hub_url else "not configured",
+    }
+
+
+@mcp.tool(annotations={"readOnlyHint": True})
 def Get_all_activities() -> list[Activity]:
     """List every recorded suspicious-activity event, oldest first.
 
     Includes kitchen food-safety violations (event_name 'food_safety_violation'):
     dropped-and-returned food and objects picked up / grasped from the floor.
     """
-    return queries.all_activities(svc.log)
+    return queries.all_activities(store)
 
 
-@svc.read_tool("Get_activity_by_zone")
+@mcp.tool(annotations={"readOnlyHint": True})
 def Get_activity_by_zone(
     zone: Annotated[str, Field(description="Zone name, e.g. 'kitchen-prep'.")],
 ) -> list[Activity]:
     """List suspicious-activity events for a single zone."""
-    return queries.activity_by_zone(svc.log, zone)
+    return queries.activity_by_zone(store, zone)
 
 
-@svc.read_tool("Get_activity_by_zone_timestamp")
+@mcp.tool(annotations={"readOnlyHint": True})
 def Get_activity_by_zone_timestamp(
     zone: Annotated[str, Field(description="Zone name to filter by.")],
     start_time: Annotated[
@@ -101,19 +118,16 @@ def Get_activity_by_zone_timestamp(
 ) -> list[Activity]:
     """List zone events in an ISO-8601 time range using the store's configured timezone."""
     start_ms, end_ms = queries.parse_time_range(start_time, end_time, _settings.store_timezone)
-    return queries.activity_by_zone_timestamp(svc.log, zone, start_ms, end_ms)
+    return queries.activity_by_zone_timestamp(store, zone, start_ms, end_ms)
 
 
-@svc.read_tool("Search_retrospective_frames")
+@mcp.tool(annotations={"readOnlyHint": True})
 def Search_retrospective_frames(
     query: Annotated[
         str | None,
         Field(description=(
-            "Optional LITERAL keyword filter: every word must appear verbatim in the "
-            "event text (event_name, use_case, zone, pose, description). Pass a single "
-            "distinctive keyword or omit it; a natural-language sentence usually matches "
-            "nothing. For dropped / picked-up-from-floor food safety, filter with "
-            "event_name='food_safety_violation' and use_case='kitchen' instead of text."
+            "Optional literal keyword filter; every meaningful word must match. "
+            "Prefer structured filters for food-safety events."
         )),
     ] = None,
     start_time: Annotated[
@@ -125,25 +139,19 @@ def Search_retrospective_frames(
         Field(description=f"Inclusive ISO datetime; local values use {_settings.store_timezone}."),
     ] = None,
     zone: Annotated[
-        str | None, Field(description="Optional zone filter, e.g. 'kitchen-prep'.")
+        str | None, Field(description="Optional zone, e.g. 'kitchen-prep'.")
     ] = None,
     event_name: Annotated[
-        str | None,
-        Field(description="Optional event filter, e.g. 'food_safety_violation'."),
+        str | None, Field(description="Optional event name, e.g. 'food_safety_violation'.")
     ] = None,
     use_case: Annotated[
-        str | None, Field(description="Optional use case filter: retail or kitchen.")
+        str | None, Field(description="Optional use case: retail or kitchen.")
     ] = None,
 ) -> list[Activity]:
-    """Search logged SAD events and return any frame references already attached to them.
-
-    Prefer the structured filters (zone, event_name, use_case, time range) over the
-    free-text query; the query is a literal keyword AND-match, so full sentences
-    typically return nothing even when relevant events exist.
-    """
+    """Search logged SAD events and SeaweedFS for matching alert frames."""
     start_ms, end_ms = queries.parse_time_range(start_time, end_time, _settings.store_timezone)
-    return queries.retrospective_frame_search(
-        svc.log,
+    activities = queries.retrospective_frame_search(
+        store,
         query=query,
         start_ms=start_ms,
         end_ms=end_ms,
@@ -151,9 +159,21 @@ def Search_retrospective_frames(
         event_name=event_name,
         use_case=use_case,
     )
+    for activity in activities:
+        frame = activity.get("frame", "")
+        if frame:
+            activity["frame_refs"] = [frame]
+        else:
+            activity["frame_refs"] = frame_store.find_alert_frames(
+                activity.get("object_id", ""),
+                activity.get("ref_id", ""),
+            )
+            if activity["frame_refs"]:
+                activity["frame"] = activity["frame_refs"][0]
+    return activities
 
 
-@svc.read_tool("Get_trend_counts")
+@mcp.tool(annotations={"readOnlyHint": True})
 def Get_trend_counts(
     start_time: Annotated[
         str | None,
@@ -164,17 +184,16 @@ def Get_trend_counts(
         Field(description=f"Inclusive ISO datetime; local values use {_settings.store_timezone}."),
     ] = None,
     event_name: Annotated[
-        str | None,
-        Field(description="Optional event filter, e.g. 'food_safety_violation'."),
+        str | None, Field(description="Optional event name, e.g. 'food_safety_violation'.")
     ] = None,
     use_case: Annotated[
-        str | None, Field(description="Optional use case filter: retail or kitchen.")
+        str | None, Field(description="Optional use case: retail or kitchen.")
     ] = None,
 ) -> list[TrendCount]:
     """Count matching SAD events by station and shift."""
     start_ms, end_ms = queries.parse_time_range(start_time, end_time, _settings.store_timezone)
     return queries.trend_counts(
-        svc.log,
+        store,
         start_ms=start_ms,
         end_ms=end_ms,
         event_name=event_name,
@@ -182,7 +201,7 @@ def Get_trend_counts(
     )
 
 
-@svc.read_tool("Get_event_count")
+@mcp.tool(annotations={"readOnlyHint": True})
 def Get_event_count(
     start_time: Annotated[
         str | None,
@@ -201,13 +220,13 @@ def Get_event_count(
     ] = None,
     minimum_severity: Annotated[
         str | None,
-        Field(description="Optional severity threshold: low, medium, high, or critical. High includes high and critical."),
+        Field(description="Optional severity threshold; high includes high and critical."),
     ] = None,
 ) -> int:
     """Return a compact count of events matching the supplied filters."""
     start_ms, end_ms = queries.parse_time_range(start_time, end_time, _settings.store_timezone)
     return queries.event_count(
-        svc.log,
+        store,
         start_ms=start_ms,
         end_ms=end_ms,
         zone=zone,
@@ -217,10 +236,8 @@ def Get_event_count(
     )
 
 
-@svc.read_tool("Get_all_zones")
+@mcp.tool(annotations={"readOnlyHint": True})
 def Get_all_zones() -> list[str]:
     """List configured zones for the current use case."""
     zones = configured_zones(_settings.zone_config_path)
-    if zones:
-        return zones
-    return queries.all_zones(svc.log)
+    return zones or queries.all_zones(store)

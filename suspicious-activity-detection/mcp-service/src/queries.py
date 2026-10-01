@@ -68,10 +68,12 @@ def _to_activity(event: Any) -> Activity:
         f"{local_time.strftime('%B')} {local_time.day}, {local_time.year} at "
         f"{local_time.strftime('%I').lstrip('0')}:{local_time.strftime('%M:%S %p %Z')}"
     )
+    frame = str(event.payload.get("frame", ""))
     return {
         "ref_id": event.ref_id,
         "ts_ms": event.ts_ms,
         "timestamp": timestamp,
+        "frame_refs": [frame] if frame else [],
         **event.payload,
     }
 

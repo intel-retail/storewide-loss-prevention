@@ -13,7 +13,7 @@ Re-runs are idempotent because each event carries a stable ref_id.
 from __future__ import annotations
 
 import queries
-from tools import ingest_alert, svc
+from tools import ingest_alert, store
 
 _EVENTS = [
     {
@@ -50,8 +50,8 @@ _EVENTS = [
 def main() -> None:
     for event in _EVENTS:
         ingest_alert(**event)
-    activities = queries.all_activities(svc.log)
-    print(f"seeded {len(activities)} activities across zones {queries.all_zones(svc.log)}")
+    activities = queries.all_activities(store)
+    print(f"seeded {len(activities)} activities across zones {queries.all_zones(store)}")
 
 
 if __name__ == "__main__":
