@@ -7,7 +7,7 @@
 # No Scenescape source checkout required.
 # Scenescape-specific targets are in scenescape/Makefile.
 
-TAG ?= 2026.2.0
+TAG ?= latest
 REGISTRY ?= true
 
 SCENESCAPE_DIR := ../scenescape
@@ -279,7 +279,11 @@ down:
 else
 .PHONY: cleanup-all-scenes
 cleanup-all-scenes:
-	@for zone_config in configs/usecase/*/zone_config.json; do \
+	@if [ -z "$$(docker ps --filter label=com.docker.compose.project=storewide-lp --filter label=com.docker.compose.service=web --format '{{.ID}}')" ]; then \
+		echo "SceneScape is already stopped; skipping scene cleanup."; \
+		exit 0; \
+	fi; \
+	for zone_config in configs/usecase/*/zone_config.json; do \
 		if [ -f "$$zone_config" ]; then \
 			echo "Cleaning SceneScape scene from $$zone_config"; \
 			ZONE_CONFIG="$(CURDIR)/$$zone_config" $(MAKE) -C $(SCENESCAPE_DIR) APP_DIR=$(CURDIR) cleanup-scene || true; \

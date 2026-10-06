@@ -90,7 +90,7 @@ services:
     networks:
       - storewide-lp
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8082/api/v1/sus/status')"]
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8082/health')"]
       interval: 10s
       timeout: 5s
       retries: 10
