@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 # Copyright (C) 2026 Intel Corporation
 # SPDX-License-Identifier: Apache-2.0
-"""Translate configs/scene-config.yaml -> configs/zone_config.json.
+"""Translate a scenario scene-config.yaml into zone_config.json.
 
-scene-config.yaml is the single source of truth the operator edits. The vendored
-SceneScape scripts (init.sh, export-scene.sh, import-scene.sh) and
-download_sample_video.sh still consume the legacy configs/zone_config.json, so we
-generate that file from scene-config.yaml before running them. The generated JSON
-is a build artifact (gitignored) and should not be edited by hand.
+The selected use case's scene-config.yaml is the single source of truth the
+operator edits. The vendored SceneScape scripts (init.sh, export-scene.sh,
+import-scene.sh) and download_sample_video.sh still consume the legacy
+zone_config.json shape, so we generate that file before running them. The
+generated JSON is a build artifact and should not be edited by hand.
 
 Runtime settings (scenes/cameras/zones/mqtt) live under the normal keys; the
 deploy-only bits (scene_zip, sample_video_fps, per-camera sample-video URLs) live
@@ -18,6 +18,7 @@ scene-understanding-service ignores the extra scene keys.
 from __future__ import annotations
 
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -30,8 +31,10 @@ except ModuleNotFoundError:
     )
 
 CONFIGS_DIR = Path(__file__).resolve().parent.parent / "configs"
-SCENE_CONFIG = CONFIGS_DIR / "scene-config.yaml"
-ZONE_CONFIG = CONFIGS_DIR / "zone_config.json"
+USE_CASE = os.environ.get("USE_CASE", "retail").strip().lower()
+USECASE_DIR = CONFIGS_DIR / "usecase" / USE_CASE
+SCENE_CONFIG = Path(os.environ.get("SCENE_CONFIG", USECASE_DIR / "scene-config.yaml"))
+ZONE_CONFIG = Path(os.environ.get("ZONE_CONFIG", USECASE_DIR / "zone_config.json"))
 
 
 def build_zone_config(data: dict) -> dict:
@@ -82,8 +85,9 @@ def main() -> None:
 
     data = yaml.safe_load(SCENE_CONFIG.read_text()) or {}
     zone_config = build_zone_config(data)
+    ZONE_CONFIG.parent.mkdir(parents=True, exist_ok=True)
     ZONE_CONFIG.write_text(json.dumps(zone_config, indent=2) + "\n")
-    print(f"  Generated {ZONE_CONFIG} from {SCENE_CONFIG.name}")
+    print(f"  Generated {ZONE_CONFIG} from {SCENE_CONFIG}")
 
 
 if __name__ == "__main__":

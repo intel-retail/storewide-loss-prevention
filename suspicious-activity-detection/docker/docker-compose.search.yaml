@@ -433,7 +433,7 @@ services:
       HTTPS_PROXY: ${https_proxy:-}
       NO_PROXY: ${no_proxy:-localhost,127.0.0.1},pipeline-manager,video-search,vdms-dataprep,minio-service
     volumes:
-      - ./configs/scene-config.yaml:/app/configs/scene-config.yaml:ro
+      - ./configs/usecase/${USE_CASE:-retail}/scene-config.yaml:/app/configs/scene-config.yaml:ro
       - ${STREAM_VIDEO_DIR:-../scenescape/sample_data}:/media:ro
       - vss-recall-clips:/clips
     restart: unless-stopped

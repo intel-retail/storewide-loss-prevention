@@ -1,4 +1,5 @@
 scenescape/sample_data/*.mp4
+scenescape/sample_data/retail/
 
 # POI application secrets
 person-of-interest/.env
@@ -14,6 +15,8 @@ suspicious-activity-detection/docker/.env.bak
 
 # Generated from configs/scene-config.yaml by scripts/gen-zone-config.py
 suspicious-activity-detection/configs/zone_config.json
+suspicious-activity-detection/configs/usecase/kitchen/zone_config.json
+suspicious-activity-detection/configs/usecase/retail/zone_config.json
 
 # Generated secrets
 scenescape/secrets/ca/

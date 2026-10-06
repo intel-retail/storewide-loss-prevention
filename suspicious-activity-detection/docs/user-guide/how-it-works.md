@@ -46,7 +46,8 @@ MQTT-driven and has no direct dependency on the camera pipeline.
 - **Session state management:** Creates, updates, and expires a `PersonSession`
   per tracked person. Sessions are kept in memory, keyed by
   `(scene_id, object_id)`.
-- **Rule evaluation:** A declarative engine driven by `configs/rules.yaml`
+- **Rule evaluation:** A declarative engine driven by the selected use case's
+  `configs/usecase/<use-case>/rules.yaml`
   matches triggers (`zone_entry`, `zone_loiter`, `zone_exit`, `ba_result`) and
   conditions against a flat context dict built from the event and session.
 - **Action execution:** Each rule emits one or more actions (`alert`,
@@ -149,9 +150,9 @@ Putting the pieces together:
    session flags (for example, `visited_high_value`, `visited_checkout`)
    are set automatically on zone entry.
 3. **Rule evaluation** — Each event is mapped to a rule trigger
-   (`zone_entry`, `zone_loiter`, `zone_exit`). The rule engine evaluates
-   `rules.yaml` conditions against a flat context built from the event and
-   session, and returns a list of actions.
+  (`zone_entry`, `zone_loiter`, `zone_exit`). The rule engine evaluates the
+  selected scenario's `rules.yaml` conditions against a flat context built
+  from the event and session, and returns a list of actions.
 4. **Action execution** —
    - `alert` actions build an `Alert` object, apply the configured
      `fire_once_per` deduplication, build a `details` payload from YAML, and
@@ -195,10 +196,11 @@ while sharing common infrastructure (MQTT, frame storage, configuration).
 
 | Concern | File |
 |---------|------|
-| Detection rules, thresholds, severity, deduplication, escalation | `configs/rules.yaml` |
-| Session flags (zone-visited / external) | `configs/rules.yaml` (`session_flags:`) |
-| Zone name → type mapping | `configs/zone_config.json` |
-| Alert routing and time-window deduplication | `configs/alert-config.yaml` |
+| Detection rules, thresholds, severity, deduplication, escalation | `configs/usecase/<use-case>/rules.yaml` |
+| Session flags (zone-visited / external) | `configs/usecase/<use-case>/rules.yaml` (`session_flags:`) |
+| Scene, cameras, and zone name → type mapping | `configs/usecase/<use-case>/scene-config.yaml` |
+| Generated SceneScape compatibility config | `configs/usecase/<use-case>/zone_config.json` |
+| Alert routing and time-window deduplication | `configs/usecase/<use-case>/alert-config.yaml` |
 | MQTT, storage, services | `configs/.env.example` / `docker/.env` |
 | DL Streamer pipeline template | `configs/scenescape/pipeline-config.json` |
 

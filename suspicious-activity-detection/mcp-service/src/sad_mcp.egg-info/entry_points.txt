@@ -1,0 +1,2 @@
+[console_scripts]
+sad-mcp = main:main

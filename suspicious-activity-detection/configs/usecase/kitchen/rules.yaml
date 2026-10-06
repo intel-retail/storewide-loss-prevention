@@ -1,0 +1,80 @@
+# Copyright (C) 2026 Intel Corporation
+# SPDX-License-Identifier: Apache-2.0
+
+# Scenario: kitchen
+
+settings:
+  session_timeout_seconds: 90
+  frame_capture_count: 15
+  frame_capture_interval_seconds: 0.3
+
+session_flags:
+  food_safety_suspected:
+    trigger: external
+    source: behavioral_analysis
+    field: status
+    match_value: suspicious
+
+variables:
+  loiter_threshold_seconds: 30
+
+services:
+  behavioral_analysis:
+    handler: ba_orchestrator
+
+rules:
+  - id: kitchen_behavioral_analysis
+    name: Trigger Food Safety Analysis on Prep Zone Entry
+    enabled: true
+    trigger:
+      event_type: zone_entry
+      zone_type: HIGH_VALUE
+    conditions: []
+    actions:
+      - type: escalate
+        params:
+          service: behavioral_analysis
+
+  - id: food_safety_violation
+    name: Food Safety Violation Confirmed by Behavioral Analysis
+    description: Item picked from floor and placed back in the food area.
+    enabled: true
+    trigger:
+      event_type: ba_result
+      zone_type: HIGH_VALUE
+    conditions:
+      - field: ba_status
+        op: eq
+        value: suspicious
+    actions:
+      - type: alert
+        params:
+          alert_type: FOOD_SAFETY_VIOLATION
+          severity: CRITICAL
+          details:
+            event_type: food_safety_violation
+            confidence: $ctx.ba_confidence
+            description: $ctx.ba_message
+            frames_analyzed: $ctx.ba_frames_analyzed
+
+
+  - id: loitering
+    name: Loitering in High-Value Zone
+    enabled: true
+    trigger:
+      event_type: zone_loiter
+      zone_type: HIGH_VALUE
+    conditions:
+      - field: dwell_seconds
+        op: gt
+        value: ${loiter_threshold_seconds:5}
+    actions:
+      - type: alert
+        params:
+          alert_type: LOITERING
+          severity: WARNING
+          fire_once_per: session
+          threshold: ${loiter_threshold_seconds:5}
+          details:
+            dwell_seconds: $ctx.dwell_seconds
+            threshold: $param.threshold          

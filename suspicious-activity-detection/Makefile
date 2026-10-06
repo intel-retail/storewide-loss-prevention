@@ -39,6 +39,18 @@ COMPOSE_ALL := $(if $(wildcard $(CAMERAS_OVERRIDE)),$(COMPOSE_ALL) -f $(CAMERAS_
 # Enable Gradio UI (set to false to skip)
 ENABLE_UI ?= true
 
+# Select exactly one application scenario at runtime.
+# Valid values: retail, kitchen.
+USE_CASE ?= retail
+USE_CASE_LOWER := $(shell echo $(USE_CASE) | tr A-Z a-z)
+USECASE_DIR := configs/usecase/$(USE_CASE_LOWER)
+USECASE_SCENE_CONFIG := $(USECASE_DIR)/scene-config.yaml
+USECASE_RULES_CONFIG := $(USECASE_DIR)/rules.yaml
+USECASE_PATTERNS_CONFIG := $(USECASE_DIR)/patterns.yaml
+USECASE_ALERT_CONFIG := $(USECASE_DIR)/alert-config.yaml
+USECASE_ZONE_CONFIG := $(USECASE_DIR)/zone_config.json
+export USE_CASE := $(USE_CASE_LOWER)
+
 # Conditionally enable the Gradio UI profile
 ENABLE_UI_LOWER := $(shell echo $(ENABLE_UI) | tr A-Z a-z)
 ifeq ($(ENABLE_UI_LOWER),true)
@@ -89,7 +101,7 @@ REGISTRY_URL = intel/
 REGISTRY_LOWER := $(shell echo $(REGISTRY) | tr A-Z a-z)
 
 # Auto-shutdown timeout in minutes (0 = disabled)
-AUTO_STOP_MINUTES ?= 15
+AUTO_STOP_MINUTES ?= 55
 
 # Validate DEVICE before doing anything
 .PHONY: validate-device
@@ -106,6 +118,27 @@ validate-device:
 		echo "For CPU-only systems, use: make up DEVICE=all-cpu.env"; \
 		exit 1; \
 	fi
+
+.PHONY: validate-use-case
+validate-use-case:
+	@if [ "$(USE_CASE_LOWER)" != "retail" ] && [ "$(USE_CASE_LOWER)" != "kitchen" ]; then \
+		echo "\033[1;31mERROR: Invalid USE_CASE='$(USE_CASE)'. Use one of: retail, kitchen.\033[0m"; \
+		exit 1; \
+	fi
+	@if [ ! -d "$(USECASE_DIR)" ]; then \
+		echo "\033[1;31mERROR: Missing use case config directory: $(USECASE_DIR).\033[0m"; \
+		exit 1; \
+	fi
+	@for f in scene-config.yaml rules.yaml patterns.yaml alert-config.yaml; do \
+		if [ ! -f "$(USECASE_DIR)/$$f" ]; then \
+			echo "\033[1;31mERROR: Missing use case config: $(USECASE_DIR)/$$f.\033[0m"; \
+			exit 1; \
+		fi; \
+	done
+
+.PHONY: select-use-case
+select-use-case: validate-use-case
+	@echo "  ✓ selected USE_CASE=$(USE_CASE_LOWER) from $(USECASE_DIR)"
 
 
 # ---- Submodules ----
@@ -129,20 +162,20 @@ download-models:
 .PHONY: download-sample-data
 download-sample-data: gen-zone-config
 	@echo "Downloading sample video..."
-	bash download_models/download_sample_video.sh
+	ZONE_CONFIG="$(abspath $(USECASE_ZONE_CONFIG))" bash download_models/download_sample_video.sh
 
 
 # ---- Initialization ----
 
-# Generate the legacy configs/zone_config.json that the vendored SceneScape
-# scripts consume, from configs/scene-config.yaml (the single source of truth).
+# Generate the legacy zone_config.json that the vendored SceneScape scripts
+# consume, from the selected scenario's scene-config.yaml.
 .PHONY: gen-zone-config
-gen-zone-config:
-	@python3 scripts/gen-zone-config.py
+gen-zone-config: validate-use-case
+	@SCENE_CONFIG="$(USECASE_SCENE_CONFIG)" ZONE_CONFIG="$(USECASE_ZONE_CONFIG)" python3 scripts/gen-zone-config.py
 
 .PHONY: init
 init: gen-zone-config
-	@$(MAKE) -C $(SCENESCAPE_DIR) APP_DIR=$(CURDIR) RESOURCE_CONFIG=$(RESOURCE_CONFIG) init
+	@ZONE_CONFIG="$(abspath $(USECASE_ZONE_CONFIG))" $(MAKE) -C $(SCENESCAPE_DIR) APP_DIR=$(CURDIR) RESOURCE_CONFIG=$(RESOURCE_CONFIG) init
 
 # ---- Full Stack (Scenescape + LP) ----
 
@@ -155,8 +188,8 @@ up:
 	@echo "=== SEARCH_ONLY=true → starting standalone search stack only (SceneScape + LP skipped) ==="
 	@$(MAKE) run-search
 else
-up: validate-device gen-zone-config
-	@$(MAKE) -C $(SCENESCAPE_DIR) APP_DIR=$(CURDIR) RESOURCE_CONFIG=$(RESOURCE_CONFIG) init init-sample-data download-models init-volumes
+up: validate-device download-sample-data
+	@ZONE_CONFIG="$(abspath $(USECASE_ZONE_CONFIG))" $(MAKE) -C $(SCENESCAPE_DIR) APP_DIR=$(CURDIR) RESOURCE_CONFIG=$(RESOURCE_CONFIG) init init-sample-data download-models init-volumes
 	@$(MAKE) patch-device
 	@mkdir -p $(RESULTS_PATH) $(RESULTS_PATH)/ba $(RESULTS_PATH)/swlp
 	@if [ "$(REGISTRY)" = "true" ]; then \
@@ -164,7 +197,7 @@ up: validate-device gen-zone-config
 		DOCKER_REGISTRY=$(REGISTRY_URL) $(COMPOSE_ALL) pull; \
 	else \
 		echo "Building LP images..."; \
-		BUILD_SERVICES="scene-understanding-service behavioral-analysis"; \
+		BUILD_SERVICES="scene-understanding-service behavioral-analysis sad-mcp-service"; \
 		if [ "$(ENABLE_UI_LOWER)" = "true" ]; then \
 			BUILD_SERVICES="$$BUILD_SERVICES swlp-suspicious-ui"; \
 		fi; \
@@ -213,6 +246,7 @@ up: validate-device gen-zone-config
 
 	@echo ""
 	@echo "Services running:"
+	@echo "  Use case:        $(USE_CASE_LOWER)"
 	@echo "  Scenescape UI:   https://localhost"
 	@echo "  Login:           admin / $$(grep SUPASS docker/.env | cut -d= -f2-)"
 	@if [ "$(ENABLE_UI_LOWER)" = "true" ]; then \
@@ -243,7 +277,17 @@ ifeq ($(SEARCH_ONLY_LOWER),true)
 down:
 	@$(MAKE) down-search
 else
+.PHONY: cleanup-all-scenes
+cleanup-all-scenes:
+	@for zone_config in configs/usecase/*/zone_config.json; do \
+		if [ -f "$$zone_config" ]; then \
+			echo "Cleaning SceneScape scene from $$zone_config"; \
+			ZONE_CONFIG="$(CURDIR)/$$zone_config" $(MAKE) -C $(SCENESCAPE_DIR) APP_DIR=$(CURDIR) cleanup-scene || true; \
+		fi; \
+	done
+
 down:
+	@$(MAKE) cleanup-all-scenes || true
 	@BRIDGE=$$(docker ps -a --filter name=vss-recall-bridge --format '{{.Names}}' | head -n1); \
 	if [ -n "$$BRIDGE" ]; then \
 		docker network disconnect $(LP_NETWORK) "$$BRIDGE" 2>/dev/null || true; \
@@ -256,6 +300,7 @@ down:
 	@# Best-effort: also stop a standalone search stack (from `make up MODE=search`),
 	@# which the combined compose files above don't know about. No-op if none running.
 	@$(SEARCH_ENV) $(COMPOSE_SEARCH) --profile recall-ui --profile standalone-rtsp down --remove-orphans || true
+	@-docker volume rm storewide-lp_vol-db storewide-lp_vol-migrations 2>/dev/null || true
 	@-docker volume rm storewide-lp_seaweedfs-data 2>/dev/null || true
 endif
 
@@ -267,7 +312,9 @@ run-scenescape:
 
 .PHONY: down-scenescape
 down-scenescape:
+	@$(MAKE) cleanup-all-scenes
 	@$(MAKE) -C $(SCENESCAPE_DIR) APP_DIR=$(CURDIR) down
+	@-docker volume rm storewide-lp_vol-db storewide-lp_vol-migrations 2>/dev/null || true
 
 .PHONY: export-scene
 export-scene:

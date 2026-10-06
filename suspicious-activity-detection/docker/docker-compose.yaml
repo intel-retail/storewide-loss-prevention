@@ -52,10 +52,10 @@ services:
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
       SEAWEEDFS_ENDPOINT: ${SEAWEEDFS_ENDPOINT:-http://seaweedfs:8333}
       SEAWEEDFS_BUCKET: ${SEAWEEDFS_BUCKET:-behavioral-frames}
-      MIN_FRAMES_FOR_DETECTION: ${BA_MIN_FRAMES:-3}
+      MIN_FRAMES_FOR_DETECTION: ${BA_MIN_FRAMES:-6}
       MAX_FRAMES_TO_FETCH: ${BA_MAX_FRAMES:-120}
-      POSE_FRAMES_COUNT: ${BA_POSE_FRAMES:-60}
-      POSE_CONFIDENCE_THRESHOLD: ${BA_CONFIDENCE:-0.5}
+      POSE_FRAMES_COUNT: ${BA_POSE_FRAMES:-15}
+      POSE_CONFIDENCE_THRESHOLD: ${BA_CONFIDENCE:-0.3}
       YOLO_POSE_MODEL: /models/yolo_models/yolo26n-pose/yolo26n-pose.xml
       GST_INFERENCE_DEVICE: ${BA_GST_DEVICE:-CPU}
       VLM_ENDPOINT: ${VLM_ENDPOINT:-http://ovms-vlm:8001}
@@ -76,6 +76,7 @@ services:
       - ../scenescape/secrets:/app/secrets:ro
       - ${RESULTS_PATH:-./results}:/app/results
       - ../edge-ai-libraries/microservices/behavioral-analysis/config:/app/config:ro
+      - ./configs/usecase/${USE_CASE:-retail}/patterns.yaml:/app/config/patterns.yaml:ro
     restart: unless-stopped
 
   # ---------- Scene Understanding Service ----------
@@ -132,8 +133,8 @@ services:
       CONTAINER_RESULTS_PATH: /app/results/swlp
     volumes:
       # Only the two config files this service actually reads.
-      - ./configs/scene-config.yaml:/app/configs/scene-config.yaml:ro
-      - ./configs/rules.yaml:/app/configs/rules.yaml:ro
+      - ./configs/usecase/${USE_CASE:-retail}/scene-config.yaml:/app/configs/scene-config.yaml:ro
+      - ./configs/usecase/${USE_CASE:-retail}/rules.yaml:/app/configs/rules.yaml:ro
       - ../scenescape/secrets:/app/secrets:ro
       - ${RESULTS_PATH:-./results}:/app/results
     restart: unless-stopped
@@ -175,7 +176,7 @@ services:
       - HTTPS_PROXY=
     restart: unless-stopped
     volumes:
-      - ./configs/zone_config.json:/app/zone_config.json:ro
+      - ./configs/usecase/${USE_CASE:-retail}/zone_config.json:/app/zone_config.json:ro
       - /etc/localtime:/etc/localtime:ro
 
   # ---------- Alert Service ----------
@@ -205,7 +206,50 @@ services:
       https_proxy: ${https_proxy}
       no_proxy: ${no_proxy:-${NO_PROXY:-}},broker.scenescape.intel.com,localhost,127.0.0.1,172.18.0.0/16,10.0.0.0/8
     volumes:
-      - ./configs/alert-config.yaml:/app/config/config.yaml:ro
+      - ./configs/usecase/${USE_CASE:-retail}/alert-config.yaml:/app/config/config.yaml:ro
+    restart: unless-stopped
+
+  # ---------- SAD MCP Sensor Service ----------
+  sad-mcp-service:
+    build:
+      context: mcp-service
+      dockerfile: Dockerfile
+    image: intel/sad-mcp:${TAG}
+    ports:
+      - "${SAD_MCP_PORT:-9000}:9000"
+    networks:
+      - storewide-lp
+    depends_on:
+      seaweedfs:
+        condition: service_healthy
+      alert-service:
+        condition: service_healthy
+    environment:
+      MCP_TRANSPORT: streamable-http
+      MCP_HOST: 0.0.0.0
+      MCP_PORT: 9000
+      STORE_ID: ${STORE_ID:-store_001}
+      SAD_LOG_PATH: /data/sad_log.sqlite
+      SAD_EVENT_HUB_URL: ${SAD_EVENT_HUB_URL:-}
+      SAD_EVENT_DELIVERY: ${SAD_EVENT_DELIVERY:-on}
+      SAD_EVENT_HUB_MIN_SEVERITY: ${SAD_EVENT_HUB_MIN_SEVERITY:-critical}
+      SAD_SEAWEEDFS_ALERTS_BUCKET: ${SAD_SEAWEEDFS_ALERTS_BUCKET:-alerts}
+      SAD_ZONE_CONFIG_PATH: /app/zone_config.json
+      SAD_TIMEZONE: ${SAD_TIMEZONE:-Asia/Kolkata}
+      SAD_MQTT_INGEST_ENABLED: ${SAD_MQTT_INGEST_ENABLED:-true}
+      SAD_MQTT_HOST: ${MQTT_HOST:-broker.scenescape.intel.com}
+      SAD_MQTT_PORT: ${MQTT_PORT:-1883}
+      SAD_MQTT_ALERT_TOPIC: ${MQTT_ALERT_TOPIC:-alerts/#}
+      SEED_DEMO: ${SEED_DEMO:-false}
+      USE_CASE: ${USE_CASE:-retail}
+      SEAWEEDFS_ENDPOINT: ${SEAWEEDFS_ENDPOINT:-http://seaweedfs:8333}
+      SEAWEEDFS_BUCKET: ${SEAWEEDFS_BUCKET:-behavioral-frames}
+      no_proxy: ${no_proxy:-${NO_PROXY:-}},seaweedfs,alert-service,localhost,127.0.0.1,172.18.0.0/16,10.0.0.0/8
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - sad-mcp-data:/data
+      - ./configs/usecase/${USE_CASE:-retail}/zone_config.json:/app/zone_config.json:ro
     restart: unless-stopped
 
   # ---------- SeaweedFS (S3-compatible Object Storage) ----------
@@ -270,11 +314,12 @@ services:
 
 networks:
   storewide-lp:
-    name: storewide-lp_storewide-lp
+    name: storewide-lp
 
 volumes:
   seaweedfs-data:
   ovms-cache:
+  sad-mcp-data:
 
 # Override the SceneScape controller config sources to use this app's
 # configs/scenescape/ files directly, instead of the vendored defaults / env-var

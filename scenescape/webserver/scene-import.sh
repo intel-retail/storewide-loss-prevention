@@ -154,6 +154,12 @@ for SCENE_ZIP in "${ZIP_FILES[@]}"; do
         continue
     fi
 
+    EXTRACT_DIR="/workspace/media/${ZIP_BASENAME%.zip}"
+    if [ -d "${EXTRACT_DIR}" ]; then
+        echo "  Removing stale extracted scene directory: ${EXTRACT_DIR}"
+        rm -rf "${EXTRACT_DIR}"
+    fi
+
     echo "  Uploading ${ZIP_BASENAME}..."
     IMPORT_RESPONSE=$(SCENE_ZIP_PATH="${SCENE_ZIP}" AUTH_TOKEN="${TOKEN}" python3 -c "
 import urllib.request, urllib.error, ssl, os, uuid, sys

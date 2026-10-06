@@ -3,9 +3,9 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 # Download and convert sample video using zone_config.json settings.
-# 1. Reads video_url and video_file from configs/zone_config.json
-# 2. Downloads the raw video
-# 3. Converts to AVC H.264 at specified resolution/fps using format_avc_mp4.sh
+# 1. Reads video_url and video_file from the selected use case's zone_config.json
+# 2. Uses local file:// media when available, otherwise downloads the raw video
+# 3. Converts downloaded media to AVC H.264 at specified resolution/fps using format_avc_mp4.sh
 # 4. Places the result in scenescape/sample_data/
 
 set -e
@@ -13,7 +13,8 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "${SCRIPT_DIR}")"
 SAMPLE_DATA_DIR="${PROJECT_ROOT}/../scenescape/sample_data"
-ZONE_CONFIG="${PROJECT_ROOT}/configs/zone_config.json"
+USE_CASE="${USE_CASE:-retail}"
+ZONE_CONFIG="${ZONE_CONFIG:-${PROJECT_ROOT}/configs/usecase/${USE_CASE}/zone_config.json}"
 FORMAT_SCRIPT="${PROJECT_ROOT}/../performance-tools/benchmark-scripts/format_avc_mp4.sh"
 SAMPLE_MEDIA_DIR="${PROJECT_ROOT}/../performance-tools/sample-media"
 
@@ -53,6 +54,28 @@ fi
 
 mkdir -p "${SAMPLE_DATA_DIR}"
 
+resolve_file_url() {
+    local url="$1"
+    local path="${url#file://}"
+
+    if [[ "${path}" == localhost/* ]]; then
+        path="/${path#localhost/}"
+    fi
+    if [ -f "${path}" ]; then
+        printf '%s\n' "${path}"
+        return 0
+    fi
+    if [[ "${path}" == /storewide-loss-prevention/* ]]; then
+        local repo_path
+        repo_path="$(dirname "${PROJECT_ROOT}")/${path#/storewide-loss-prevention/}"
+        if [ -f "${repo_path}" ]; then
+            printf '%s\n' "${repo_path}"
+            return 0
+        fi
+    fi
+    return 1
+}
+
 # --- Download & convert a single camera video ---
 # Args: <url> <filename> <fps>
 download_one() {
@@ -60,6 +83,9 @@ download_one() {
     local filename="$2"
     local fps="$3"
     local video_fps="${VIDEO_FPS:-${fps}}"
+    local usecase_dir="${SAMPLE_DATA_DIR}/${USE_CASE}"
+    local canonical_path="${usecase_dir}/${filename}"
+    local output_path="${SAMPLE_DATA_DIR}/${filename}"
 
     if [ -z "${camera_url}" ]; then
         echo "  ✗ Skipping '${filename}': video_url is empty in ${ZONE_CONFIG}"
@@ -74,19 +100,36 @@ download_one() {
     echo "Sample Video Download & Convert"
     echo "=========================================="
     echo "  URL:         ${camera_url}"
-    echo "  Output:      ${SAMPLE_DATA_DIR}/${filename}"
+    echo "  Canonical:   ${canonical_path}"
+    echo "  Active:      ${output_path}"
     echo "  Resolution:  ${VIDEO_WIDTH}x${VIDEO_HEIGHT} @ ${video_fps}fps"
     echo ""
 
-    local output_path="${SAMPLE_DATA_DIR}/${filename}"
+    mkdir -p "${usecase_dir}"
 
-    if [ -f "${output_path}" ]; then
-        echo "  ✓ Video already exists: ${output_path}"
+    # Local file:// source: stage (overwrite) so switching use cases restages the
+    # correct video even when the flat output filename is shared (e.g. lp-camera1.mp4).
+    if [[ "${camera_url}" == file://* ]]; then
+        local source_path
+        if ! source_path="$(resolve_file_url "${camera_url}")"; then
+            echo "  ✗ Local video not found for ${camera_url}"
+            return 1
+        fi
+        if [ ! -f "${canonical_path}" ] || ! cmp -s "${source_path}" "${canonical_path}"; then
+            cp "${source_path}" "${canonical_path}"
+            echo "  ✓ Updated canonical video: ${source_path} -> ${canonical_path}"
+        fi
+        if [ -f "${output_path}" ] && cmp -s "${canonical_path}" "${output_path}"; then
+            echo "  ✓ Video already staged: ${output_path}"
+            return 0
+        fi
+        cp "${canonical_path}" "${output_path}"
+        echo "  ✓ Staged local video: ${canonical_path} -> ${output_path}"
         return 0
     fi
 
     # --- Download & convert using format_avc_mp4.sh ---
-    if [ -f "${FORMAT_SCRIPT}" ]; then
+    if [ ! -f "${canonical_path}" ] && [ -f "${FORMAT_SCRIPT}" ]; then
         echo "  Converting via format_avc_mp4.sh (${VIDEO_WIDTH}x${VIDEO_HEIGHT} @ ${video_fps}fps)..."
         mkdir -p "${SAMPLE_MEDIA_DIR}"
 
@@ -99,29 +142,39 @@ download_one() {
         bash format_avc_mp4.sh "${filename}" "${camera_url}" "${VIDEO_WIDTH}" "${VIDEO_HEIGHT}" "${video_fps}"
         popd > /dev/null
 
-        # Move the converted file to sample_data with the expected name
+        # Save the converted file under the use-case folder, then stage it flat.
         if [ -f "${SAMPLE_MEDIA_DIR}/${bench_file}" ]; then
-            mv "${SAMPLE_MEDIA_DIR}/${bench_file}" "${output_path}"
-            echo "  ✓ Converted video saved: ${output_path}"
+            mv "${SAMPLE_MEDIA_DIR}/${bench_file}" "${canonical_path}"
+            echo "  ✓ Converted video saved: ${canonical_path}"
         else
             echo "  ✗ Conversion failed — bench file not found: ${bench_file}"
             return 1
         fi
-    else
+    elif [ ! -f "${canonical_path}" ]; then
         # Fallback: direct download without conversion
         echo "  format_avc_mp4.sh not found, downloading raw video..."
-        curl -fL --progress-bar -o "${output_path}" "${camera_url}"
+        curl -fL --progress-bar -o "${canonical_path}" "${camera_url}"
 
-        if [ -f "${output_path}" ] && [ -s "${output_path}" ]; then
+        if [ -f "${canonical_path}" ] && [ -s "${canonical_path}" ]; then
             local file_size
-            file_size=$(du -h "${output_path}" | cut -f1)
-            echo "  ✓ Download complete: ${output_path} (${file_size})"
+            file_size=$(du -h "${canonical_path}" | cut -f1)
+            echo "  ✓ Download complete: ${canonical_path} (${file_size})"
         else
             echo "  ✗ Download failed"
-            rm -f "${output_path}"
+            rm -f "${canonical_path}"
             return 1
         fi
+    else
+        echo "  ✓ Canonical video already exists: ${canonical_path}"
     fi
+
+    if [ -f "${output_path}" ] && cmp -s "${canonical_path}" "${output_path}"; then
+        echo "  ✓ Video already staged: ${output_path}"
+        return 0
+    fi
+
+    cp "${canonical_path}" "${output_path}"
+    echo "  ✓ Staged active video: ${canonical_path} -> ${output_path}"
 }
 
 # --- Download every camera's video ---

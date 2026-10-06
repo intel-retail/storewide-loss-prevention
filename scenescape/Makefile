@@ -43,7 +43,7 @@ init-sample-data:
 		echo "Sample data volume initialized."; \
 	else \
 		echo "WARNING: No video files (.ts/.mp4) in $(SAMPLE_DATA_DIR)/"; \
-		echo "Place sample video files (.ts/.mp4) in $(SAMPLE_DATA_DIR)/ before running make init."; \
+		echo "Run make download-sample-data from the app directory, or place sample video files (.ts/.mp4) in $(SAMPLE_DATA_DIR)/ before init-sample-data."; \
 	fi
 
 # ---- Download Models ----
@@ -108,6 +108,15 @@ run: init init-sample-data download-models init-volumes
 .PHONY: down
 down:
 	-$(COMPOSE_SCENESCAPE) down
+
+.PHONY: cleanup-scene
+cleanup-scene:
+	@if [ -z "$(APP_DIR)" ]; then \
+		echo "Skipping SceneScape cleanup: APP_DIR is not set."; \
+	else \
+		chmod +x $(SCENESCAPE_DIR)/scripts/delete-scene.sh; \
+		ZONE_CONFIG="$(ZONE_CONFIG)" $(SCENESCAPE_DIR)/scripts/delete-scene.sh $(APP_DIR); \
+	fi
 
 # ---- Logs ----
 

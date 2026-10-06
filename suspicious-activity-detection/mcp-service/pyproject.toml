@@ -1,0 +1,24 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "sad-mcp"
+version = "0.1.0"
+description = "Suspicious Activity Detection MCP service for the Central QSR Agent."
+requires-python = ">=3.11"
+dependencies = [
+    "boto3>=1.34,<2",
+    "fastmcp>=2.14,<3",
+    "paho-mqtt>=1.6,<3",
+]
+
+[project.scripts]
+sad-mcp = "main:main"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+py-modules = ["config", "delivery", "events", "frame_store", "models", "queries", "store", "tools", "main", "mqtt_ingest"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]

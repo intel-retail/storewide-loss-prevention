@@ -36,8 +36,10 @@ Before starting, ensure these files are in place:
 | File | Purpose |
 |------|---------|
 | `configs/.env.example` | Reference for all environment variables; copied to `docker/.env` by `init.sh` |
-| `configs/zone_config.json` | Zone name → type mapping (for example, `aisle1` → `HIGH_VALUE`) |
-| `configs/rules.yaml` | Declarative rules: triggers, conditions, actions, and deduplication scope |
+| `configs/usecase/<use-case>/scene-config.yaml` | Scene, cameras, sample video URL, and zone name → type mapping |
+| `configs/usecase/<use-case>/rules.yaml` | Declarative rules: triggers, conditions, actions, and deduplication scope |
+| `configs/usecase/<use-case>/patterns.yaml` | Behavioral Analysis pose/VLM patterns for the selected use case |
+| `configs/usecase/<use-case>/alert-config.yaml` | Alert routing and time-window deduplication for the selected use case |
 | `../scenescape/webserver/storewide-loss-prevention.zip` | Scene map + zone definitions imported into Scenescape |
 | `../scenescape/sample_data/lp-camera1.mp4` | Sample video used by the camera replay |
 
@@ -47,16 +49,20 @@ Before starting, ensure these files are in place:
 
 ## 4. Download Sample Video
 
-Download the sample video defined in `configs/zone_config.json` (`video_url`)
-to `../scenescape/sample_data/`:
+Download the sample video defined by the selected scenario to
+`../scenescape/sample_data/`:
 
 ```bash
 make download-sample-data
+
+# Or select a non-default scenario
+make download-sample-data USE_CASE=kitchen
 ```
 
-The video is saved with the filename specified by the `video_file` key in
-`zone_config.json` (for example, `lp-camera1.mp4`). If the file already
-exists, the download is skipped.
+`make download-sample-data` first generates
+`configs/usecase/<use-case>/zone_config.json` from the use case's
+`scene-config.yaml`. The video is saved with the filename specified in that
+generated file. If the file already exists, the download is skipped.
 
 ## 5. Download AI Models
 
@@ -89,6 +95,9 @@ suspicious-activity-detection/models/
 
 ```bash
 make up
+
+# Run the kitchen food-safety scenario instead of the default retail scenario
+make up USE_CASE=kitchen
 ```
 
 By default this uses the **GPU detect + CPU re-identification** configuration
@@ -141,13 +150,15 @@ continue to run normally.
 
 `make up` performs the following steps automatically:
 
-1. Sources the selected device resource config (`configs/res/<DEVICE>`).
-2. Generates TLS certificates, Scenescape secrets, and `docker/.env`.
-3. Renders `pipeline-config.json` with device-specific settings.
-4. Copies the sample video into the Docker volume.
-5. Initializes Docker volumes with correct permissions.
-6. Builds the LP, Behavioral Analysis, and Gradio UI container images.
-7. Starts all Scenescape and LP containers.
+1. Selects one scenario (`USE_CASE=retail` by default, or `USE_CASE=kitchen`).
+2. Generates `configs/usecase/<use-case>/zone_config.json` from that use case's `scene-config.yaml`.
+3. Sources the selected device resource config (`configs/res/<DEVICE>`).
+4. Generates TLS certificates, Scenescape secrets, and `docker/.env`.
+5. Renders `pipeline-config.json` with device-specific settings.
+6. Copies the sample video into the Docker volume.
+7. Initializes Docker volumes with correct permissions.
+8. Builds the LP, Behavioral Analysis, and Gradio UI container images.
+9. Starts all Scenescape and LP containers.
 8. Imports the scene map into Scenescape.
 
 ## 7. View Logs
@@ -194,8 +205,8 @@ curl http://localhost:8082/api/v1/lp/status
 ## 11. Tune Detection Behavior
 
 Detection thresholds, deduplication scope, and severity escalation are defined
-declaratively in `configs/rules.yaml`. Edit the file and restart the
-swlp-service to apply changes:
+declaratively in `configs/usecase/<use-case>/rules.yaml`. Edit the selected
+scenario file and restart the swlp-service to apply changes:
 
 ```yaml
 variables:
