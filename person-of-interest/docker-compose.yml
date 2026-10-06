@@ -25,6 +25,8 @@ services:
       - RTSP_BASE_URL=rtsp://mediaserver:8554
       - RTSP_PREWARM_CAMERAS=Camera_01,Camera_02
       - CAMERA_STREAM_MAP=${CAMERA_STREAM_MAP:-Camera_01:Camera_01,Camera_02:Camera_02}
+      - MQTT_HOST=${MQTT_HOST:-broker.scenescape.intel.com}
+      - MQTT_PORT=${MQTT_PORT:-1883}
       - MQTT_IMAGE_CAMERAS=Camera_01,Camera_02
       - ENROLL_FACE_PADDING=0.0
       - ENROLL_FACE_SQUARE=false
