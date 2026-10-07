@@ -25,5 +25,10 @@ def test_fastmcp_lists_expected_sad_tools_and_calls_count_tool():
             assert "subscribe" not in names
             result = await client.call_tool("Get_event_count", {"use_case": "kitchen"})
             assert not result.is_error
+            bad = await client.call_tool(
+                "Get_trend_counts", {"zone": "food area"}, raise_on_error=False
+            )
+            assert bad.is_error
+            assert "Valid values" in bad.content[0].text
 
     asyncio.run(exercise())

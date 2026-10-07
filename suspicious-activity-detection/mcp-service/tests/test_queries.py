@@ -152,6 +152,42 @@ def test_retrospective_frame_search_matches_food_safety_intent():
     assert [item["ref_id"] for item in result] == ["a", "b"]
 
 
+def test_daily_counts_zero_fills_store_local_days():
+    log = _new_log()
+    day_ms = 86_400_000
+    now_ms = 10 * day_ms + 12 * 3_600_000
+    for ref, ts in (
+        ("d1", now_ms - 2 * day_ms),
+        ("d2", now_ms),
+        ("d3", now_ms - 60_000),
+        ("old", now_ms - 9 * day_ms),
+    ):
+        log.append(
+            EventEnvelope(
+                event_type=events.EVENT_TYPE,
+                service="suspicious_activity",
+                store_id="store_001",
+                payload={"event_name": "food_safety_violation", "use_case": "kitchen", "zone": "kitchen-prep"},
+                ref_id=ref,
+                ts_ms=ts,
+            )
+        )
+    result = queries.daily_counts(log, 3, "UTC", now_ms=now_ms, use_case="kitchen")
+    assert (result["window_start"], result["window_end"], result["total"]) == (
+        "1970-01-09",
+        "1970-01-11",
+        3,
+    )
+    [zone] = result["zones"]
+    assert zone["zone"] == "kitchen-prep"
+    assert zone["days_with_events"] == [
+        {"date": "1970-01-09", "count": 1},
+        {"date": "1970-01-11", "count": 2},
+    ]
+    assert zone["trend"] == "up"
+    assert "3 events" in zone["summary"]
+
+
 def test_trend_counts():
     log = _new_log()
     _seed(log)
