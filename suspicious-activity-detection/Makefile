@@ -101,7 +101,7 @@ REGISTRY_URL = intel/
 REGISTRY_LOWER := $(shell echo $(REGISTRY) | tr A-Z a-z)
 
 # Auto-shutdown timeout in minutes (0 = disabled)
-AUTO_STOP_MINUTES ?= 55
+AUTO_STOP_MINUTES ?= 0
 
 # Validate DEVICE before doing anything
 .PHONY: validate-device

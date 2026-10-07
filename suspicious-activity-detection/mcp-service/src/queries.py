@@ -8,13 +8,13 @@ from __future__ import annotations
 
 import re
 from collections.abc import Iterator
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import os
 from typing import Any
 from zoneinfo import ZoneInfo
 
 from events import EVENT_TYPE
-from models import Activity, TrendCount
+from models import Activity, DailyCountsResult, TrendCount
 
 _MAX = 10_000
 SEVERITY_RANK = {"low": 1, "medium": 2, "high": 3, "critical": 4}
@@ -238,6 +238,67 @@ def trend_counts(
         {"station": station, "shift": shift, "count": count}
         for (station, shift), count in sorted(buckets.items())
     ]
+
+
+def daily_counts(
+    log: Any,
+    days: int,
+    store_timezone: str,
+    now_ms: int | None = None,
+    event_name: str | None = None,
+    use_case: str | None = None,
+    zone: str | None = None,
+) -> DailyCountsResult:
+    """Per-zone totals, non-zero days, and trend for the last `days` store-local days."""
+    tz = ZoneInfo(store_timezone)
+    now = (
+        datetime.fromtimestamp(now_ms / 1000, tz=timezone.utc).astimezone(tz)
+        if now_ms is not None
+        else datetime.now(tz)
+    )
+    dates = [(now.date() - timedelta(days=offset)) for offset in range(days - 1, -1, -1)]
+    start = datetime.combine(dates[0], datetime.min.time(), tzinfo=tz)
+    counts: dict[tuple[str, str], int] = {}
+    zones: set[str] = {zone} if zone else set()
+    for a in _iter_activities(log, int(start.timestamp() * 1000), int(now.timestamp() * 1000)):
+        if event_name and a.get("event_name") != event_name:
+            continue
+        if use_case and a.get("use_case") != use_case:
+            continue
+        if zone and a.get("zone") != zone:
+            continue
+        day = datetime.fromtimestamp(a["ts_ms"] / 1000, tz=timezone.utc).astimezone(tz)
+        key = (day.date().isoformat(), a.get("zone") or "unknown")
+        counts[key] = counts.get(key, 0) + 1
+        zones.add(key[1])
+    summaries = []
+    for z in sorted(zones):
+        series = [counts.get((d.isoformat(), z), 0) for d in dates]
+        active = [
+            {"date": d.isoformat(), "count": c} for d, c in zip(dates, series) if c
+        ]
+        previous, latest = (series[-2], series[-1]) if len(series) > 1 else (0, series[-1])
+        trend = "up" if latest > previous else "down" if latest < previous else "flat"
+        breakdown = ", ".join(f"{row['date']}: {row['count']}" for row in active) or "none"
+        summaries.append({
+            "zone": z,
+            "total": sum(series),
+            "days_with_events": active,
+            "trend": trend,
+            "summary": (
+                f"{z}: {sum(series)} events from {dates[0]} to {dates[-1]} "
+                f"({breakdown}; all other days 0). Trend {trend}: "
+                f"{dates[-2] if len(dates) > 1 else dates[-1]} = {previous}, "
+                f"{dates[-1]} (today, partial) = {latest}."
+            ),
+        })
+    return {
+        "window_start": dates[0].isoformat(),
+        "window_end": dates[-1].isoformat(),
+        "timezone": store_timezone,
+        "total": sum(s["total"] for s in summaries),
+        "zones": summaries,
+    }
 
 
 def event_count(
