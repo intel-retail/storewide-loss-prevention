@@ -6,8 +6,8 @@ FROM node:20-slim AS builder
 
 WORKDIR /app
 COPY ui/third_party_programs_poi-ui-service.txt ./
-COPY ui/package.json ui/tsconfig.json ui/vite.config.ts ./
-RUN npm install --frozen-lockfile 2>/dev/null || npm install
+COPY ui/package.json ui/package-lock.json ui/tsconfig.json ui/vite.config.ts ./
+RUN npm ci
 
 COPY ui/ ./
 RUN npm run build
