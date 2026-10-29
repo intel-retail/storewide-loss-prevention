@@ -5,8 +5,13 @@
 
 settings:
   session_timeout_seconds: 90
-  frame_capture_count: 15
-  frame_capture_interval_seconds: 0.3
+  # Frames are spaced ~100 ms apart (~10 fps per person in the zone) and a BA
+  # request is sent every 0.5 s cycle. BA analyzes the latest 15 frames
+  # (BA_POSE_FRAMES), so each request sees ~1.5 s of motion and consecutive
+  # windows overlap — short bends are not missed, and the last bend before a
+  # person leaves is still analyzed.
+  frame_capture_count: 5
+  frame_capture_interval_seconds: 0.5
 
 session_flags:
   food_safety_suspected:
