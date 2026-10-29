@@ -92,10 +92,12 @@ patterns:
           min_frames: 1
           conditions:
             # A reduced shoulder-hip-knee angle indicates bending at the waist.
+            # Deep bends fold the torso onto the thighs (observed 13-18 deg),
+            # so the lower bound is kept near zero.
             - subject: hip
               relation: bent
               reference: [shoulder, knee]
-              min_angle: 35
+              min_angle: 5
               max_angle: 135
             # The hand reaches below the knee toward a low item.
             - subject: wrist
@@ -121,21 +123,21 @@ patterns:
       num_frames: 6
       confidence_threshold: 0.7
       prompt: |
-        You are analyzing sequential cropped frames of one person. The pose system detected the person bending, reaching below the knee, and rising with the same hand.
+        You are reviewing sequential frames from a commercial-kitchen camera for food-safety violations. The frames are full camera views and may show several people. A pose detector flagged one person who bends down, reaches below knee level, and stands back up.
 
-        Determine whether the person actually PICKS UP AN ITEM during this motion.
+        Focus on the person who bends toward the floor. Decide whether that person PICKS UP AN ITEM FROM THE FLOOR (food, utensil, or any object).
 
-        Look for:
-        - A visible object in or near the hand at the lowest point of the reach
-        - The hand grasping an object and lifting it while the person rises
-        - The object changing position from a surface or the floor into the hand
+        Pick-up (suspicious=true):
+        - An object lies on the floor near that person's hand at the lowest point of the bend
+        - The hand closes on the object and carries it up as the person stands
+        - The object is no longer on the floor afterwards
 
-        NOT a pick-up:
-        - Tying shoes, adjusting clothing, stretching, or touching the floor
-        - Bending and rising with an empty hand
-        - An item already held before the person bends
+        Not a pick-up (suspicious=false):
+        - Bending without touching anything on the floor, or rising with an empty hand
+        - Tying shoes, adjusting clothing, stretching, or reaching into a low shelf, drawer, or oven
+        - Other people in the frame working normally at the counter
 
-        Output compact JSON only. Keep reasoning under 12 words:
+        Output compact JSON only. Keep reasoning under 15 words:
         {"suspicious":true|false,"confidence":0.0-1.0,"reasoning":"short reason"}
       response_fields:
         - reasoning
