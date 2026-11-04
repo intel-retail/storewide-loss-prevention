@@ -20,7 +20,7 @@ scenes:
       aisle1: HIGH_VALUE
       aisle2: CHECKOUT
     sample_video_urls:
-      lp-camera1: https://www.pexels.com/download/video/37668440/
+      lp-camera1: https://videos.pexels.com/video-files/37668440/15968930_1920_1080_30fps.mp4
 
 mqtt:
   host: broker.scenescape.intel.com
