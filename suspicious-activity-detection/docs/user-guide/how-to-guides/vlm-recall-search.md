@@ -83,14 +83,14 @@ The `Makefile` sets sensible defaults, so nothing else is mandatory. To override
 pass variables on the command line or export them first:
 
 ```bash
-make up MODE=full EMBEDDING_MODEL_NAME=CLIP/clip-vit-b-32 TAG=latest
+make up MODE=full EMBEDDING_MODEL_NAME=CLIP/clip-vit-b-32 TAG=2026.3.0-rc1
 ```
 
 | Variable | Default | Purpose |
 |----------|---------|---------|
 | `MODE` | `core` | `core` (no search) · `full` (core + search) · `search` (search only). |
 | `SEARCH_REGISTRY` | `intel/` | Registry for the VSS search images. |
-| `TAG` | `latest` | Image tag, shared by the LP and VSS search images. |
+| `TAG` | `2026.3.0-rc1` | Image tag, shared by the LP and VSS search images. |
 | `EMBEDDING_MODEL_NAME` | `CLIP/clip-vit-b-32` | Multimodal model used for text+frame embeddings. |
 | `RECALL_UI_PORT` | `7860` | Host port for the standalone Investigator UI (`MODE=search`). |
 
