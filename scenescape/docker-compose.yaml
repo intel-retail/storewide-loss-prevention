@@ -114,11 +114,11 @@ services:
       webserver
       --dbtype postgres
       --dbport 5432
-      --broker broker.scenescape.intel.com
+      --broker broker.scenescape.intel.com:8883
       --brokerauth /run/secrets/browser.auth
       --brokerrootcert /run/secrets/certs/scenescape-ca.pem
     healthcheck:
-      test: "curl --insecure -X GET https://web.scenescape.intel.com:443/api/v1/database-ready | grep 'true'"
+      test: "curl --insecure --noproxy '*' -H 'Host: localhost' -X GET https://127.0.0.1:443/api/v1/database-ready | grep 'true'"
       interval: 10s
       timeout: 120s
       retries: 10
@@ -214,7 +214,7 @@ services:
     command: >
       --restauth /run/secrets/controller.auth
       --brokerauth /run/secrets/controller.auth
-      --broker broker.scenescape.intel.com
+      --broker broker.scenescape.intel.com:8883
       --ntp ntpserv
     configs:
       - source: tracker-config
@@ -263,7 +263,7 @@ services:
     command: >
       --restauth /run/secrets/controller.auth
       --brokerauth /run/secrets/controller.auth
-      --broker broker.scenescape.intel.com
+      --broker broker.scenescape.intel.com:8883
       --visibility_topic ${VISIBILITY:-regulated}
     volumes:
       - vol-media:/home/scenescape/SceneScape/media
