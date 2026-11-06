@@ -76,40 +76,13 @@ echo "  Found ${#ZIP_FILES[@]} zip file(s) to import."
 echo "  API URL:  ${SCENESCAPE_URL}"
 echo "  User:     ${SCENESCAPE_USER}"
 
-# Wait for Scenescape web to be healthy
-echo "Waiting for Scenescape web service..."
+# Wait for Scenescape web and authenticate.
+# /api/v1/database-ready is loopback-only since Scenescape 2026.3, so readiness
+# is detected by retrying token auth (succeeds once the DB and admin user exist).
+echo "Waiting for Scenescape web service and authenticating..."
+TOKEN=""
 for i in $(seq 1 ${MAX_RETRIES}); do
-    HEALTH=$(python3 -c "
-import urllib.request, ssl, os
-ctx = ssl.create_default_context()
-ca = os.environ.get('CA_CERT', '')
-if ca and os.path.isfile(ca):
-    ctx.load_verify_locations(ca)
-else:
-    ctx.check_hostname = False
-    ctx.verify_mode = ssl.CERT_NONE
-try:
-    url = os.environ.get('SCENESCAPE_URL', '').rstrip('/') + '/api/v1/database-ready'
-    r = urllib.request.urlopen(url, context=ctx, timeout=5)
-    print(r.read().decode())
-except Exception:
-    print('')
-")
-    if echo "$HEALTH" | grep -q "true"; then
-        echo "  Web service is ready (attempt ${i}/${MAX_RETRIES})"
-        break
-    fi
-    if [ "$i" -eq "${MAX_RETRIES}" ]; then
-        echo "ERROR: Web service did not become ready after ${MAX_RETRIES} attempts"
-        exit 1
-    fi
-    echo "  Waiting... (attempt ${i}/${MAX_RETRIES})"
-    sleep ${RETRY_INTERVAL}
-done
-
-# Authenticate and get token
-echo "Authenticating..."
-TOKEN=$(python3 -c "
+    TOKEN=$(python3 -c "
 import urllib.request, ssl, json, os, sys
 ctx = ssl.create_default_context()
 ca = os.environ.get('CA_CERT', '')
@@ -132,9 +105,15 @@ except Exception as e:
     print(f'ERROR: {e}', file=sys.stderr)
     print('')
 ")
+    if [ -n "${TOKEN}" ]; then
+        break
+    fi
+    echo "  Waiting... (attempt ${i}/${MAX_RETRIES})"
+    sleep ${RETRY_INTERVAL}
+done
 
 if [ -z "${TOKEN}" ]; then
-    echo "ERROR: Failed to authenticate with Scenescape."
+    echo "ERROR: Failed to authenticate with Scenescape after ${MAX_RETRIES} attempts."
     exit 1
 fi
 echo "  Authenticated successfully."
