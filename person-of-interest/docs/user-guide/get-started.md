@@ -64,10 +64,10 @@ Minimal example:
   "models": "person-detection-retail-0013,face-detection-retail-0004,face-reidentification-retail-0095",
   "scenescape": {
     "registry": "",
-    "version": "2026.2.0",
+    "version": "2026.3.0-rc1",
     "controller_image": "intel/scenescape-controller",
     "manager_image": "intel/scenescape-manager",
-    "dlstreamer_version": "2026.2.0-ubuntu24"
+    "dlstreamer_version": "2026.3.0-ubuntu24-rc1"
   },
   "store": {
     "name": "Retail",
@@ -171,15 +171,19 @@ inference device, pre-process backend, model precision, and throughput options.
 ## 5. Pull or Build Images
 
 Pre-built container images are available on Docker Hub. The `docker-compose.yml`
-references them directly (`intel/poi-backend:2026.2.0` and
-`intel/poi-ui:2026.2.0`), so `make up` will pull them automatically if they
+references them directly (`intel/poi-backend:2026.3.0-rc1` and
+`intel/poi-ui:2026.3.0-rc1`), so `make up` will pull them automatically if they
 are not already present locally.
 
 To explicitly pull before starting:
 
 ```bash
-docker compose --env-file docker/.env -f docker-compose.yml pull poi-backend ui
+TAG=2026.3.0-rc1 docker compose --env-file docker/.env -f docker-compose.yml pull poi-backend ui
 ```
+
+`TAG` must be supplied explicitly here because `--env-file docker/.env` prevents
+Compose from reading the application `.env`. The `make` targets export `TAG`
+automatically, so `make up` does not need it.
 
 To build from source instead of using pre-built images:
 
@@ -187,9 +191,9 @@ To build from source instead of using pre-built images:
 make build REGISTRY=false
 ```
 
-When building locally with `REGISTRY=false`, the images are tagged as `poi-backend`
-and `poi-ui`, and the compose file uses them via the `POI_BACKEND_IMAGE` and
-`POI_UI_IMAGE` environment variables. See [Build from Source](./get-started/build-from-source.md)
+When building locally, the images are tagged `intel/poi-backend:$(TAG)` and
+`intel/poi-ui:$(TAG)` — the same references the compose file uses — so no further
+configuration is needed. See [Build from Source](./get-started/build-from-source.md)
 for detailed build options.
 
 ## 6. Download Models
@@ -271,7 +275,7 @@ This launches the following containers:
 | `poi-backend`        | `poi-backend`                | 8000  |
 | `poi-ui`             | `poi-ui`                     | 3000  |
 | `poi-redis`          | `redis:8.6.2`                | 6379  |
-| `poi-alert-service`  | `intel/alert-agent-service:2026.2.0`  | 8001  |
+| `poi-alert-service`  | `intel/alert-agent-service:2026.3.0-rc1`  | 8001  |
 
 > **Note:** Use `make up` for subsequent starts after the initial setup. Scenescape
 > is started automatically by the `up` target.
