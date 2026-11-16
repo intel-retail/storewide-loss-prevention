@@ -199,7 +199,7 @@ BENCHMARK_VENV := cd $(PERF_TOOLS_DIR) && \
 	pip3 install -q -e . && \
 	cd $(CURDIR)
 
-TAG ?= latest
+TAG ?= 2026.3.0-rc1
 export TAG
 REGISTRY_BENCHMARK ?= intel/retail-benchmark:$(TAG)
 

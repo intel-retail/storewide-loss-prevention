@@ -1,10 +1,30 @@
 # Release Notes
 
+- [Version 2026.3.0-rc1](#version-20263-rc1)
 - [Version 2026.2.0](#version-20260)
 - [Version 1.1.0](#version-110)
 - [Version 1.0.0](#version-100)
 
 ## Current Release
+
+### Version 2026.3.0-rc1
+
+**Release Date**: November 2026
+
+**New**:
+
+- **Image tag alignment**: All container images (`poi-backend`, `poi-ui`,
+  `alert-agent-service`, `retail-benchmark`, Scenescape controller/manager and
+  the DL Streamer pipeline server) now default to the `2026.3.0-rc1` release
+  tag, matching the Suspicious Activity Detection application
+- **DL Streamer pipeline server**: bumped to `2026.3.0-ubuntu24-rc1` in
+  `configs/zone_config.json` and in the benchmark stream-density override
+  generator (`benchmark/poi_scaling.py`)
+- **Makefile default tag**: `TAG` now defaults to `2026.3.0-rc1` instead of
+  `latest`, so `make build`/`make up` produce and consume correctly versioned
+  images without extra configuration
+
+## Previous Releases
 
 ### Version 2026.2.0
 
