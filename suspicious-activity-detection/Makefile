@@ -434,7 +434,7 @@ PERF_TOOLS_DOCKER_DIR := ../performance-tools/docker
 SWLP_STREAM_DENSITY := $(PERF_TOOLS_DIR)/swlp_stream_density.py
 
 # Benchmark image configuration
-BENCHMARK_IMAGE ?= retail-benchmark:2026.2.0
+BENCHMARK_IMAGE ?= retail-benchmark:2026.3.0-rc1
 REGISTRY_BENCHMARK ?= intel/retail-benchmark:$(TAG)
 
 .PHONY: fetch-benchmark
