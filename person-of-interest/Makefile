@@ -51,7 +51,9 @@ init:
 		exit 1; \
 	fi
 	@echo "  HOST_IP=$(HOST_IP) (used for WebRTC ICE candidates)"
+	@$(MAKE) download-sample-video
 	@$(MAKE) -C $(SCENESCAPE_DIR) APP_DIR=$(CURDIR) RESOURCE_CONFIG=$(RESOURCE_CONFIG) init download-models init-sample-data init-volumes
+	@$(MAKE) download-models
 	@# .env is the single, persistent source of truth for POI app config
 	@# (including benchmark tuning). Only bootstrap it from .env.example on
 	@# first run — never overwrite a user's existing .env on subsequent
@@ -138,15 +140,27 @@ SAMPLE_DATA_DIR := $(SCENESCAPE_DIR)/sample_data
 CLASSROOM_VIDEO_URL := https://github.com/intel-iot-devkit/sample-videos/raw/master/classroom.mp4
 FACE_DEMO_VIDEO_URL := https://github.com/intel-iot-devkit/sample-videos/raw/master/face-demographics-walking-and-pause.mp4
 
+# Downloads only missing videos (also run by 'make init'); delete a file to re-fetch it.
 .PHONY: download-sample-video
 download-sample-video:
-	@echo "Downloading sample videos..."
 	@mkdir -p $(SAMPLE_DATA_DIR)
-	@echo "[1/2] Downloading classroom.mp4 → Camera_01.mp4..."
-	@curl -L --progress-bar "$(CLASSROOM_VIDEO_URL)" -o "$(SAMPLE_DATA_DIR)/Camera_01.mp4"
-	@echo "[2/2] Downloading face-demographics-walking-and-pause.mp4 → Camera_02.mp4..."
-	@curl -L --progress-bar "$(FACE_DEMO_VIDEO_URL)" -o "$(SAMPLE_DATA_DIR)/Camera_02.mp4"
-	@echo "Sample videos saved to $(SAMPLE_DATA_DIR)/"
+	@if [ -s "$(SAMPLE_DATA_DIR)/Camera_01.mp4" ]; then \
+		echo "Camera_01.mp4 already present, skipping download."; \
+	else \
+		echo "Downloading classroom.mp4 → Camera_01.mp4..."; \
+		curl -fL --progress-bar "$(CLASSROOM_VIDEO_URL)" -o "$(SAMPLE_DATA_DIR)/Camera_01.mp4.part" \
+			&& mv "$(SAMPLE_DATA_DIR)/Camera_01.mp4.part" "$(SAMPLE_DATA_DIR)/Camera_01.mp4" \
+			|| { rm -f "$(SAMPLE_DATA_DIR)/Camera_01.mp4.part"; exit 1; }; \
+	fi
+	@if [ -s "$(SAMPLE_DATA_DIR)/Camera_02.mp4" ]; then \
+		echo "Camera_02.mp4 already present, skipping download."; \
+	else \
+		echo "Downloading face-demographics-walking-and-pause.mp4 → Camera_02.mp4..."; \
+		curl -fL --progress-bar "$(FACE_DEMO_VIDEO_URL)" -o "$(SAMPLE_DATA_DIR)/Camera_02.mp4.part" \
+			&& mv "$(SAMPLE_DATA_DIR)/Camera_02.mp4.part" "$(SAMPLE_DATA_DIR)/Camera_02.mp4" \
+			|| { rm -f "$(SAMPLE_DATA_DIR)/Camera_02.mp4.part"; exit 1; }; \
+	fi
+	@echo "Sample videos available in $(SAMPLE_DATA_DIR)/"
 
 # ---- Stream Density & Benchmarking ----
 
