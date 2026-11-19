@@ -11,7 +11,11 @@ cd storewide-loss-prevention/person-of-interest
 # Initialize submodules
 make update-submodules
 
-# Initialize environment and start (pulls images from Docker Hub automatically)
+# HOST_IP must be set before init (see Get Started for details)
+export HOST_IP=$(ip route get 1 | awk '{print $7; exit}')
+
+# Initialize environment (also downloads the AI models and the sample videos Camera_01.mp4 / Camera_02.mp4)
+# and start (pulls images from Docker Hub automatically)
 make init
 make up
 ```

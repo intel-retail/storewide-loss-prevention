@@ -36,15 +36,15 @@ Before starting, ensure these files are in place:
 | `configs/res/*.env` | Device resource configs for DL Streamer pipeline (GPU, CPU, NPU profiles) |
 | `configs/pipeline-config.json` | DL Streamer pipeline template (rendered per camera by `init.sh`) |
 | `../scenescape/webserver/conference-room.zip` | Scene map + zone definitions imported into Scenescape |
-| `../scenescape/sample_data/Camera_01.mp4` | Sample video for camera 1 (classroom) — downloaded by `make download-sample-video` |
-| `../scenescape/sample_data/Camera_02.mp4` | Sample video for camera 2 (face demographics) — downloaded by `make download-sample-video` |
+| `../scenescape/sample_data/Camera_01.mp4` | Sample video for camera 1 (classroom) — downloaded automatically by `make init` (or manually with `make download-sample-video`) |
+| `../scenescape/sample_data/Camera_02.mp4` | Sample video for camera 2 (face demographics) — downloaded automatically by `make init` (or manually with `make download-sample-video`) |
 | `sample_data/poi_1.png` | Reference image for benchmark POI enrollment |
 | `sample_data/poi_2.png` | Additional reference image for benchmark POI enrollment |
 
 > **Note:** The video file names must match the `video` entries in
 > `configs/zone_config.json` (for example, `Camera_01.mp4` corresponds to
-> camera `Camera_01`). Run `make download-sample-video` to fetch both videos
-> automatically before starting the application.
+> camera `Camera_01`). `make init` fetches both videos automatically if they are missing
+> (requires internet access); run `make download-sample-video` to fetch them manually.
 
 ### `zone_config.json` Reference
 
@@ -195,7 +195,8 @@ for detailed build options.
 ## 6. Download Models
 
 The OpenVINO™ face detection and re-identification models are required for both enrollment
-and DL Streamer inference:
+and DL Streamer inference. `make init` downloads them automatically (models already in the
+Docker volume are skipped); to download or refresh them manually, run:
 
 ```bash
 make download-models
