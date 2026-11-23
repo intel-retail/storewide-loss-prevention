@@ -1,7 +1,24 @@
 # Release Notes
 
+- [Version 2026.3.0](#version-202630)
+- [Version 1.2.0](#version-120)
 - [Version 1.1.0](#version-110)
 - [Version 1.0.0](#version-100)
+
+## Version 2026.3.0
+
+**New**:
+
+- Added support for the kitchen food-safety use case alongside the retail use case.
+- Added a Model Context Protocol (MCP) endpoint that allows AI agents to query suspicious activity alerts and alert history.
+- Added optional delivery of alert events to external agents.
+
+**Improved**:
+
+- Updated image tags to the `2026.3.0-rc1` release, including Scenescape and DL Streamer.
+- Tuned the default behavioral analysis settings for detection.
+- Improved the reliability of stack startup and cleanup.
+- Updated the documentation.
 
 ## Version 1.2.0
 
@@ -20,7 +37,7 @@
   configurations, letting deployments match available hardware without changing
   the application.
 
-**Changed**:
+**Improved **:
 
 - **Upgraded to Scenescape 2026.2.0**, keeping the app aligned with the latest
   supported scene-analytics platform. Zone-based detection and alerting behave
