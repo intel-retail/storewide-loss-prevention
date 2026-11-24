@@ -1,11 +1,29 @@
 # Release Notes
 
+- [Version 2026.3.0-rc2](#version-20263-rc2)
 - [Version 2026.3.0-rc1](#version-20263-rc1)
 - [Version 2026.2.0](#version-20260)
 - [Version 1.1.0](#version-110)
 - [Version 1.0.0](#version-100)
 
 ## Current Release
+
+### Version 2026.3.0-rc2
+
+**Release Date**: November 2026
+
+**New**:
+
+- **Scenescape images**: Scenescape manager, controller and analytics
+  images now default to `2026.3.0-rc2` in `configs/zone_config.json`
+- **DL Streamer pipeline server**: bumped to `2026.3.0-ubuntu24-rc2` in
+  `configs/zone_config.json` and in the benchmark stream-density override
+  generator (`benchmark/poi_scaling.py`)
+- **POI images**: All container images (`poi-backend`, `poi-ui`,
+  `alert-agent-service` and `retail-benchmark`) now default to the
+  `2026.3.0-rc2` tag (`TAG` in the Makefile and `.env.example`)
+
+## Previous Releases
 
 ### Version 2026.3.0-rc1
 
@@ -23,8 +41,6 @@
 - **Makefile default tag**: `TAG` now defaults to `2026.3.0-rc1` instead of
   `latest`, so `make build`/`make up` produce and consume correctly versioned
   images without extra configuration
-
-## Previous Releases
 
 ### Version 2026.2.0
 

@@ -16,10 +16,10 @@
   "model_precision": "FP32",
   "scenescape": {
     "registry": "",
-    "version": "2026.3.0-rc1",
+    "version": "2026.3.0-rc2",
     "controller_image": "intel/scenescape-controller",
     "manager_image": "intel/scenescape-manager",
-    "dlstreamer_version": "2026.3.0-ubuntu24-rc1",
+    "dlstreamer_version": "2026.3.0-ubuntu24-rc2",
     "api_user": "admin"
   },
   "store": {
