@@ -164,9 +164,11 @@ services:
       # Frame processing settings
       MM_DATAPREP_FRAME_INTERVAL: ${FRAME_INTERVAL:-15}
       MM_DATAPREP_ENABLE_OBJECT_DETECTION: ${ENABLE_OBJECT_DETECTION:-true}
+      # Required since 2026.3.0-rc2: image ships no detector, downloads this HF repo on first use.
+      MM_DATAPREP_DETECTION_MODEL_NAME: ${DATAPREP_DETECTION_MODEL:-OpenVINO/yolox_s-int8-ov}
       MM_DATAPREP_DETECTION_CONFIDENCE: ${DETECTION_CONFIDENCE:-0.85}
       MM_DATAPREP_FRAMES_TEMP_DIR: ${FRAMES_TEMP_DIR:-/tmp/dataprep}
-      MM_DATAPREP_DETECTION_MODEL_DIR: ${YOLOX_MODELS_MOUNT_PATH:-/app/models/yolox}
+      MM_DATAPREP_DETECTION_MODEL_DIR: ${DETECTION_MODELS_MOUNT_PATH:-/app/models/object-detection}
       MM_DATAPREP_DETECTION_DEVICE: ${DATAPREP_DETECTION_DEVICE:-CPU}
       # ROI consolidation settings
       MM_DATAPREP_ROI_CONSOLIDATION_ENABLED: ${ROI_CONSOLIDATION_ENABLED:-false}
@@ -199,7 +201,7 @@ services:
       retries: 60
       start_period: 10s
     volumes:
-      - vdms-yolox-models:${YOLOX_MODELS_MOUNT_PATH:-/app/models/yolox}
+      - ${DETECTION_MODELS_HOST_DIR:-./models/detect_models}:${DETECTION_MODELS_MOUNT_PATH:-/app/models/object-detection}
       - data-prep:/tmp/dataprep
       - ov-models:/home/appuser/.cache/huggingface
       - ov-models:${OV_MODELS_DIR:-/app/ov_models}
@@ -479,8 +481,6 @@ volumes:
   ov-models:
     driver: local
   data-prep:
-    driver: local
-  vdms-yolox-models:
     driver: local
   vss-watcher-dir:
     driver: local
